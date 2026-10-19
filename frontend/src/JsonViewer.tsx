@@ -13,10 +13,18 @@ export default function JsonViewer({ value, unavailable = false, preserveFormatt
   const containers = useMemo(() => document.isJson ? jsonContainers(document.text) : [], [document]);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [starts, setStarts] = useState([0]);
-  const [copied, setCopied] = useState<number | null>(null);
-  const copyContainer = (range: JsonContainer) => {
+  const [copied, setCopied] = useState<{ start: number; ok: boolean } | null>(null);
+  const copyContainer = async (range: JsonContainer) => {
     const text = document.text.slice(range.start, range.end);
-    Promise.resolve(window.streamglass?.copyText ? window.streamglass.copyText(text) : navigator.clipboard.writeText(text)).then(() => { setCopied(range.start); setTimeout(() => setCopied(current => current === range.start ? null : current), 1200); }).catch(() => {});
+    let ok = true;
+    try {
+      if (window.streamglass?.copyText) await window.streamglass.copyText(text);
+      else await navigator.clipboard.writeText(text);
+    } catch {
+      try { await navigator.clipboard.writeText(text); } catch { ok = false; }
+    }
+    setCopied({ start: range.start, ok });
+    setTimeout(() => setCopied(current => current?.start === range.start ? null : current), ok ? 1500 : 3500);
   };
   useEffect(() => { setStarts([0]); setCollapsed(new Set()); }, [document]);
   const folded = useMemo(() => foldJson(document.text, containers, collapsed), [document, containers, collapsed]);
@@ -55,16 +63,16 @@ export default function JsonViewer({ value, unavailable = false, preserveFormatt
       {query && <><span className="json-search-count" role="status">{matches.length ? `${Math.min(active, matches.length - 1) + 1} of ${matches.length}${matches.length >= 5000 ? '+' : ''}` : 'No matches'}</span><button type="button" aria-label="Previous match" disabled={!matches.length} onClick={() => step(-1)}>↑</button><button type="button" aria-label="Next match" disabled={!matches.length} onClick={() => step(1)}>↓</button></>}
       {containers.length > 0 && <><button type="button" onClick={() => { setCollapsed(new Set()); setStarts([0]); }}>Expand all</button><button type="button" onClick={() => { setCollapsed(new Set(containers.map(range => range.start))); setStarts([0]); }}>Collapse all</button></>}
     </div>}
-    <div className="json-viewer-content" ref={contentRef}>
+    <div className="json-viewer-content" ref={contentRef}><div className="json-rows">
       {document.isJson && <pre className="json-line-numbers" aria-hidden="true">{lines.map((_, i) => firstLine + i).join('\n')}</pre>}
       <pre className="json-code"><code>{tokens.map((token, i) => {
         const range = visible.get(position);
         const tokenStart = position;
         position += token.text.length;
         const content = matches.length ? splitByMatches(token.text, tokenStart, matches, Math.min(active, matches.length - 1)).map((part, index) => part.match ? <mark key={index} className={part.match === 'active' ? 'json-match active' : 'json-match'}>{part.text}</mark> : part.text) : token.text;
-        return <span key={i}>{range && <><button type="button" className="json-fold" aria-label={`${collapsed.has(range.start) ? 'Expand' : 'Collapse'} ${range.kind} at offset ${range.start}`} aria-expanded={!collapsed.has(range.start)} onClick={() => { setCollapsed(previous => { const next = new Set(previous); if (next.has(range.start)) next.delete(range.start); else next.add(range.start); return next; }); setStarts([0]); }}>{collapsed.has(range.start) ? '▸' : '▾'}</button><button type="button" className="json-copy" aria-label={`Copy ${range.kind} at offset ${range.start}`} onClick={() => copyContainer(range)}>{copied === range.start ? 'Copied' : 'Copy'}</button>{onReplace && <button type="button" className="json-replace" disabled={disabled} aria-label={`Replace ${range.kind} at offset ${range.start}`} onClick={() => onReplace(range)}>Replace</button>}</>}{token.kind ? <span className={`json-${token.kind}`}>{content}</span> : content}</span>;
+        return <span key={i}>{range && <><button type="button" className="json-fold" aria-label={`${collapsed.has(range.start) ? 'Expand' : 'Collapse'} ${range.kind} at offset ${range.start}`} aria-expanded={!collapsed.has(range.start)} onClick={() => { setCollapsed(previous => { const next = new Set(previous); if (next.has(range.start)) next.delete(range.start); else next.add(range.start); return next; }); setStarts([0]); }}>{collapsed.has(range.start) ? '▸' : '▾'}</button><button type="button" className="json-copy" aria-label={`Copy ${range.kind} at offset ${range.start}`} onClick={() => copyContainer(range)}>{copied?.start === range.start ? copied.ok ? 'Copied' : 'Copy failed' : 'Copy'}</button>{onReplace && <button type="button" className="json-replace" disabled={disabled} aria-label={`Replace ${range.kind} at offset ${range.start}`} onClick={() => onReplace(range)}>Replace</button>}</>}{token.kind ? <span className={`json-${token.kind}`}>{content}</span> : content}</span>;
       })}</code></pre>
-    </div>
+    </div></div>
     {paginated && <nav className="json-pagination" aria-label="Body pages">
       <button type="button" disabled={starts.length === 1} onClick={() => setStarts(previous => previous.slice(0, -1))}>Previous</button>
       <span>Page {starts.length}{page.hasNext ? ' · more content' : ' · end'}</span>

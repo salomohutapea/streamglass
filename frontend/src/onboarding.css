@@ -6,7 +6,7 @@ dialog.onboarding::backdrop{background:#0008}
 .ob-body{padding:18px 22px 6px;min-height:150px}
 .ob-body h2{font-size:17px;font-weight:500;margin-bottom:6px}
 .ob-body p{color:var(--muted);line-height:1.6;max-width:540px}
-.ob-note{margin-top:10px;font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:flex-start}.ob-note svg{margin-top:2px}
+.ob-note{margin-top:10px;font-size:12px;line-height:18px;color:var(--muted);display:flex;gap:8px;align-items:flex-start}.ob-note svg{flex-shrink:0;width:14px;height:14px;margin-top:2px}
 .ob-foot{display:flex;justify-content:space-between;align-items:center;padding:12px 18px 16px}
 .ob-actions{display:flex;gap:8px}
 .ob-dots{display:flex;gap:6px}.ob-dots i{width:6px;height:6px;border-radius:3px;background:var(--line);transition:all .3s}.ob-dots i.on{width:20px;background:var(--accent)}

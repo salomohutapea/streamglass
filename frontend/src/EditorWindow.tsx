@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Folder, Plus } from 'lucide-react';
-import RuleList from './RuleList';
+import RuleList, { PopupMenu, ruleDragType } from './RuleList';
 import JsonViewer from './JsonViewer';
 import JsonBodyEditor from './JsonBodyEditor';
 import type { DecodedBody } from './CodecPanel';
@@ -40,8 +40,10 @@ export default function EditorWindow() {
   const [editing, setEditing] = useState<Rule | null>(null);
   const [editingRevision, setEditingRevision] = useState<number | null>(null);
   const [selectedFolder, setSelectedFolder] = useState('all');
+  const [dropFolder, setDropFolder] = useState<string | null>(null);
   const [folderForm, setFolderForm] = useState<{ id?: string; name: string } | null>(null);
   const [confirmDeleteFolder, setConfirmDeleteFolder] = useState(false);
+  const [folderMenu, setFolderMenu] = useState<{ x: number; y: number } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [seedLoading, setSeedLoading] = useState(Boolean(recordId && mode !== 'paused'));
@@ -160,6 +162,17 @@ export default function EditorWindow() {
     if (!editing.pattern.trim() || !editing.stages.length) { setError('Enter a URL wildcard and select at least one stage.'); return; }
     if (await mutateRules(rules => upsertRule(rules, editing), editingRevision)) { setEditing(null); setEditingRevision(null); }
   }
+  async function moveRule(rule: Rule, folderId: string | null) {
+    await mutateRules(rules => rules.map(item => { if (item.id !== rule.id) return item; const { folderId: _old, ...rest } = item; return folderId ? { ...rest, folderId } : rest; }));
+  }
+  async function createFolderAndMove(rule: Rule, name: string) {
+    if (working.current) return;
+    setError('');
+    let folder: RuleFolder;
+    try { folder = await api('/api/folders', 'POST', { name, kind }) as RuleFolder; }
+    catch (error) { setError(errorMessage(error)); return; }
+    if (await mutateRules(rules => rules.map(item => item.id === rule.id ? { ...item, folderId: folder.id } : item))) setSelectedFolder(folder.id);
+  }
   async function saveFolder() {
     if (!folderForm || working.current) return;
     const name = folderForm.name.trim();
@@ -224,7 +237,7 @@ export default function EditorWindow() {
   });
 
   return <main className="editor-window">
-    <header className="editor-window-heading"><h1>{title}</h1><span>{mode === 'paused' ? gate?.stage ?? 'Breakpoint' : 'Applies to all connected devices'}</span></header>
+    <header className="editor-window-heading window-header"><h1>{title}</h1><span>{mode === 'paused' ? gate?.stage ?? 'Breakpoint' : 'Applies to all connected devices'}</span></header>
     {error && <div className="editor-error" role="alert"><span>{error}</span><button onClick={() => setError('')}>Dismiss</button></div>}
     <div className="editor-window-content">
       {mode === 'paused' ? <>
@@ -254,17 +267,18 @@ export default function EditorWindow() {
         <label className="check"><input type="checkbox" checked={editing.enabled} onChange={event => setEditing({ ...editing, enabled: event.target.checked })}/>Enabled</label>
         {mode === 'scripts' && <><p className="muted">Return the edited value from onRequest(context, url, request), onResponse(context, url, request, response), or onEvent(context, url, request, event).</p><label>JavaScript<textarea className="mono script-editor" spellCheck={false} maxLength={100000} value={editing.script ?? ''} onChange={event => setEditing({ ...editing, script: event.target.value })}/></label></>}
       </fieldset> : <><p className="muted">{mode === 'scripts' ? 'Run JavaScript hooks for matching traffic. Each rule has its own URL wildcard and stages.' : 'Pause matching requests, responses, or SSE events before they continue.'}</p>{data ? <fieldset className="editor-fields rule-browser" disabled={busy}>
-        <aside className="rule-folder-sidebar">
+        <aside className="rule-folder-sidebar" onContextMenu={event => { event.preventDefault(); setFolderMenu({ x: event.clientX, y: event.clientY }); }}>
           <div className="rule-folder-heading"><h2>Folders</h2><button className="icon-button" aria-label="New folder" title="New folder" onClick={() => { setFolderForm({ name: '' }); setConfirmDeleteFolder(false); setError(''); }}><Plus size={14}/></button></div>
           <nav className="rule-folder-nav" aria-label="Rule folders">
-            {[{ id: 'all', name: 'All rules', count: rules.length }, { id: 'ungrouped', name: 'Ungrouped', count: rules.filter(rule => !rule.folderId).length }, ...folders.map(folder => ({ ...folder, count: rules.filter(rule => rule.folderId === folder.id).length }))].map(folder => <button key={folder.id} className={selectedFolder === folder.id ? 'selected' : ''} aria-label={folder.name} aria-current={selectedFolder === folder.id ? 'page' : undefined} onClick={() => { setSelectedFolder(folder.id); setFolderForm(null); setConfirmDeleteFolder(false); }}><Folder size={13}/><span title={folder.name}>{folder.name}</span><small>{folder.count}</small></button>)}
+            {[{ id: 'all', name: 'All rules', count: rules.length }, { id: 'ungrouped', name: 'Ungrouped', count: rules.filter(rule => !rule.folderId).length }, ...folders.map(folder => ({ ...folder, count: rules.filter(rule => rule.folderId === folder.id).length }))].map(folder => <button key={folder.id} className={`${selectedFolder === folder.id ? 'selected' : ''}${dropFolder === folder.id ? ' drop-target' : ''}`} {...(folder.id !== 'all' ? { onDragOver: (event: import('react').DragEvent) => { if (event.dataTransfer.types.includes(ruleDragType)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropFolder(folder.id); } }, onDragLeave: () => setDropFolder(current => current === folder.id ? null : current), onDrop: (event: import('react').DragEvent) => { event.preventDefault(); setDropFolder(null); const rule = rules.find(item => item.id === event.dataTransfer.getData(ruleDragType)); if (rule) void moveRule(rule, folder.id === 'ungrouped' ? null : folder.id); } } : {})} aria-label={folder.name} aria-current={selectedFolder === folder.id ? 'page' : undefined} onClick={() => { setSelectedFolder(folder.id); setFolderForm(null); setConfirmDeleteFolder(false); }}><Folder size={13}/><span title={folder.name}>{folder.name}</span><small>{folder.count}</small></button>)}
           </nav>
+          {folderMenu && <PopupMenu x={folderMenu.x} y={folderMenu.y} label="Folder actions" opener={null} onClose={() => setFolderMenu(null)}><button role="menuitem" onClick={() => { setFolderMenu(null); setFolderForm({ name: '' }); setConfirmDeleteFolder(false); setError(''); }}><Plus size={13}/>New folder…</button></PopupMenu>}
           {folderForm && <form className="rule-folder-form" onSubmit={event => { event.preventDefault(); void saveFolder(); }}><label htmlFor="folder-name">{folderForm.id ? 'Rename folder' : 'New folder'}</label><input id="folder-name" aria-label="Folder name" autoFocus maxLength={128} value={folderForm.name} onChange={event => setFolderForm({ ...folderForm, name: event.target.value })}/><div><button type="button" onClick={() => { setFolderForm(null); setError(''); }}>Cancel</button><button className="primary" type="submit" disabled={!folderForm.name.trim()}>{folderForm.id ? 'Save folder' : 'Create folder'}</button></div></form>}
         </aside>
         <section className="rule-folder-content" aria-label="Folder rules">
           <div className="rule-folder-title"><h2>{selectedFolder === 'all' ? 'All rules' : activeFolder?.name ?? 'Ungrouped'} <small>{visibleRules.length}</small></h2>{activeFolder && <div className="rule-folder-actions"><button onClick={() => { setFolderForm({ id: activeFolder.id, name: activeFolder.name }); setConfirmDeleteFolder(false); setError(''); }}>Rename folder</button><button onClick={() => { setConfirmDeleteFolder(true); setFolderForm(null); }}>Delete folder</button></div>}</div>
           {confirmDeleteFolder && activeFolder && <div className="rule-folder-confirm" role="group" aria-label="Delete folder?"><p>Delete “{activeFolder.name}”? Its rules will move to Ungrouped.</p><div><button onClick={() => setConfirmDeleteFolder(false)}>Cancel</button><button className="error-text" onClick={() => void deleteFolder()}>Keep rules and delete folder</button></div></div>}
-          <RuleList rules={visibleRules} emptyMessage={selectedFolder !== 'all' ? 'No rules in this folder. Add a rule or move one here from its editor.' : mode === 'scripts' ? 'No JavaScript rules yet.' : 'No breakpoint rules yet.'} onToggle={(rule, enabled) => void mutateRules(rules => rules.map(item => item.id === rule.id ? { ...item, enabled } : item))} onEdit={rule => { setEditing(rule); setEditingRevision(data?.rulesRevision ?? null); setError(''); }} onDelete={rule => void mutateRules(rules => rules.filter(item => item.id !== rule.id))}/>
+          <RuleList rules={visibleRules} folders={folders} onMove={(rule, folderId) => void moveRule(rule, folderId)} onCreateFolderAndMove={(rule, name) => void createFolderAndMove(rule, name)} emptyMessage={selectedFolder !== 'all' ? 'No rules in this folder. Add a rule or move one here from its editor.' : mode === 'scripts' ? 'No JavaScript rules yet.' : 'No breakpoint rules yet.'} onToggle={(rule, enabled) => void mutateRules(rules => rules.map(item => item.id === rule.id ? { ...item, enabled } : item))} onEdit={rule => { setEditing(rule); setEditingRevision(data?.rulesRevision ?? null); setError(''); }} onDelete={rule => void mutateRules(rules => rules.filter(item => item.id !== rule.id))}/>
         </section>
       </fieldset> : <p className="muted">Connecting…</p>}</>}
     </div>

@@ -1,5 +1,5 @@
 .editor-window{height:100dvh;min-width:360px;display:flex;flex-direction:column;background:var(--panel)}
-.editor-window-heading{padding:32px 24px 18px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:15px;flex-wrap:wrap;-webkit-app-region:drag}
+.editor-window-heading{gap:15px}
 .editor-window-heading h1{font-size:16px;font-weight:600;margin:0}.editor-window-heading>span{color:var(--muted);font-size:11px}
 .editor-window-content{flex:1;min-height:0;overflow:auto;padding:22px 24px}.editor-window-content>p:first-child{margin-top:0;line-height:1.7}
 .editor-window-footer{padding:14px 24px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;background:var(--sidebar)}

@@ -51,9 +51,13 @@ One repeat job runs at a time. The result table compares status, duration, obser
 
 ## Saved views, notes, and highlights
 
-**Views & notes → Save current filters** stores the search text, content scope, matching mode, HTTP/HTTPS/SSE filters, status-family filters, selected library, device, and application. Apply saved views from the chooser beside the traffic filters. A saved device or application filter can match nothing when that device/app is no longer present.
+**Views & notes → Save current filters** stores the search text, content scope, matching mode (plus up to seven extra AND/OR conditions, where AND binds tighter than OR; older views without them still load), HTTP/HTTPS/SSE filters, status-family filters, selected library, device, and application. Apply saved views from the chooser beside the traffic filters. A saved device or application filter can match nothing when that device/app is no longer present.
 
 Right-click a capture and choose **Note and highlight** to add a note or one of five subtle row colors. Choose **None** to remove its highlight. Notes remain separate from the read-only inspector and are included in capture snapshots and exports. Explicit capture deletion removes the associated note. Configuration workspaces also include journey settings, watches, assertions, and saved views; they do not include capture notes or archives.
+
+## Tab helpers
+
+**Journeys** explains itself when nothing is correlated. **Detect correlation keys** inspects the selected capture plus the most recent ones for ID-like JSON fields (searchId, requestId, traceId) and headers (x-request-id, traceparent); **Add key** saves the suggestion into the existing correlation settings. Requests without a shared ID are collapsed under one "uncorrelated" summary. **Watches** and **Assertions** have **Pick from capture**: choose a capture, click a JSON path, and it fills a watch or required-field assertion. Assertion results are a per-capture pass/fail table. **Repeat** picks the capture with the shared capture list and shows min/avg/p95/max with a bar per run. **Views & notes** is one searchable list of saved views (load, rename, delete) and annotated captures. All of this only edits tool preferences or annotations; the inspector stays read-only.
 
 ## Source map
 

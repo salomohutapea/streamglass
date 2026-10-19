@@ -76,7 +76,7 @@ function createWindow(recordId, editor) {
     title: 'Streamglass', backgroundColor: '#17191e',
     fullscreenable: !auxiliary,
     icon: path.join(root, 'electron/assets/streamglass.png'),
-    ...(!auxiliary && process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } } : {}),
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } } : {}),
     webPreferences: { preload: path.join(root, 'electron/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
   if (auxiliary && process.platform === 'darwin') {
@@ -122,6 +122,32 @@ function toolsTrafficWindow() {
   if (toolsOwner && !toolsOwner.isDestroyed()) return toolsOwner;
   if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
   return createWindow();
+}
+
+const aboutLinks = {
+  issues: 'https://github.com/salomohutapea/streamglass/issues/new/choose',
+  repository: 'https://github.com/salomohutapea/streamglass',
+  license: 'https://github.com/salomohutapea/streamglass/blob/main/LICENSE',
+  email: 'mailto:me@salomo.dev?subject=Streamglass',
+};
+let aboutWindow;
+function openAboutWindow() {
+  if (aboutWindow && !aboutWindow.isDestroyed()) { aboutWindow.show(); aboutWindow.focus(); return; }
+  const win = aboutWindow = new BrowserWindow({
+    width: 380, height: 560, resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
+    title: 'About Streamglass', backgroundColor: '#17191e',
+    icon: path.join(root, 'electron/assets/streamglass.png'),
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } } : {}),
+    webPreferences: { preload: path.join(root, 'electron/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false },
+  });
+  windows.add(win);
+  applicationMenu?.register(win, false, true, false);
+  win.on('closed', () => { windows.delete(win); applicationMenu?.forget(win); aboutWindow = undefined; });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', event => event.preventDefault());
+  const url = new URL(windowURL());
+  url.searchParams.set('about', '1');
+  void win.loadURL(url.href);
 }
 
 function openEditor(input, automatic = false) {
@@ -175,7 +201,7 @@ async function pollPendingEditors() {
 async function start() {
   await app.whenReady();
   app.dock?.setIcon(path.join(root, 'electron/assets/streamglass.png'));
-  applicationMenu = createApplicationMenu({ app, Menu, BrowserWindow, windows,
+  applicationMenu = createApplicationMenu({ app, Menu, BrowserWindow, windows, openAbout: openAboutWindow,
     getToolsOwner:() => toolsOwner && !toolsOwner.isDestroyed() ? toolsOwner : mainWindow && !mainWindow.isDestroyed() ? mainWindow : null });
   handle('menu-state', (event, state) => applicationMenu.updateState(BrowserWindow.fromWebContents(event.sender), state));
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -298,7 +324,7 @@ async function start() {
   try { await initialDevices.restoreMonitor(); } catch (error) { monitorRestoreError = error.message; }
   handle('bootstrap', () => ({ ...bootstrap, lanAddresses: lanAddresses() }));
   handle('copy-text', (_event, value) => {
-    if (typeof value !== 'string' || Buffer.byteLength(value) > 1024 * 1024) throw new Error('Invalid clipboard text');
+    if (typeof value !== 'string' || Buffer.byteLength(value) > 256 * 1024 * 1024) throw new Error('Invalid clipboard text');
     clipboard.writeText(value);
   });
   handle('detach-inspector', (_event, id) => {
@@ -404,6 +430,11 @@ async function start() {
   });
   const checkForUpdate = createUpdateChecker({ currentVersion: app.getVersion() });
   handle('update-status', async (_event, force) => (app.isPackaged && process.env.STREAMGLASS_DISABLE_UPDATE_CHECK !== '1' ? checkForUpdate({ force: force === true }) : null));
+  handle('about-info', () => ({ version: app.getVersion(), electron: process.versions.electron, links: Object.keys(aboutLinks) }));
+  handle('open-about-link', async (_event, key) => {
+    if (!Object.hasOwn(aboutLinks, key)) throw new Error('Unknown link');
+    await shell.openExternal(aboutLinks[key]);
+  });
   handle('open-update', async (_event, value) => {
     const url = new URL(value);
     if (url.protocol !== 'https:' || !url.href.startsWith(releasesPrefix) || url.username || url.password) throw new Error('Update link is not permitted');

@@ -10,7 +10,7 @@ export function validateMenuState(input) {
   return Object.fromEntries([...flags, ...Object.keys(enums)].map(key => [key, input[key]]));
 }
 
-export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getToolsOwner }) {
+export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getToolsOwner, openAbout }) {
   const states = new WeakMap(), detachedWindows = new WeakSet(), editorWindows = new WeakSet(), toolsWindows = new WeakSet();
   const isToolCommand = id => id === 'map-local' || id === 'network-profile' || id.startsWith('lab-') || id.startsWith('daily-');
   const focused = () => {
@@ -41,7 +41,7 @@ export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getTo
   const separator = { type: 'separator' };
   const menu = Menu.buildFromTemplate([
     { label: 'Streamglass', submenu: [
-      { role: 'about', label: 'About Streamglass' }, separator,
+      { label: 'About Streamglass', click: () => openAbout?.() }, separator,
       command('settings', 'Settings…', 'CmdOrCtrl+,'), separator,
       { role: 'services' }, separator,
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, separator, { role: 'quit' },
@@ -54,7 +54,6 @@ export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getTo
         command('export-response', 'Response…'), command('export-events', 'SSE Events…'),
       ] }, command('export-all', 'Export All Captures…'), separator, { role: 'close' },
     ] },
-    { label: 'Certificate / Setup', submenu: setupCommands },
     { label: 'Edit', submenu: [
       { role: 'undo' }, { role: 'redo' }, separator,
       { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
@@ -88,6 +87,7 @@ export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getTo
       command('lab-share', 'Redacted Export…'), separator,
       command('lab-workspaces', 'Configuration Workspaces…'), command('lab-codecs', 'Body Codecs…'),
     ] },
+    { label: 'Certificate / Setup', submenu: setupCommands },
     { label: 'View', submenu: [
       command('inspector-right', 'Inspector on Right'), command('inspector-below', 'Inspector Below'), separator,
       command('view-all', 'All Requests', undefined, 'checkbox'), command('view-sse', 'SSE Requests', undefined, 'checkbox'), separator,

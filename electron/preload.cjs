@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   deviceAction: (action) => ipcRenderer.invoke('device-action', action),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   getUpdate: (force) => ipcRenderer.invoke('update-status', force),
+  getAboutInfo: () => ipcRenderer.invoke('about-info'),
+  openAboutLink: (key) => ipcRenderer.invoke('open-about-link', key),
   openUpdate: (url) => ipcRenderer.invoke('open-update', url),
   setMenuState: (state) => ipcRenderer.invoke('menu-state', state),
   onMenuAction: (callback) => {

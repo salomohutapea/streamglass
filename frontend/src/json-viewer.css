@@ -17,3 +17,6 @@
 .json-toolbar .json-search{flex:1;min-width:120px;max-width:240px;padding:4px 7px;font-size:11px}.json-toolbar .json-search-count{margin-left:0;white-space:nowrap}
 .json-code mark.json-match{background:color-mix(in srgb,var(--accent) 28%,transparent);color:inherit;border-radius:2px}.json-code mark.json-match.active{background:color-mix(in srgb,#e8a23d 70%,transparent);outline:1px solid #e8a23d}
 .json-toolbar{flex-wrap:wrap}.json-toolbar button{white-space:nowrap}.json-toolbar .json-search{flex:1 1 140px}
+
+.json-viewer .json-rows{display:flex;align-items:stretch;min-width:100%;width:max-content}
+.json-viewer .json-viewer-content{display:block}

@@ -126,7 +126,7 @@ c.commit()`,path.join(directory,'captures.sqlite3'),String(proxyPort)],{input:JS
     assert.equal(await page.getByRole('textbox',{name:'Filter requests',exact:true}).inputValue(),'/initial');
     await openTools();
     await panel.getByRole('button',{name:'Repeat',exact:true}).click();
-    await panel.getByLabel('Daily tools capture').selectOption('initial');
+    await panel.getByRole('listbox',{name:'Repeat capture'}).getByRole('option').filter({hasText:'/initial'}).filter({hasNotText:'/sse'}).getByRole('button').click();
     await panel.getByLabel('Repeat count',{exact:true}).fill('3');
     await panel.getByLabel('Interval after completion (ms)',{exact:true}).fill('0');
     await panel.getByRole('button',{name:'Start 3 requests',exact:true}).click();

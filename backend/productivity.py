@@ -100,6 +100,8 @@ def validate(value):
                 raise ValueError("IDs must be unique")
             ids.add(item["id"])
             allowed = {"id", "name", "path", "source"} if key == "watches" else {"id", "name", "enabled", "pattern", "method", "kind", "path", "source", "eventName", "timeoutMs"} if key == "assertions" else {"id", "name", "filter", "scope", "mode", "protocols", "statuses", "device", "application", "library"}
+            if key == "views" and "conditions" in item:
+                allowed = allowed | {"conditions"}
             if set(item) != allowed:
                 raise ValueError(f"Unexpected {key} fields")
             if key in ("watches", "assertions"):
@@ -126,6 +128,13 @@ def validate(value):
                     text(item["application"], "application", 1024)
                 if item["scope"] not in ("url", "request", "response", "event") or item["mode"] not in ("contains", "not_contains", "equals", "starts_with", "ends_with", "wildcard") or item["library"] not in ("all", "sse", "pinned"):
                     raise ValueError("Invalid saved search")
+                if "conditions" in item:
+                    if not isinstance(item["conditions"], list) or len(item["conditions"]) > 7:
+                        raise ValueError("Invalid extra search conditions")
+                    for condition in item["conditions"]:
+                        if not isinstance(condition, dict) or set(condition) != {"joiner", "scope", "mode", "filter"} or condition["joiner"] not in ("and", "or") or condition["scope"] not in ("url", "request", "response", "event") or condition["mode"] not in ("contains", "not_contains", "equals", "starts_with", "ends_with", "wildcard"):
+                            raise ValueError("Invalid extra search condition")
+                        text(condition["filter"], "filter", 1024, True)
                 if not isinstance(item["protocols"], list) or len(item["protocols"]) > 3 or any(p not in ("HTTP", "HTTPS", "SSE") for p in item["protocols"]):
                     raise ValueError("Invalid protocol filters")
                 if not isinstance(item["statuses"], list) or len(item["statuses"]) > 5 or any(type(s) is not int or s not in range(1, 6) for s in item["statuses"]):

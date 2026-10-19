@@ -54,10 +54,10 @@ button{border-radius:6px}
 .icon-button.active{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}
 
 .sidebar{width:48px;padding:10px 6px 0;overflow:hidden;position:relative;z-index:20;background:var(--bg);border-right:1px solid var(--line)}
-.sidebar:hover,.sidebar:focus-within{width:216px;margin-right:-168px;overflow:auto;background:var(--panel);box-shadow:0 8px 30px #0006}
-.sidebar:not(:hover):not(:focus-within) .nav-row,.sidebar:not(:hover):not(:focus-within) .device-row .nav-row{font-size:0;gap:0;justify-content:center;padding:8px 0}
-.sidebar:not(:hover):not(:focus-within) :is(.nav-row svg,.application-icon){width:16px;height:16px}
-.sidebar:not(:hover):not(:focus-within) :is(.sidebar-heading,.sidebar-note,.connect-button,.sidebar-bottom,.pending-label,.application-name,.device-name,.device-row>.icon-button,.nav-row>span:last-child){display:none}
+.sidebar:hover,.sidebar:has(:focus-visible){width:216px;margin-right:-168px;overflow:auto;background:var(--panel);box-shadow:0 8px 30px #0006}
+:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) .nav-row,:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) .device-row .nav-row{font-size:0;gap:0;justify-content:center;padding:8px 0}
+:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) :is(.nav-row svg,.application-icon){width:16px;height:16px}
+:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) :is(.sidebar-heading,.sidebar-note,.connect-button,.sidebar-bottom,.pending-label,.application-name,.device-name,.device-row>.icon-button,.nav-row>span:last-child){display:none}
 .splitter[aria-label="Resize sidebar"]{display:none}
 .splitter{width:5px;background:transparent;border:0;border-left:1px solid var(--line)}
 .splitter:hover{background:color-mix(in srgb,var(--accent) 40%,transparent)}
@@ -105,7 +105,7 @@ dialog{border:1px solid var(--line);border-radius:12px}
 
 .workspace.inspector-below{grid-template-columns:48px 0 minmax(0,1fr)}
 .inspector-below>.sidebar{width:48px}
-.inspector-below>.sidebar:hover,.inspector-below>.sidebar:focus-within{width:216px}
+.inspector-below>.sidebar:hover,.inspector-below>.sidebar:has(:focus-visible){width:216px}
 .inspector-below>.splitter:first-of-type{display:none}
 
 .cert-callout{display:grid;grid-template-columns:1fr auto;gap:8px 12px;align-items:center;margin:14px 0;padding:12px 14px;border:1px solid var(--accent);border-radius:8px;background:color-mix(in srgb,var(--accent) 10%,transparent)}
@@ -115,3 +115,51 @@ dialog{border:1px solid var(--line);border-radius:12px}
 .cert-callout code{font-size:17px;font-weight:600;color:var(--accent);letter-spacing:.01em}
 
 .update-banner{display:flex;align-items:center;gap:8px;padding:6px 15px;background:color-mix(in srgb,var(--accent) 12%,var(--bg));border-bottom:1px solid var(--line);font-size:11px;flex-shrink:0}.update-banner span{margin-right:auto}.update-banner button{padding:2px 9px}
+
+.app-badge{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:5px;flex-shrink:0;font-size:8px;font-weight:700;line-height:1;letter-spacing:0;font-family:inherit}
+:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) .app-badge{width:16px;height:16px;font-size:7px}
+.domain-list,.form fieldset.domain-list{border:0;padding:0;margin:0;display:grid;gap:6px;min-width:0}.domain-list legend{padding:0;margin-bottom:6px}
+.domain-row{display:flex;gap:4px;align-items:center}.domain-row input{flex:1;min-width:0}
+
+/* Window chrome: every window (main, inspector, rules, tools) hides the native title bar and
+   places the traffic lights inside its own header. Use .window-header for any new window. */
+:root{--titlebar-height:46px;--titlebar-inset:84px}
+.window-header{min-height:var(--titlebar-height);display:flex;align-items:center;gap:12px;padding:0 24px;border-bottom:1px solid var(--line);background:var(--panel);-webkit-app-region:drag;user-select:none}
+.window-header h1,.window-header h2{margin:0;font-size:14px;font-weight:600}
+.window-header>span{color:var(--muted);font-size:11px}
+.window-header :is(button,input,select,textarea,a){-webkit-app-region:no-drag}
+.window-header>button:last-child{margin-left:auto}
+:root[data-titlebar=inset] .window-header{padding-left:var(--titlebar-inset)}
+
+/* Sidebar: animated expand/collapse and an always-expanded option */
+.sidebar{transition:width .2s cubic-bezier(.2,.7,.2,1),margin-right .2s cubic-bezier(.2,.7,.2,1),box-shadow .2s,background-color .2s}
+.sidebar-pin{display:flex;align-items:center;justify-content:center;width:100%;margin:0 0 6px;color:var(--muted)}
+:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) .sidebar-pin{justify-content:center}
+.sidebar:hover .sidebar-pin,.sidebar:has(:focus-visible) .sidebar-pin,:root[data-sidebar-pinned] .sidebar-pin{justify-content:flex-end}
+.sidebar-pin[aria-pressed=true]{color:var(--accent)}
+.sidebar>*:not(.sidebar-pin){animation:sidebar-fade .22s ease both}
+@keyframes sidebar-fade{from{opacity:0}to{opacity:1}}
+:root[data-sidebar-pinned] .sidebar,:root[data-sidebar-pinned] .sidebar:hover,:root[data-sidebar-pinned] .sidebar:has(:focus-visible){width:216px;margin-right:0;overflow:auto;background:var(--panel);box-shadow:none}
+:root[data-sidebar-pinned] .workspace.inspector-below{grid-template-columns:216px 0 minmax(0,1fr)}
+:root[data-sidebar-pinned] .inspector-below>.sidebar,:root[data-sidebar-pinned] .inspector-below>.sidebar:hover{width:216px}
+
+/* Smooth appearance switch: View Transitions cross-fade a snapshot, so no per-element transitions */
+::view-transition-old(root),::view-transition-new(root){animation-duration:.32s;animation-timing-function:ease}
+@media(prefers-reduced-motion:reduce){.sidebar{transition:none!important}.sidebar>*{animation:none!important}}
+.header-search>.icon-button{width:22px;height:22px;padding:3px;color:var(--muted);flex-shrink:0}
+.filter-conditions{display:flex;flex-direction:column;gap:4px;padding:6px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+.filter-condition{display:flex;align-items:center;gap:6px;background:var(--input);border:1px solid var(--line);border-radius:7px;padding:0 6px 0 8px;height:28px}
+.filter-condition:focus-within{border-color:var(--accent)}
+.filter-condition select{background:transparent;border:0;color:var(--muted);padding:2px 4px;font-size:10px;flex-shrink:0}
+.filter-condition .condition-joiner{max-width:56px;font-weight:600;color:var(--accent)}
+.filter-condition .condition-text{flex:1;min-width:0;background:transparent;border:0;padding:4px 0;outline:none}
+.filter-condition :is(select,input):focus-visible{outline:none}
+.filter-condition select:focus-visible{background:var(--raised);border-radius:5px}
+.filter-condition>.icon-button{width:20px;height:20px;padding:3px;flex-shrink:0}
+
+/* Popup motion */
+dialog[open]{animation:dialog-in .2s cubic-bezier(.2,.8,.2,1)}
+dialog[open]::backdrop{animation:backdrop-in .2s ease}
+@keyframes dialog-in{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes backdrop-in{from{opacity:0}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){dialog[open],dialog[open]::backdrop{animation:none}}
