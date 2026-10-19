@@ -91,7 +91,7 @@ export function releaseOptions({ version, signed = false, now = new Date() }) {
   const folder = path.join(root, 'release/local', `${version}-${now.toISOString().replace(/[:.]/g, '-')}`);
   return {
     folder,
-    args: ['node_modules/electron-builder/cli.js', '--mac', '--publish', 'never', `--config.directories.output=${folder}`, ...(signed ? ['--config.forceCodeSigning=true'] : ['--config.mac.identity=null', '--config.mac.notarize=false', '--config.mac.hardenedRuntime=false'])],
+    args: ['node_modules/electron-builder/cli.js', '--mac', '--publish', 'never', `--config.directories.output=${folder}`, ...(signed ? ['--config.forceCodeSigning=true'] : ['--config.mac.identity=null', '--config.mac.notarize=false', '--config.mac.hardenedRuntime=false', '--config.afterPack=scripts/adhoc-sign.cjs'])],
     env: signed ? { ...process.env } : { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
   };
 }

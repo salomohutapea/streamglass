@@ -17,11 +17,13 @@ test('local release disables signing and publication and uses a separate output 
   assert.match(result.folder, /release\/local\/0\.1\.0-2026-10-16T00-00-00-000Z$/);
   assert.ok(result.args.includes('--config.mac.identity=null'));
   assert.ok(result.args.includes('--config.mac.notarize=false'));
+  assert.ok(result.args.includes('--config.afterPack=scripts/adhoc-sign.cjs'));
   assert.equal(result.args[result.args.indexOf('--publish') + 1], 'never');
   assert.equal(result.env.CSC_IDENTITY_AUTO_DISCOVERY, 'false');
   const signed = releaseOptions({ version: '0.1.0', signed: true });
   assert.ok(!signed.args.includes('--config.mac.identity=null'));
   assert.ok(!signed.args.includes('--config.mac.notarize=false'));
+  assert.ok(!signed.args.includes('--config.afterPack=scripts/adhoc-sign.cjs'));
   assert.ok(signed.args.includes('--config.forceCodeSigning=true'));
 });
 
