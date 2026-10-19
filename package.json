@@ -1,6 +1,6 @@
 {
   "name": "streamglass",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "A local HTTP and event-stream inspection workbench",
   "type": "module",
