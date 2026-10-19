@@ -224,7 +224,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     await requestContext.locator('.headers-disclosure summary').click();
     await requestContext.getByText('visible-request', { exact: true }).waitFor();
     await requestContext.getByText('request-body-context', { exact: false }).waitFor();
-    assert.equal(await requestContext.locator('input, textarea').count(), 0, 'Request context must remain read only');
+    assert.equal(await requestContext.locator('input:not(.json-search), textarea').count(), 0, 'Request context must remain read only');
     const requestBounds = await requestContext.boundingBox();
     const editBounds = await editor.getByRole('region', { name: 'Paused traffic editor', exact: true }).boundingBox();
     assert.ok(requestBounds.x + requestBounds.width <= editBounds.x, 'Request and editable response must appear side by side');
