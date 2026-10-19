@@ -112,3 +112,7 @@ Before labeling a 1.0.0 artifact, use the [release qualification checklist](RELE
 **Mac proxy helper denied:** follow the managed-Mac guidance in [device setup](DEVICES.md). Certificate-only simulator setup does not change network proxy settings; ask IT to configure those when policy requires it.
 
 **Connection problems after exit:** restore saved proxy settings using the app, or inspect the affected platform's proxy configuration. A deleted capture or data directory cannot restore a network setting.
+
+## Keeping captures between runs
+
+The engine deletes all captures when it stops and when it starts. Set `STREAMGLASS_KEEP_CAPTURES=1` to disable both for debugging; the desktop tests set it because they seed `captures.sqlite3` before launching.

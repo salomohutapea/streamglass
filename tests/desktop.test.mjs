@@ -66,7 +66,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
   const httpsPort = await listen(httpsFixture);
   let app;
   try {
-    const env = { ...process.env, STREAMGLASS_MCP_PORT: '0', STREAMGLASS_BUILT_UI: '1', STREAMGLASS_DATA_DIR: directory };
+    const env = { ...process.env, STREAMGLASS_MCP_PORT: '0', STREAMGLASS_KEEP_CAPTURES: '1', STREAMGLASS_BUILT_UI: '1', STREAMGLASS_DATA_DIR: directory };
     delete env.ELECTRON_RUN_AS_NODE;
     const executablePath = process.env.STREAMGLASS_TEST_APP;
     app = await electron.launch({ ...(executablePath ? { executablePath } : {}), args: [...(executablePath ? [] : [root]), `--user-data-dir=${path.join(directory, 'chromium')}`], env, timeout: 30000 });

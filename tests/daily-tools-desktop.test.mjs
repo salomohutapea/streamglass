@@ -44,7 +44,7 @@ for r in json.loads(sys.stdin.read()):c.execute('INSERT INTO records VALUES (?,?
 c.commit()`,path.join(directory,'captures.sqlite3'),String(proxyPort)],{input:JSON.stringify(records)});
   let app,page,toolsPage,panel;
   try{
-    const env={...process.env,STREAMGLASS_MCP_PORT:'0',STREAMGLASS_BUILT_UI:'1',STREAMGLASS_DATA_DIR:directory};delete env.ELECTRON_RUN_AS_NODE;
+    const env={...process.env,STREAMGLASS_MCP_PORT:'0',STREAMGLASS_KEEP_CAPTURES:'1',STREAMGLASS_BUILT_UI:'1',STREAMGLASS_DATA_DIR:directory};delete env.ELECTRON_RUN_AS_NODE;
     const executablePath=process.env.STREAMGLASS_TEST_APP;
     app=await electron.launch({...executablePath?{executablePath}:{},args:[...executablePath?[]:[root],`--user-data-dir=${path.join(directory,'chromium')}`],env});
     page=await app.firstWindow();page.setDefaultTimeout(15000);await page.getByRole('dialog',{name:'Welcome tour'}).getByRole('button',{name:'Skip tour'}).click();
