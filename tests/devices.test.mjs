@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createDeviceService } from '../electron/devices.mjs';
 
-async function fixture(t, { route4 = 'en0', route6 = 'en0', failElevation = false, authenticated = false, captured = false, simulators = null, directNetwork = false, failSimulator = false, ensureProxyListening = async () => {}, groups = 'staff admin', noOpWrites = false } = {}) {
+async function fixture(t, { route4 = 'en0', route6 = 'en0', failElevation = false, authenticated = false, captured = false, simulators = null, directNetwork = false, failSimulator = false, genericDenial = false, ensureProxyListening = async () => {}, groups = 'staff admin', noOpWrites = false } = {}) {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'streamglass-devices-'));
   t.after(() => rm(dataDir, { recursive: true, force: true }));
   const services = [];
@@ -32,7 +32,7 @@ async function fixture(t, { route4 = 'en0', route6 = 'en0', failElevation = fals
     if (file.endsWith('/networksetup')) {
       if (args[0] === '-listallnetworkservices') return { stdout: 'An asterisk denotes disabled services.\nAX88179B USB\nWi-Fi\nVPN\n*Disabled\n' };
       if (args[0] === '-listnetworkserviceorder') return { stdout: '(1) AX88179B USB\n(Hardware Port: USB, Device: en9)\n(2) Wi-Fi\n(Hardware Port: Wi-Fi, Device: en0)\n(3) VPN\n(Hardware Port: VPN, Device: utun7)' };
-      if (args[0].startsWith('-set')) { if (!directNetwork) throw new Error('Requires root privileges'); applyNetworkChange(args); return { stdout: '' }; }
+      if (args[0].startsWith('-set')) { if (!directNetwork) throw new Error(genericDenial ? `Command failed: /usr/sbin/networksetup ${args.join(' ')}` : 'Requires root privileges'); applyNetworkChange(args); return { stdout: '' }; }
       if (args[0].startsWith('-get')) { const proxy = proxyState(args[1], args[0].includes('secureweb') ? 'secureweb' : 'web'); return { stdout: `Enabled: ${proxy.enabled ? 'Yes' : 'No'}\nServer: ${proxy.host}\nPort: ${proxy.port}\nAuthenticated Proxy Enabled: ${authenticated ? '1' : '0'}` }; }
     }
     if (file.endsWith('/route')) {
@@ -219,7 +219,9 @@ test('simulator setup reports completed steps when simulator certificate install
 test('failed combined proxy preparation keeps original snapshot without claiming persistent monitor ownership', async t => {
   const { service, dataDir, commands } = await fixture(t, { failElevation: true, simulators: [{ udid: 'sim', name: 'Phone', state: 'Booted' }] });
   await writeFile(path.join(dataDir, 'ca.pem'), '-----BEGIN CERTIFICATE-----\nfixture');
-  await assert.rejects(service.perform({ action: 'simulator-prepare', target: 'sim', networkTarget: 'Wi-Fi' }), /simulator certificate installed.*Setup did not finish: macOS requires administrator approval/);
+  const result = await service.perform({ action: 'simulator-prepare', target: 'sim', networkTarget: 'Wi-Fi' });
+  assert.equal(result.partial, true);
+  assert.match(result.message, /simulator certificate installed\. The system proxy was not changed: macOS requires administrator approval/);
   const original = JSON.parse(await readFile(path.join(dataDir, 'device-proxy-state.json'), 'utf8'));
   assert.deepEqual(original['mac:Wi-Fi'].secureweb, { enabled: false, host: 'previous.example', port: '3128' });
   assert.equal((await service.list()).monitorEnabled, false);
@@ -249,11 +251,22 @@ test('standard account can install user and simulator certificates without chang
   assert.equal(commands.some(command => command[0].endsWith('/osascript') || command[1]?.startsWith('-set')), false);
 });
 
-test('standard account combined setup reports completed certificates without prompting for admin', async t => {
+test('standard account combined setup completes certificates and reports the skipped system proxy without prompting for admin', async t => {
   const { service, dataDir, commands } = await fixture(t, { groups: 'staff', simulators: [{ udid: 'sim', name: 'Phone', state: 'Booted' }] });
   await writeFile(path.join(dataDir, 'ca.pem'), '-----BEGIN CERTIFICATE-----\nfixture');
-  await assert.rejects(service.perform({ action: 'simulator-prepare', target: 'sim' }), /Mac user certificate trusted; simulator certificate installed.*This account cannot change system proxy settings/);
+  const result = await service.perform({ action: 'simulator-prepare', target: 'sim' });
+  assert.equal(result.partial, true);
+  assert.match(result.message, /Mac user certificate trusted; simulator certificate installed\. The system proxy was not changed: This account cannot change system proxy settings.*127\.0\.0\.1:8080/);
   assert.equal(commands.some(command => command[0].endsWith('/osascript')), false);
+});
+
+test('an unexplained networksetup failure still reaches the administrator prompt for admins and is handled for standard accounts', async t => {
+  const admin = await fixture(t, { groups: 'staff admin', genericDenial: true });
+  await admin.service.perform({ action: 'mac-enable-proxy', target: 'Wi-Fi' });
+  assert.equal(admin.commands.some(command => command[0].endsWith('/osascript')), true);
+  const standard = await fixture(t, { groups: 'staff', genericDenial: true });
+  await assert.rejects(standard.service.perform({ action: 'mac-enable-proxy', target: 'Wi-Fi' }), /This account cannot change system proxy settings/);
+  assert.equal(standard.commands.some(command => command[0].endsWith('/osascript')), false);
 });
 
 

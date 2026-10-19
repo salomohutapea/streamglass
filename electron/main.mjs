@@ -7,6 +7,7 @@ import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startScriptService } from './script-service.mjs';
+import { createUpdateChecker, releasesPrefix } from './updater.mjs';
 import { createDeviceService } from './devices.mjs';
 import { createApplicationMenu } from './menu.mjs';
 import { startMcpServer } from './mcp-server.mjs';
@@ -399,6 +400,13 @@ async function start() {
     const url = new URL(value);
     const allowed = ['docs.mitmproxy.org', 'developer.apple.com', 'support.apple.com', 'developer.android.com'];
     if (url.protocol !== 'https:' || !allowed.includes(url.hostname) || url.username || url.password) throw new Error('External link is not permitted');
+    await shell.openExternal(url.href);
+  });
+  const checkForUpdate = createUpdateChecker({ currentVersion: app.getVersion() });
+  handle('update-status', async (_event, force) => (app.isPackaged && process.env.STREAMGLASS_DISABLE_UPDATE_CHECK !== '1' ? checkForUpdate({ force: force === true }) : null));
+  handle('open-update', async (_event, value) => {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || !url.href.startsWith(releasesPrefix) || url.username || url.password) throw new Error('Update link is not permitted');
     await shell.openExternal(url.href);
   });
   startupReady = true;

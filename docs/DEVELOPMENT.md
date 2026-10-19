@@ -42,6 +42,8 @@ GitHub Actions workflows live in `.github/workflows/` and run on macOS (Apple Si
 - **Bump version** (`bump-version.yml`) is started manually from the Actions tab (patch, minor, major, or an exact `x.y.z`). It runs `npm run bump`, which updates `package.json`, the lockfile root, and `pyproject.toml`, then opens a pull request. With the default workflow token, GitHub holds that PR's CI run until someone clicks "Approve and run workflows" on the PR; add a `BUMP_PR_TOKEN` repository secret (a personal access token with `repo` scope) to skip the approval. You can also run `npm run bump -- patch` locally.
 - **Release** (`release.yml`) runs when `package.json` changes on `main`. If the version differs from the previous commit and the `vX.Y.Z` tag does not exist, it builds an unsigned macOS release and publishes the DMG, ZIP, and `SHA256SUMS.txt` on the GitHub Releases page. It can also be started manually to publish the current version when its tag is missing.
 
+**Update notifications.** Packaged builds check the latest GitHub release at launch and every six hours, and show a banner when a newer version exists; "View release" opens the release page in the browser. This is a notification, not an automatic install: Electron's `autoUpdater` (Squirrel.Mac) only installs updates signed with the same Apple Developer ID, which unsigned builds do not have. Once releases are signed and notarized, replace the notifier in `electron/updater.mjs` with `autoUpdater` or `electron-updater`. Set `STREAMGLASS_DISABLE_UPDATE_CHECK=1` to turn the check off; development runs never check.
+
 The release build is unsigned and not notarized; see the Local releases section for what users see on first launch.
 
 ## Local releases

@@ -113,3 +113,5 @@ dialog{border:1px solid var(--line);border-radius:12px}
 .cert-callout strong{font-size:12px;font-weight:600}
 .cert-callout span{color:var(--muted);font-size:11px}
 .cert-callout code{font-size:17px;font-weight:600;color:var(--accent);letter-spacing:.01em}
+
+.update-banner{display:flex;align-items:center;gap:8px;padding:6px 15px;background:color-mix(in srgb,var(--accent) 12%,var(--bg));border-bottom:1px solid var(--line);font-size:11px;flex-shrink:0}.update-banner span{margin-right:auto}.update-banner button{padding:2px 9px}

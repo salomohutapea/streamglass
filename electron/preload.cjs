@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   listDevices: (options) => ipcRenderer.invoke('list-devices', options),
   deviceAction: (action) => ipcRenderer.invoke('device-action', action),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  getUpdate: (force) => ipcRenderer.invoke('update-status', force),
+  openUpdate: (url) => ipcRenderer.invoke('open-update', url),
   setMenuState: (state) => ipcRenderer.invoke('menu-state', state),
   onMenuAction: (callback) => {
     const listener = (_event, action, payload) => callback(action, payload);

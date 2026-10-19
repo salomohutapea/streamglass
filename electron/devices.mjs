@@ -26,13 +26,18 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
   let monitorError = '', timer, networkCache, observedNetwork, monitorTickPending = false, suspended = false;
   let adminMembership;
   const isAdministrator = () => adminMembership ??= optional('/usr/bin/id', ['-Gn']).then(groups => Boolean(groups?.split(/\s+/).includes('admin')));
+  const permissionDenied = message => Object.assign(new Error(message), { code: 'PROXY_PERMISSION' });
+  const permissionPattern = /permission|not authorized|admin|privilege|root|access denied|authorization/i;
   const configureNetwork = async (commands, allowAdmin = true) => {
-    try { for (const [file, ...args] of commands) { const output = await run(file, args); if (/permission|not authorized|administrator|root|access denied|authorization/i.test(output)) throw new Error(output); } }
+    try { for (const [file, ...args] of commands) { const output = await run(file, args); if (permissionPattern.test(output)) throw new Error(output); } }
     catch (error) {
-      if (!/permission|not authorized|administrator|root|access denied|authorization/i.test(`${error.message} ${error.stderr ?? ''}`)) throw error;
-      if (!allowAdmin) throw new Error('Mac monitor could not update this network proxy without permission. Open Device Setup and enable Mac capture to retry, or ask IT to configure HTTP/HTTPS proxies. Monitoring remains enabled.');
-      if (!await isAdministrator()) throw new Error('This account cannot change system proxy settings. Ask IT to configure the HTTP/HTTPS proxy, or set the proxy inside your app. Certificate setup remains available without system proxy access.');
-      try { await elevated(commands); } catch (cause) { throw new Error(`macOS requires administrator approval for network proxy changes. Use an administrator account or configure HTTP/HTTPS proxies manually in Network settings. ${cause.message}`); }
+      const text = `${error.message} ${error.stderr ?? ''}`;
+      // networksetup rejects unauthorised changes with varying wording (often just "Command failed"), so only an unknown service name is excluded.
+      const networksetupFailure = /\/usr\/sbin\/networksetup/.test(text) && !/not a recognized network service|could not find network service/i.test(text);
+      if (!permissionPattern.test(text) && !networksetupFailure) throw error;
+      if (!allowAdmin) throw permissionDenied('Mac monitor could not update this network proxy without permission. Open Device Setup and enable Mac capture to retry, or ask IT to configure HTTP/HTTPS proxies. Monitoring remains enabled.');
+      if (!await isAdministrator()) throw permissionDenied('This account cannot change system proxy settings. Ask IT to configure the HTTP/HTTPS proxy, or set the proxy inside your app. Certificate setup remains available without system proxy access.');
+      try { await elevated(commands); } catch (cause) { throw permissionDenied(`macOS requires administrator approval for network proxy changes. Use an administrator account or configure HTTP/HTTPS proxies manually in Network settings. ${cause.message}`); }
     }
   };
   const verifyNetwork = async (target, expected) => {
@@ -146,7 +151,13 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
         if (action === 'simulator-prepare') { await ensureProxyListening(); completed = 'Proxy listener started'; }
         await trustMacCertificate(); completed = `${action === 'simulator-prepare' ? completed + '; ' : ''}Mac user certificate trusted`;
         await run('/usr/bin/xcrun', ['simctl', 'keychain', target, 'add-root-cert', certificatePath]); completed += '; simulator certificate installed';
-        if (action === 'simulator-prepare') await performAction({ action: 'mac-enable-proxy', target: networkTarget });
+        if (action === 'simulator-prepare') {
+          try { await performAction({ action: 'mac-enable-proxy', target: networkTarget }); }
+          catch (error) {
+            if (error.code !== 'PROXY_PERMISSION') throw error;
+            return { message: `${completed}. The system proxy was not changed: ${error.message} Simulator apps follow the Mac's system proxy, so either ask IT to set the HTTP/HTTPS proxy to 127.0.0.1:${proxyPort}, or point the app under test at the Streamglass proxy itself. Then add API domains to the TLS allowlist.`, partial: true, devices: await list() };
+          }
+        }
       } catch (error) { throw new Error(`${completed}. Setup did not finish: ${error.message}`); }
       if (action === 'simulator-certificates') return { message: 'Mac user and simulator certificates installed. System proxy settings are unchanged. Configure the proxy inside your app or ask IT to configure the network proxy, then add API domains to the TLS allowlist.', devices: await list() };
       return { message: 'Simulator capture prepared. Mac monitor stays enabled across app restarts. Add API domains to the TLS allowlist, then reload the simulator app. Existing capture pause is unchanged.', devices: await list() };
