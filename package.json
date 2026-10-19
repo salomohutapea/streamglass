@@ -1,0 +1,81 @@
+{
+  "name": "streamglass",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local HTTP and event-stream inspection workbench",
+  "type": "module",
+  "main": "electron/main.mjs",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "test": "npm run test:shell && npm run test:engine",
+    "audit:js": "npm audit --ignore-scripts",
+    "audit:python": ".venv/bin/python scripts/audit_python.py",
+    "test:frozen-engine": ".venv/bin/python scripts/smoke_engine.py",
+    "dev": "node scripts/dev.mjs",
+    "dev:ui": "vite --config frontend/vite.config.ts",
+    "build:ui": "vite build --config frontend/vite.config.ts",
+    "build:engine": ".venv/bin/python scripts/package_engine.py",
+    "package:mac": "npm run build:release",
+    "test:shell": "node --test tests/scripts.test.mjs tests/json-viewer.test.mjs frontend/src/editor-draft.test.mjs frontend/src/rule-order.test.mjs frontend/src/device-labels.test.mjs tests/devices.test.mjs tests/mcp-server.test.mjs tests/mcp-tools.test.mjs tests/mcp-config.test.mjs tests/applications.test.mjs tests/applications-service.test.mjs frontend/src/applications.test.mjs tests/export-session.test.mjs tests/developer-tools.test.mjs tests/map-local-file.test.mjs frontend/src/traffic-preferences.test.mjs frontend/src/capture-tools.test.mjs frontend/src/replay-body.test.mjs tests/workspaces.test.mjs tests/mcp-lab-tools.test.mjs tests/mcp-daily-tools.test.mjs tests/tools-window.test.mjs frontend/src/daily-tools.test.mjs tests/bump-version.test.mjs",
+    "test:desktop": "node --test --test-concurrency=1 tests/desktop.test.mjs tests/table-desktop.test.mjs tests/workbench-features.test.mjs tests/lab-desktop.test.mjs tests/daily-tools-desktop.test.mjs",
+    "typecheck": "tsc -p frontend/tsconfig.json",
+    "start": "STREAMGLASS_BUILT_UI=1 electron .",
+    "test:engine": ".venv/bin/python -m unittest discover -s backend/tests",
+    "build:icons": "node scripts/build-icons.mjs",
+    "setup": "node scripts/setup.mjs",
+    "bump": "node scripts/bump-version.mjs",
+    "build:release": "node scripts/release.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "lucide-react": "1.57.0",
+    "quickjs-emscripten": "0.32.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "44.8.0",
+    "electron-builder": "26.15.3",
+    "playwright": "1.64.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
+  },
+  "overrides": {
+    "global-agent": "4.1.3"
+  },
+  "build": {
+    "appId": "dev.streamglass.desktop",
+    "productName": "Streamglass",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**",
+      "frontend/dist/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "engine-dist/streamglass-engine",
+        "to": "engine"
+      }
+    ],
+    "asar": true,
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "notarize": true,
+      "icon": "electron/assets/Streamglass.icns"
+    }
+  }
+}

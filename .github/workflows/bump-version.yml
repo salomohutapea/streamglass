@@ -1,0 +1,52 @@
+name: Bump version
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump (or enter an exact x.y.z below)
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      exact:
+        description: Exact version x.y.z (optional, overrides the bump type)
+        type: string
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  bump:
+    name: Open version bump PR
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Bump version files
+        id: bump
+        run: |
+          version=$(node scripts/bump-version.mjs "${{ inputs.exact || inputs.bump }}")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          branch="release/v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add package.json package-lock.json pyproject.toml
+          git commit -m "chore: bump version to ${VERSION}"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore: bump version to ${VERSION}" \
+            --body "Bumps the app version to ${VERSION}. Merging this PR to main builds the macOS release and publishes it on the Releases page."
+          # Pull requests opened with the workflow token do not start CI on their own, so start it explicitly.
+          gh workflow run ci.yml --ref "$branch"

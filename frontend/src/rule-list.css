@@ -1,0 +1,13 @@
+dialog:has(.compact-rule-list){width:640px}
+.compact-rule-list{margin-top:16px;min-width:0}
+.compact-rule-row{display:grid;grid-template-columns:16px minmax(0,1fr) 27px;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.compact-rule-row>input{margin:0;width:14px;height:14px}
+.compact-rule-detail{display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:7px;min-width:0;padding:8px;text-align:left;background:transparent;border:0}
+.compact-rule-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600}
+.compact-rule-target{display:flex;align-items:center;gap:8px;min-width:0}
+.compact-rule-method{flex-shrink:0;min-width:40px;padding:3px 5px;border-radius:4px;background:var(--selection);color:var(--accent);font:600 10px ui-monospace,SFMono-Regular,Menlo,monospace;text-align:center}
+.compact-rule-target code{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;line-height:1.5}
+.compact-rule-stages{display:flex;flex-wrap:wrap;gap:5px}
+.compact-rule-stages>span{padding:2px 6px;border:1px solid var(--line);border-radius:4px;color:var(--muted);font-size:10px;line-height:1.4;overflow-wrap:anywhere}
+.compact-rule-delete{color:var(--muted)}
+.compact-rule-delete:hover{color:var(--danger)}

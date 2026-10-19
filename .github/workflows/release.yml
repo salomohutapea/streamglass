@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  detect:
+    name: Detect version change
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.check.outputs.release }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        env:
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          release=false
+          if git rev-parse -q --verify "refs/tags/v${version}" >/dev/null; then
+            echo "Tag v${version} already exists; nothing to release."
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            release=true
+          elif [ -n "$BEFORE" ] && ! echo "$BEFORE" | grep -qE '^0+$'; then
+            previous=$(git show "${BEFORE}:package.json" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+            if [ "$previous" != "$version" ]; then release=true; fi
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build and publish macOS release
+    needs: detect
+    if: needs.detect.outputs.release == 'true'
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - name: Build unsigned macOS release
+        run: npm run build:release
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect.outputs.version }}
+        run: |
+          folder=$(ls -d release/local/*/ | head -n 1)
+          cd "$folder"
+          shasum -a 256 *.dmg *.zip > SHA256SUMS.txt
+          cat > notes.md <<NOTES
+          Unsigned macOS (Apple Silicon) build of Streamglass ${VERSION}.
+
+          macOS will warn that the app is from an unidentified developer. After installing, either open System Settings > Privacy & Security and click Open Anyway, or run:
+
+              xattr -dr com.apple.quarantine /Applications/Streamglass.app
+          NOTES
+          gh release create "v${VERSION}" *.dmg *.zip SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Streamglass ${VERSION}" --notes-file notes.md --generate-notes

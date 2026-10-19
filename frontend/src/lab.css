@@ -1,0 +1,55 @@
+.lab-dialog{width:min(1060px,calc(100vw - 40px));max-height:92vh}.lab-tabs{overflow:auto;flex-shrink:0;padding:0 18px}.lab-tabs button{white-space:nowrap}.lab-tabs button[aria-pressed=true]{color:var(--accent);border-bottom-color:var(--accent)}.lab-body{display:flex;flex-direction:column;gap:14px;overflow:auto}.lab-body label{display:flex;flex-direction:column;gap:6px;min-width:0}.lab-body select,.lab-body input,.lab-body textarea{width:100%;box-sizing:border-box}.lab-body textarea{min-height:110px;font-family:monospace}.lab-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.lab-grid>*{min-width:0}.lab-body .lab-check{flex-direction:row;align-items:center}.lab-check input{width:auto}.lab-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:12px}.scenario-rule{border:1px solid var(--line);border-radius:6px;padding:14px}.scenario-rule legend{padding:0 6px}.lab-diffs section{padding:12px 0;border-top:1px solid var(--line)}.lab-diffs strong{overflow-wrap:anywhere}.lab-diffs .lab-grid>div:first-child{border-left:1px solid #b66969;padding-left:10px}.lab-diffs .lab-grid>div:last-child{border-left:1px solid #65a887;padding-left:10px}.sse-timeline{padding:12px;border-bottom:1px solid var(--line)}.sse-timeline summary{font-weight:600;cursor:pointer}.sse-timeline dl{display:grid;grid-template-columns:140px minmax(0,1fr);gap:6px}.sse-timeline dd{margin:0;overflow-wrap:anywhere}.timeline-scroll{overflow:auto;max-height:220px}.timeline-scroll table{width:100%;font-size:11px;text-align:left}.timeline-scroll th,.timeline-scroll td{padding:5px 8px;border-bottom:1px solid var(--line)}@media(max-width:700px){.lab-grid{grid-template-columns:1fr}}
+.lab-dialog{height:min(830px,92vh)}
+.tools-window{height:100dvh;display:flex;flex-direction:column;background:var(--panel)}
+.tools-window .lab-window-panel{display:flex;flex-direction:column;width:100%;height:100%;max-height:none;border:0;border-radius:0;min-height:0}
+.tools-window>.connection-error{flex-shrink:0}
+.lab-layout{display:grid;grid-template-columns:155px minmax(0,1fr);min-height:0;overflow:hidden;flex:1}
+.lab-layout .lab-tabs{display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:12px 8px;border-right:1px solid var(--line);overflow:auto}
+.lab-tabs>span{padding:10px 8px 6px;color:var(--muted);font-size:11px;font-weight:600}
+.lab-layout .lab-tabs button{justify-content:flex-start;text-align:left;border:0;padding:8px;border-radius:5px;background:transparent;color:var(--text)}
+.lab-layout .lab-tabs button[aria-pressed=true]{background:var(--selection,#294562);color:var(--text)}
+.daily-tools{display:flex;flex-direction:column;gap:14px;min-width:0}
+.lab-body .traffic-tools,.traffic-tools-body{display:flex;flex-direction:column;gap:14px;min-width:0}
+.lab-body .traffic-tools h3{margin:0}
+.lab-body .traffic-tools fieldset{display:flex;flex-direction:column;gap:12px;border:1px solid var(--line);border-radius:6px;padding:14px;min-width:0}
+.lab-body .traffic-tools label:has(> input[type=checkbox]){flex-direction:row;align-items:center}
+.lab-body .traffic-tools input[type=checkbox]{width:auto}
+.daily-tools h3,.daily-tools h4{margin:0;font-weight:600}
+.daily-tools p{margin:0;line-height:1.5;max-width:75ch}
+.daily-tools h3 .muted,.daily-tools h4 .muted{font-size:11px;font-weight:400}
+.daily-inline{display:flex;align-items:end;flex-wrap:wrap;gap:8px;min-width:0}
+.daily-inline>label{flex:1;min-width:160px}
+.daily-section{display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line);padding-top:18px;margin-top:4px;min-width:0}
+.daily-scroll{overflow:auto;max-height:420px;min-width:0}
+.daily-table{width:100%;table-layout:fixed;border-collapse:collapse;font-variant-numeric:tabular-nums}
+.daily-table th:first-child,.daily-table th:nth-child(3),.daily-table th:nth-child(4),.daily-table th:last-child{width:auto}
+.daily-table th,.daily-table td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere;white-space:normal}
+.daily-table th{font-size:11px;color:var(--muted);font-weight:500}
+.daily-table td button{max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left}
+.daily-table .daily-inline{align-items:center}
+.journey-group{border-top:1px solid var(--line);padding-top:12px}
+.journey-group summary{display:flex;justify-content:space-between;gap:8px;cursor:pointer;overflow-wrap:anywhere}
+.journey-group summary>span{color:var(--muted);font-size:11px;flex-shrink:0}
+.journey-group>p{padding:10px 0}
+.waterfall-table th:first-child{width:45%}
+.waterfall-table th:nth-child(2){width:35%}
+.waterfall-track{position:relative;height:18px;border-bottom:1px solid var(--line);overflow:hidden}
+.waterfall-track span{position:absolute;top:4px;height:9px;min-width:2px;background:var(--accent);border-radius:2px}
+.watch-rule{display:grid;grid-template-columns:1fr 100px 1.5fr auto;gap:8px;align-items:end}
+.assertion-result{font-size:11px;font-weight:600;text-transform:capitalize}
+.assertion-result.fail{color:var(--danger)}
+.assertion-result.pass{color:#8acba4}
+:root[data-theme=light] .assertion-result.pass{color:#246c40}
+.assertion-result.pending,.assertion-result.unknown{color:var(--muted)}
+.saved-view-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.saved-view-row>span{flex:1;overflow-wrap:anywhere}
+.capture-note{white-space:pre-wrap;overflow-wrap:anywhere}
+.traffic-filters .saved-view-chooser{max-width:145px;min-width:95px;margin-left:auto;font-size:11px}
+.traffic tbody tr.row-highlight-blue{--row-highlight:#337ac022}
+.traffic tbody tr.row-highlight-green{--row-highlight:#3caa7622}
+.traffic tbody tr.row-highlight-amber{--row-highlight:#bd922922}
+.traffic tbody tr.row-highlight-red{--row-highlight:#c8595922}
+.traffic tbody tr.row-highlight-purple{--row-highlight:#956bc522}
+.traffic tbody tr[class*="row-highlight-"]:not(.selected){background:var(--row-highlight)}
+.row-note-marker{color:var(--accent);margin-left:6px;font-size:10px}
+@media(max-width:760px){.lab-layout{grid-template-columns:125px minmax(0,1fr)}.watch-rule{grid-template-columns:1fr 1fr}.journey-group summary{flex-wrap:wrap}.daily-table{min-width:460px}}

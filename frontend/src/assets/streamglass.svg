@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#213a56"/><stop offset="1" stop-color="#0b1729"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#d6f3ff" stop-opacity=".19"/><stop offset="1" stop-color="#83b5ff" stop-opacity=".025"/>
+    </linearGradient>
+    <linearGradient id="stream" x1="0" y1="0" x2=".8" y2="1">
+      <stop stop-color="#b8f5ff"/><stop offset=".48" stop-color="#70d6f4"/><stop offset="1" stop-color="#739dff"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="202" fill="url(#surface)"/>
+  <rect x="70" y="70" width="884" height="884" rx="196" fill="none" stroke="#b8dcff" stroke-opacity=".15" stroke-width="4"/>
+  <rect x="282" y="210" width="460" height="604" rx="68" transform="rotate(-12 512 512)" fill="url(#glass)" stroke="#b8e5ff" stroke-opacity=".26" stroke-width="5"/>
+  <path d="M672 345H455c-77 0-113 41-113 93s38 83 110 83h114c76 0 116 37 116 90s-41 94-117 94H355" fill="none" stroke="#071323" stroke-opacity=".3" stroke-width="84" stroke-linecap="round" transform="translate(0 9)"/>
+  <path d="M672 345H455c-77 0-113 41-113 93s38 83 110 83h114c76 0 116 37 116 90s-41 94-117 94H355" fill="none" stroke="url(#stream)" stroke-width="72" stroke-linecap="round"/>
+</svg>
