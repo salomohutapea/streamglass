@@ -33,7 +33,7 @@ c.commit()`,path.join(directory,'captures.sqlite3'),String(proxyPort)],{input:JS
     await panel.getByRole('button',{name:'Slot A'}).click();await panel.getByRole('listbox',{name:'Capture A'}).getByRole('option').filter({hasText:/\/echo(?!\/)/}).nth(0).getByRole('button').click();await panel.getByRole('button',{name:'Slot B'}).click();await panel.getByRole('listbox',{name:'Capture B'}).getByRole('option').filter({hasText:/\/echo(?!\/)/}).nth(1).getByRole('button').click();
     await panel.getByText('2 differences',{exact:true}).waitFor();
     await panel.getByLabel('Ignore fields or paths').fill('id');await panel.getByText('1 differences',{exact:true}).waitFor();
-    await panel.getByRole('button',{name:'Share',exact:true}).click();await panel.getByRole('listbox',{name:'Capture to share'}).getByRole('option').filter({hasText:/\/echo(?!\/)/}).nth(0).getByRole('button').click();
+    await panel.getByRole('button',{name:'Share',exact:true}).click();await panel.getByRole('listbox',{name:'Capture to share'}).getByRole('option').filter({hasText:/\/echo(?!\/)/}).nth(1).getByRole('button').click();
     assert.doesNotMatch(await panel.innerText(),/PRIVATE-TOKEN|PRIVATE-LOG|SECRET-HEADER/);
     const exported=path.join(directory,'redacted.json');await app.evaluate(({dialog},filePath)=>{dialog.showSaveDialog=async()=>({canceled:false,filePath});},exported);
     await panel.getByRole('button',{name:'Export redacted capture'}).click();await panel.getByText('Redacted export prepared.').waitFor();
