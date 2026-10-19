@@ -132,7 +132,7 @@ def apply_message(message, value, request=False, headers_only=False):
 class Service:
     def __init__(self, directory, token, port):
         try:
-            default_proxy_port = int(os.environ.get("STREAMGLASS_PROXY_PORT", "8080"))
+            default_proxy_port = int(os.environ.get("STREAMGLASS_PROXY_PORT", "9090"))
         except ValueError as exc:
             raise ValueError("STREAMGLASS_PROXY_PORT must be a port number") from exc
         if not 1024 <= default_proxy_port <= 65535 or default_proxy_port == port:

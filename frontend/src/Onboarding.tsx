@@ -28,7 +28,7 @@ function Welcome() {
 }
 function Connect() {
   return <div className="ob-card ob-connect"><small>Connect device</small>
-    <div className="ob-device"><Laptop size={20}/><div><div>This Mac</div><small>Wi-Fi · 127.0.0.1:8080</small></div><span className="ob-toggle"><i/></span></div>
+    <div className="ob-device"><Laptop size={20}/><div><div>This Mac</div><small>Wi-Fi · 127.0.0.1:9090</small></div><span className="ob-toggle"><i/></span></div>
     <div className="ob-live"><i/>Capturing</div></div>;
 }
 function Certificate() {
@@ -69,7 +69,7 @@ export default function Onboarding({ onClose }: { onClose: () => void }) {
   const last = step === 4;
   const copy: { title: string; text: ReactNode; note?: string }[] = [
     { title: 'Welcome to Streamglass', text: 'Inspect HTTP, HTTPS, and live Server-Sent Event (SSE) streams from this Mac and your devices. This quick tour takes about a minute, and you can reopen it from the help button in the toolbar.' },
-    { title: 'Connect this Mac', text: 'Open Connect device, pick This Mac, and turn on capture. Streamglass follows Wi-Fi and Ethernet changes and restores your proxy settings when you quit.', note: 'No administrator password? Use Certificate-only setup, then point your app at 127.0.0.1:8080.' },
+    { title: 'Connect this Mac', text: 'Open Connect device, pick This Mac, and turn on capture. Streamglass follows Wi-Fi and Ethernet changes and restores your proxy settings when you quit.', note: 'No administrator password? Use Certificate-only setup, then point your app at 127.0.0.1:9090.' },
     { title: 'Trust the HTTPS certificate', text: 'Click Trust HTTPS certificate, then add the domains you want to decrypt to the TLS allowlist. Only domains you list are inspected.', note: 'macOS may ask for your login password. The certificate is trusted for your user only.' },
     { title: tools[tool][0], text: tools[tool][1], note: 'The inspector is read-only. Breakpoints and scripts open in their own windows.' },
     { title: 'Let your AI agent drive it', text: 'Streamglass runs an MCP server, so tools like Claude Code can search captures, replay requests, and edit rules through the same engine the app uses. Turn it on and copy the connection from Proxy settings.', note: 'Local only: the endpoint listens on 127.0.0.1 and needs a token.' },
