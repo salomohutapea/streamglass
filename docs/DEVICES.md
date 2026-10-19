@@ -30,7 +30,7 @@ For a physical device, enable LAN proxy access, connect to the same network, and
 
 ## Android
 
-Physical Android devices do not require ADB or USB debugging for Wi-Fi proxy setup. Enable LAN access, connect the phone and Mac to the same network, and enter the displayed Mac IP address and port in the phone’s Wi-Fi proxy settings. Open `http://mitm.it` on the phone to download the public CA and install it in Android Settings. Disable the phone’s manually configured Wi-Fi proxy when Streamglass is closed; the Mac cannot undo a manual setting on the phone.
+Physical Android devices do not require ADB or USB debugging for Wi-Fi proxy setup. LAN access is on by default for new profiles (Proxy settings → Allow devices on the local network; profiles that already saved the setting keep their choice). Connect the phone and Mac to the same network, and enter the displayed Mac IP address and port in the phone’s Wi-Fi proxy settings. Open `http://mitm.it` on the phone to download the public CA and install it in Android Settings. Disable the phone’s manually configured Wi-Fi proxy when Streamglass is closed; the Mac cannot undo a manual setting on the phone.
 
 **Optional ADB helpers** is collapsed by default for physical devices. Only these automatic actions require installed Android platform-tools and an authorized USB or wireless debugging connection. Actions accept only connected, authorized serials. Install certificate copies the public certificate to Downloads and opens Security Settings; the user selects Install certificate → CA certificate. The app cannot silently grant CA trust. Enable proxy saves existing global HTTP proxy settings before changing them; Restore uses that snapshot. OEM permissions may prevent settings changes. Restore an ADB-configured proxy before quitting; unresolved snapshots still produce a quit warning.
 
@@ -53,3 +53,7 @@ For an office Mac with no administrator access, expand **Certificate-only setup 
 Streamglass does not require administrator rights to run. Certificate setup targets the current user trust domain and login keychain; organizational policy may still restrict trust changes. macOS system HTTP/HTTPS proxy changes can require administrator approval. Streamglass does not bypass those restrictions or repeatedly show an admin prompt for standard accounts.
 
 Where your organization allows it, apps with independent proxy settings can point to `127.0.0.1` and the Streamglass proxy port without changing the system proxy. For example, [Firefox supports manual proxy settings](https://support.mozilla.org/en-US/kb/connection-settings-firefox). This captures that app only, not all Mac or simulator traffic. For system-wide or simulator capture, ask IT to configure the host proxy when your account cannot do so.
+
+## Local network exposure
+
+Because LAN access is on by default for new profiles, the proxy port listens on all interfaces and any device on the same network can route traffic through it. Turn off **Allow devices on the local network** in Proxy settings on untrusted networks. The management API and MCP server remain loopback-only and token-protected.

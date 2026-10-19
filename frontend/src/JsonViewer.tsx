@@ -13,6 +13,11 @@ export default function JsonViewer({ value, unavailable = false, preserveFormatt
   const containers = useMemo(() => document.isJson ? jsonContainers(document.text) : [], [document]);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [starts, setStarts] = useState([0]);
+  const [copied, setCopied] = useState<number | null>(null);
+  const copyContainer = (range: JsonContainer) => {
+    const text = document.text.slice(range.start, range.end);
+    Promise.resolve(window.streamglass?.copyText ? window.streamglass.copyText(text) : navigator.clipboard.writeText(text)).then(() => { setCopied(range.start); setTimeout(() => setCopied(current => current === range.start ? null : current), 1200); }).catch(() => {});
+  };
   useEffect(() => { setStarts([0]); setCollapsed(new Set()); }, [document]);
   const folded = useMemo(() => foldJson(document.text, containers, collapsed), [document, containers, collapsed]);
   const start = Math.min(starts[starts.length - 1], folded.text.length);
@@ -31,13 +36,13 @@ export default function JsonViewer({ value, unavailable = false, preserveFormatt
   const paginated = page.hasNext || starts.length > 1;
   let position = page.start;
   return <section className="json-viewer" aria-label={document.isJson ? 'JSON body' : 'Body'}>
-    {containers.length > 0 && <div className="json-toolbar"><button type="button" onClick={() => { setCollapsed(new Set()); setStarts([0]); }}>Expand all</button><button type="button" onClick={() => { setCollapsed(new Set(containers.map(range => range.start))); setStarts([0]); }}>Collapse all</button>{onReplace && <span>Use Replace beside an object or array.</span>}</div>}
+    {containers.length > 0 && <div className="json-toolbar"><button type="button" onClick={() => { setCollapsed(new Set()); setStarts([0]); }}>Expand all</button><button type="button" onClick={() => { setCollapsed(new Set(containers.map(range => range.start))); setStarts([0]); }}>Collapse all</button><span>{onReplace ? 'Use Copy or Replace beside an object or array.' : 'Use Copy beside an object or array.'}</span></div>}
     <div className="json-viewer-content">
       {document.isJson && <pre className="json-line-numbers" aria-hidden="true">{lines.map((_, i) => firstLine + i).join('\n')}</pre>}
       <pre className="json-code"><code>{tokens.map((token, i) => {
         const range = visible.get(position);
         position += token.text.length;
-        return <span key={i}>{range && <><button type="button" className="json-fold" aria-label={`${collapsed.has(range.start) ? 'Expand' : 'Collapse'} ${range.kind} at offset ${range.start}`} aria-expanded={!collapsed.has(range.start)} onClick={() => { setCollapsed(previous => { const next = new Set(previous); if (next.has(range.start)) next.delete(range.start); else next.add(range.start); return next; }); setStarts([0]); }}>{collapsed.has(range.start) ? '▸' : '▾'}</button>{onReplace && <button type="button" className="json-replace" disabled={disabled} aria-label={`Replace ${range.kind} at offset ${range.start}`} onClick={() => onReplace(range)}>Replace</button>}</>}{token.kind ? <span className={`json-${token.kind}`}>{token.text}</span> : token.text}</span>;
+        return <span key={i}>{range && <><button type="button" className="json-fold" aria-label={`${collapsed.has(range.start) ? 'Expand' : 'Collapse'} ${range.kind} at offset ${range.start}`} aria-expanded={!collapsed.has(range.start)} onClick={() => { setCollapsed(previous => { const next = new Set(previous); if (next.has(range.start)) next.delete(range.start); else next.add(range.start); return next; }); setStarts([0]); }}>{collapsed.has(range.start) ? '▸' : '▾'}</button><button type="button" className="json-copy" aria-label={`Copy ${range.kind} at offset ${range.start}`} onClick={() => copyContainer(range)}>{copied === range.start ? 'Copied' : 'Copy'}</button>{onReplace && <button type="button" className="json-replace" disabled={disabled} aria-label={`Replace ${range.kind} at offset ${range.start}`} onClick={() => onReplace(range)}>Replace</button>}</>}{token.kind ? <span className={`json-${token.kind}`}>{token.text}</span> : token.text}</span>;
       })}</code></pre>
     </div>
     {paginated && <nav className="json-pagination" aria-label="Body pages">

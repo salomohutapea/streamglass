@@ -60,7 +60,7 @@ class ProxyLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_occupied_port_restores_previous_listener_without_exiting(self):
         previous_port = self.service.settings["proxyPort"]
-        occupied = await asyncio.start_server(lambda reader, writer: writer.close(), "127.0.0.1", 0)
+        occupied = await asyncio.start_server(lambda reader, writer: writer.close(), "0.0.0.0", 0)
         try:
             port = occupied.sockets[0].getsockname()[1]
             error = await self.settings({"proxyPort": port}, status=400)

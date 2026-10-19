@@ -145,7 +145,7 @@ class Service:
         self.db.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, started REAL, payload TEXT)")
         config = dict(self.db.execute("SELECT key,value FROM config"))
-        self.settings = {"capturePaused": False, "proxyEnabled": True, "proxyPort": default_proxy_port, "listenHost": "127.0.0.1", "tlsDomains": []}
+        self.settings = {"capturePaused": False, "proxyEnabled": True, "proxyPort": default_proxy_port, "listenHost": "0.0.0.0", "tlsDomains": []}
         self.settings.update(json.loads(config.get("settings", "{}")))
         self.rules = json.loads(config.get("rules", "[]"))
         self.rules_revision = int(config.get("rulesRevision", "0"))
