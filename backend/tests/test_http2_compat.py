@@ -1,6 +1,7 @@
 """Synthetic HTTP/2 TLS traffic through the real loopback proxy."""
 
 import asyncio
+import contextlib
 import ssl
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -40,7 +41,8 @@ class Http2CompatTests(unittest.IsolatedAsyncioTestCase):
         self.release_events.set()
         for writer in self.h2_clients:
             writer.close()
-            await writer.wait_closed()
+            with contextlib.suppress(ConnectionError, ssl.SSLError):
+                await writer.wait_closed()
         self.h2_server.close()
         await self.h2_server.wait_closed()
         await self.fixture.asyncTearDown(self)
@@ -84,7 +86,8 @@ class Http2CompatTests(unittest.IsolatedAsyncioTestCase):
             pass
         finally:
             writer.close()
-            await writer.wait_closed()
+            with contextlib.suppress(ConnectionError, ssl.SSLError):
+                await writer.wait_closed()
 
     async def open_h2(self, port=None):
         reader, writer = await asyncio.open_connection('127.0.0.1', self.proxy_port)
