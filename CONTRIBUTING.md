@@ -1,5 +1,7 @@
 # Contributing
 
+Contributions come from forks: fork the repository, work on a branch in your fork, and open a pull request against `main`. The `Test` check must pass and a code owner must approve before merging; see the [README](README.md#contributing) for the step-by-step flow. By contributing you agree that your work is released under the [MIT License](LICENSE).
+
 Keep changes focused and preserve the behavior of traffic passing through the proxy. Start with the [development guide](docs/DEVELOPMENT.md), [architecture](docs/ARCHITECTURE.md), and the workflow affected by your change.
 
 ## Proposing a change

@@ -93,3 +93,24 @@ Start with [workflows](docs/WORKFLOWS.md) for capture and breakpoints, [testing 
 The current dependency build targets macOS Apple Silicon; Intel is not qualified because the updated cryptography package no longer provides Intel macOS wheels. Local application attribution is best-effort; remote devices are identified by peer address and may share an address. Apps that ignore system proxies or pin certificates may need app-specific debug configuration. OS and organization policies still apply.
 
 Capture retention, viewers, scripting, and editable bodies are bounded. Streamed bodies may have previews rather than complete retained content; exports identify unavailable data. Streamglass does not recover events that were forwarded without retention. Physical-device workflows, Intel packaging, signed distribution, and long-duration load need qualification on the intended target.
+
+## Contributing
+
+Direct pull requests are not accepted from branches in this repository. Contribute from your own fork:
+
+1. Fork [salomohutapea/streamglass](https://github.com/salomohutapea/streamglass) on GitHub.
+2. Clone your fork and add this repository as `upstream`:
+   ```sh
+   git clone https://github.com/<you>/streamglass.git
+   cd streamglass
+   git remote add upstream https://github.com/salomohutapea/streamglass.git
+   ```
+3. Create a branch from the latest `main` (`git fetch upstream && git checkout -b my-change upstream/main`).
+4. Run `npm run setup`, then make your change. Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [development guide](docs/DEVELOPMENT.md) first. Use synthetic data only, never real captures or credentials.
+5. Check your work with `npm run typecheck` and the tests that cover what you changed (see the test matrix in the development guide).
+6. Push the branch to your fork and open a pull request against `main` here. Describe the problem, the resulting behavior, and which checks you ran.
+7. The `Test` check must pass (a maintainer approves the first run for new contributors), and a code owner must approve the PR before it is merged.
+
+## License
+
+Streamglass is released under the [MIT License](LICENSE). Bundled third-party software keeps its own licenses.

@@ -2,6 +2,7 @@
   "name": "streamglass",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "description": "A local HTTP and event-stream inspection workbench",
   "type": "module",
   "main": "electron/main.mjs",
