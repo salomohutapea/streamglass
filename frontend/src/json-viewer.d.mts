@@ -5,3 +5,6 @@ export type JsonContainer = { start: number; end: number; kind: string };
 export function jsonContainers(text: string): JsonContainer[];
 export function foldJson(text: string, ranges: JsonContainer[], collapsed: Set<number>): { text: string; ranges: (JsonContainer & { displayStart: number })[] };
 export function replaceJsonContainer(text: string, range: JsonContainer, replacement: string): string;
+export function findMatches(text: string, query: string, limit?: number): { start: number; end: number }[];
+export function pageStartsFor(text: string, offset: number): number[];
+export function splitByMatches(token: string, tokenStart: number, matches: { start: number; end: number }[], activeIndex: number): { text: string; match: 'match' | 'active' | null }[];

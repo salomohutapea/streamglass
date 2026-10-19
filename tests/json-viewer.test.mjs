@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { prepareJson, jsonPage, jsonHighlights, jsonContainers, foldJson, replaceJsonContainer } from '../frontend/src/json-viewer.mjs';
+import { prepareJson, jsonPage, jsonHighlights, jsonContainers, foldJson, replaceJsonContainer, findMatches, splitByMatches, pageStartsFor } from '../frontend/src/json-viewer.mjs';
 
 test('pretty JSON preserves exact numeric and string lexemes', () => {
   const source = '{"id":9007199254740993123,"exp":1.00e+40,"nested":[true,null,{"quote":"a\\\"b","line":"\\n","html":"<script>alert(1)</script>"}]}';
@@ -92,4 +92,26 @@ test('folding huge values still produces bounded syntax-highlighted pages', () =
   }
   assert.equal(all, folded.text);
   assert.equal(folded.text[folded.ranges.at(-1).displayStart], '{');
+});
+
+test('search finds case-insensitive, non-overlapping matches and splits tokens around them', () => {
+  const text = '{\n  "Name": "name and NAME"\n}';
+  const matches = findMatches(text, 'name');
+  assert.deepEqual(matches.map(m => text.slice(m.start, m.end)), ['Name', 'name', 'NAME']);
+  assert.deepEqual(findMatches(text, ''), []);
+  assert.equal(findMatches('aaaa', 'aa').length, 2);
+  assert.equal(findMatches('x'.repeat(50), 'x', 10).length, 10);
+  const token = '"name and NAME"';
+  const tokenStart = text.indexOf(token);
+  assert.deepEqual(splitByMatches(token, tokenStart, matches, 1).map(p => [p.text, p.match]), [['"', null], ['name', 'active'], [' and ', null], ['NAME', 'match'], ['"', null]]);
+  assert.deepEqual(splitByMatches('plain', 100, matches, 0).map(p => p.match), [null]);
+});
+
+test('page starts reach the page that contains a match offset', () => {
+  const text = `${'line\n'.repeat(450)}needle\n`;
+  const offset = text.indexOf('needle');
+  const starts = pageStartsFor(text, offset);
+  const last = starts[starts.length - 1];
+  assert.ok(starts.length > 1 && last <= offset && offset < jsonPage(text, last).end);
+  assert.deepEqual(pageStartsFor('short', 2), [0]);
 });

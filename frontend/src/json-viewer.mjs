@@ -108,3 +108,35 @@ export function replaceJsonContainer(text, range, replacement) {
   JSON.parse(replacement); // Validate only; preserve exact numeric/string lexemes below.
   return text.slice(0, range.start) + replacement + text.slice(range.end);
 }
+
+export function findMatches(text, query, limit = 5000) {
+  if (!query) return [];
+  const needle = query.toLowerCase(), haystack = text.toLowerCase();
+  const matches = [];
+  for (let index = haystack.indexOf(needle); index !== -1 && matches.length < limit; index = haystack.indexOf(needle, index + needle.length)) matches.push({ start: index, end: index + needle.length });
+  return matches;
+}
+
+export function pageStartsFor(text, offset) {
+  const starts = [0];
+  let page = jsonPage(text, 0);
+  while (page.end <= offset && page.hasNext) { starts.push(page.end); page = jsonPage(text, page.end); }
+  return starts;
+}
+
+export function splitByMatches(token, tokenStart, matches, activeIndex) {
+  const parts = [];
+  const tokenEnd = tokenStart + token.length;
+  let cursor = tokenStart;
+  for (let i = 0; i < matches.length; i++) {
+    const match = matches[i];
+    if (match.end <= tokenStart) continue;
+    if (match.start >= tokenEnd) break;
+    const from = Math.max(match.start, tokenStart), to = Math.min(match.end, tokenEnd);
+    if (from > cursor) parts.push({ text: token.slice(cursor - tokenStart, from - tokenStart), match: null });
+    parts.push({ text: token.slice(from - tokenStart, to - tokenStart), match: i === activeIndex ? 'active' : 'match' });
+    cursor = to;
+  }
+  if (cursor < tokenEnd) parts.push({ text: token.slice(cursor - tokenStart), match: null });
+  return parts;
+}
