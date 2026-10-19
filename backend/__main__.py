@@ -15,6 +15,7 @@ async def run(args):
     import logging
     logging.basicConfig(level=logging.ERROR)
     service = Service(args.data_dir, args.token, args.port)
+    service.discard_captures()  # captures never outlive a session; this also clears leftovers from a crash
     patch_engine(service.cancel)
     service.http = ClientSession(timeout=ClientTimeout(total=10))
     runner = web.AppRunner(create_app(service), access_log=None)
@@ -49,6 +50,10 @@ async def run(args):
         await asyncio.gather(icon_refresh, assertion_monitor, return_exceptions=True)
         await service.http.close()
         await runner.cleanup()
+        try:
+            service.discard_captures()  # after every flow has stopped writing
+        except Exception:
+            pass
         service.db.close()
 
 

@@ -12,6 +12,7 @@ import uuid
 import zlib
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 from aiohttp import web, ClientSession, ClientTimeout, ClientError
 
@@ -218,17 +219,40 @@ class Service:
         self.db.execute("INSERT OR REPLACE INTO records VALUES (?,?,?)", (record["id"], record["startedAt"], payload))
         self.records[record["id"]] = record
         self.record_sizes[record["id"]] = payload_size
-        total = self.db.execute("SELECT COALESCE(SUM(length(CAST(payload AS BLOB))),0) FROM records").fetchone()[0]
-        candidates = sorted((r for r in self.records.values() if not r.get("pinned")), key=lambda r: r["startedAt"])
-        for oldest in candidates:
-            if len(self.records) <= MAX_RECORDS and total <= 256 * 1024 * 1024:
+        # Captures for TLS-allowlisted domains are never evicted and do not count toward the limits. Pinned captures
+        # are never evicted but still count, as before.
+        allowlist = [re.compile(pattern, re.IGNORECASE) for pattern in self.tls_patterns()]
+        limited = [r for r in self.records.values() if not self.tls_allowlisted(r, allowlist)]
+        evictable = sorted((r for r in limited if not r.get("pinned")), key=lambda r: r["startedAt"])
+        total = sum(self.record_sizes[r["id"]] for r in limited)
+        count = len(limited)
+        for oldest in evictable:
+            if count <= MAX_RECORDS and total <= 256 * 1024 * 1024:
                 break
             size = self.record_sizes.pop(oldest["id"])
             self.db.execute("DELETE FROM records WHERE id=?", (oldest["id"],))
             self.records.pop(oldest["id"], None)
             self.analysis_cache.pop(oldest["id"], None)
             total -= size
+            count -= 1
         self.db.commit()
+        self.changed()
+
+    def tls_allowlisted(self, record, patterns):
+        if record.get("sslInspected"):
+            return True
+        host = urlsplit(record.get("url") or "").netloc or (f"{record.get('host')}:{record.get('port')}" if record.get("host") else "")
+        return bool(host) and any(pattern.match(host) for pattern in patterns)
+
+    def discard_captures(self):
+        """Delete every retained capture; configuration, rules, and saved capture sessions are left alone."""
+        self.db.execute("DELETE FROM records")
+        self.db.commit()
+        self.db.execute("VACUUM")
+        self.records.clear()
+        self.record_sizes.clear()
+        self.analysis_cache.clear()
+        self.assertion_summaries.clear()
         self.changed()
 
     def state(self):
