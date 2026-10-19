@@ -4,6 +4,10 @@
 
 A macOS traffic workbench for HTTP, HTTPS, and server-sent events. See what an app sends, pause a response, edit an event, and let the connection continue.
 
+<p align="center"><img src="docs/images/streamglass.png" alt="Streamglass inspecting a list of requests with a JSON response open in the inspector" width="900"></p>
+
+<p align="center"><sub>Screenshot uses synthetic example data.</sub></p>
+
 Streamglass combines an Electron desktop app, a React inspector, and a bundled mitmproxy engine. Captures and rules are stored on your Mac. The packaged app includes its engine; using it does not require Python, Node.js, or Xcode.
 
 ## How it works
