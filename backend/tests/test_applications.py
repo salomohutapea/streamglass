@@ -100,7 +100,7 @@ class ApplicationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(flow.client_conn.id, self.service.applications)
         url, options = self.calls[0]
         self.assertEqual(url, 'http://127.0.0.1:1234/application')
-        self.assertEqual(options['json'], {'clientHost': '127.0.0.1', 'clientPort': 52123, 'proxyPort': 8080})
+        self.assertEqual(options['json'], {'clientHost': '127.0.0.1', 'clientPort': 52123, 'proxyPort': 9090})
         self.assertEqual(options['headers'], {'Authorization': 'Bearer application-token'})
 
     async def test_connect_and_subsequent_http_share_single_connection_lookup(self):
