@@ -5,13 +5,16 @@ import copy
 import fnmatch
 import re
 
+from .traffic_rules import RULE_KEYS, normalize, validate_rules
+
 MAX_LOCAL_BODY = 32 * 1024 * 1024
 DEFAULT_NETWORK = dict(enabled=False, delayMs=0, downloadKbps=0, uploadKbps=0, hostPattern='*', deviceId='')
 
 
 def validate(value):
-    if not isinstance(value, dict) or set(value) != {'mapLocalRules', 'network'}:
+    if not isinstance(value, dict) or not {'mapLocalRules', 'network'} <= set(value) <= {'mapLocalRules', 'network', *RULE_KEYS}:
         raise ValueError('Expected mapLocalRules and network')
+    value = normalize(copy.deepcopy(value))
     rules, network = value['mapLocalRules'], value['network']
     if not isinstance(rules, list) or len(rules) > 100:
         raise ValueError('Expected at most 100 Map Local rules')
@@ -50,6 +53,7 @@ def validate(value):
         total += len(base64.b64decode(body, validate=True))
         if total > MAX_LOCAL_BODY:
             raise ValueError('Map Local bodies exceed 32 MiB total')
+    validate_rules(value)
     if not isinstance(network, dict) or set(network) != set(DEFAULT_NETWORK):
         raise ValueError('Invalid network profile fields')
     if type(network['enabled']) is not bool:

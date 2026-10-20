@@ -1,0 +1,18 @@
+export type Pair = { name: string; value: string };
+export type Part = { name: string; filename: string; contentType: string; size: number; text?: string; truncated: boolean };
+export type SetCookie = Pair & { domain: string; path: string; expires: string; flags: string[] };
+type Message = { url?: string; headers?: [string, string][]; body?: string; bodyBase64?: string } | undefined | null;
+export function headerValues(headers: unknown, name: string): string[];
+export function headerValue(headers: unknown, name: string): string | undefined;
+export function mediaType(contentType: unknown): string;
+export function decodeComponent(text: string): string;
+export function parseUrlEncoded(text: string | undefined): Pair[];
+export function parseQuery(url: string | undefined): Pair[];
+export function parseCookies(header: string | undefined): Pair[];
+export function parseSetCookie(values: string | string[] | undefined): SetCookie[];
+export function base64ToBytes(base64: string): Uint8Array;
+export function multipartBoundary(contentType: unknown): string;
+export function parseMultipart(contentType: unknown, bodyBase64: string | undefined, limit?: number): Part[];
+export function formatSize(bytes: number | null | undefined): string;
+export function imageDataUrl(headers: unknown, bodyBase64: string | undefined): string;
+export function requestStructure(request: Message): { query: Pair[]; cookies: Pair[]; form: Pair[]; parts: Part[] };

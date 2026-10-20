@@ -1,0 +1,34 @@
+.connect-steps{display:flex;gap:6px;list-style:none;margin:0 0 14px;padding:0}
+.connect-steps li{display:flex;align-items:center;gap:6px;flex:1;font-size:11px;color:var(--muted);padding:6px 8px;border-bottom:2px solid var(--line)}
+.connect-steps li span{display:grid;place-items:center;width:16px;height:16px;border-radius:50%;border:1px solid var(--line);font-size:10px}
+.connect-steps li.current{color:var(--text);border-bottom-color:var(--accent)}.connect-steps li.current span{background:var(--accent);border-color:var(--accent);color:#fff}
+.connect-steps li.done{color:var(--text)}.connect-steps li.done span{border-color:var(--accent);color:var(--accent)}
+.connect-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.connect-card{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:14px;text-align:left;height:auto;border:1px solid var(--line);border-radius:8px;background:var(--input)}
+.connect-card strong{font-size:12px}.connect-card small{color:var(--muted);font-size:10px}
+.connect-card.selected{border-color:var(--accent);background:var(--selection)}
+.connect-body h3{margin:0;font-size:13px}
+.connect-qr{display:flex;gap:16px;align-items:center;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--input)}
+.connect-qr .qr-code{width:148px;height:148px;flex:none;border-radius:6px}.connect-qr p{margin:4px 0 10px}
+.connect-wait{display:flex;flex-direction:column;align-items:center;gap:8px;padding:36px 16px;text-align:center}.connect-wait p{max-width:380px;margin:0}
+.connect-wait .spin{animation:connect-spin 1s linear infinite;color:var(--accent)}
+.connect-ok{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:var(--accent);color:#fff}
+.connect-nav{position:sticky;bottom:-20px;z-index:2;display:flex;justify-content:space-between;align-items:center;gap:8px;margin:18px -20px -20px;padding:12px 20px;background:var(--panel);border-top:1px solid var(--line)}.connect-nav>div{display:flex;gap:8px}
+@keyframes connect-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.connect-wait .spin{animation:none}}
+@media(max-width:480px){.connect-qr{flex-direction:column;align-items:flex-start}}
+
+.connect-reverse { display: grid; gap: 8px; margin-top: 12px; padding: 12px; border: 1px solid var(--border, rgba(128,128,128,.3)); border-radius: 8px; }
+.connect-reverse h4 { margin: 0; font-size: 13px; }
+.connect-qr code { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
+
+.connect-steps li{padding:0}
+.connect-steps li button{display:flex;align-items:center;gap:6px;width:100%;padding:6px 8px;border:0;border-radius:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.connect-steps li button:hover{color:var(--text)}
+.optional-adb{display:flex;flex-direction:column;gap:10px}
+.optional-adb[open]>summary{margin-bottom:8px}
+.optional-adb>p{margin:0 0 10px}
+.optional-adb>label{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.optional-adb .setup-actions{display:flex;flex-wrap:wrap;gap:8px}
+.connect-body details>p{margin:8px 0 10px}
+.connect-body details>button,.connect-body details>.setup-actions{margin-top:4px}

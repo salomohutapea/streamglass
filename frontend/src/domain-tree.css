@@ -1,0 +1,43 @@
+.domain-tree{display:flex;flex-direction:column;gap:2px;padding:0 6px 6px}
+.domain-tree[hidden]{display:none}
+.domain-rail-button{display:none}
+:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) .domain-rail-button{display:flex}
+:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) .domain-tree{display:none}
+.domain-search{display:flex;align-items:center;gap:5px;margin:2px 0 4px;padding:0 7px;height:24px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--muted)}
+.domain-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);font:inherit}
+.domain-search:focus-within{border-color:var(--accent,#5b8def)}
+.domain-row{position:relative;display:flex;align-items:center;gap:2px;min-height:24px;border-radius:6px;padding-right:2px}
+.domain-row:hover{background:var(--hover)}
+.domain-row.selected{background:color-mix(in srgb,var(--accent,#5b8def) 24%,transparent)}
+.domain-row button{border:0;background:transparent;color:inherit;font:inherit;cursor:pointer}
+.domain-twisty{display:grid;place-items:center;width:16px;height:20px;padding:0;color:var(--muted)}
+.domain-twisty:disabled{visibility:hidden}
+.domain-twisty svg{width:11px;height:11px;transition:transform .12s}
+.domain-twisty svg.open{transform:rotate(90deg)}
+.domain-label{display:flex;flex:1;min-width:0;align-items:center;gap:5px;padding:2px 4px;text-align:left}
+.domain-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.domain-count{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.domain-lock{flex:none;color:var(--muted)}
+.domain-lock.on{color:var(--green,#4cc38a)}
+.domain-actions{display:none;gap:1px;flex:none}
+.domain-row:hover .domain-row:hover .domain-actions,.domain-row:focus-within .domain-actions,.domain-row.selected .domain-actions{display:flex}
+.domain-row:hover .domain-count,.domain-row:focus-within .domain-count{display:none}
+.domain-actions button{display:grid;place-items:center;width:20px;height:20px;padding:0;border-radius:5px;color:var(--muted)}
+.domain-actions button:hover:not(:disabled){background:var(--raised);color:var(--text)}
+.domain-actions button:disabled{opacity:.5;cursor:default}
+.domain-more{margin:0;padding:2px 0;color:var(--muted);font-size:11px}
+.domain-hidden{margin-top:6px;padding-top:6px;border-top:1px solid var(--line)}
+.domain-hidden-title{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:11px;padding:0 4px}
+.domain-hidden-title button,.domain-hidden-row button{border:0;background:transparent;color:var(--muted);font:inherit;cursor:pointer}
+.domain-hidden-title button:hover,.domain-hidden-row button:hover{color:var(--text)}
+.domain-hidden-row{display:flex;justify-content:space-between;align-items:center;gap:4px;padding:1px 4px;color:var(--muted)}
+.domain-hidden-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.domain-menu{position:fixed;z-index:60;min-width:180px;padding:4px;border:1px solid var(--line);border-radius:8px;background:var(--raised);box-shadow:0 8px 30px #0006}
+.domain-menu button{display:flex;align-items:center;justify-content:flex-start;gap:8px;width:100%;padding:5px 8px;border:0;border-radius:5px;background:transparent;color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.domain-menu button:hover:not(:disabled){background:var(--hover)}
+.domain-menu button:disabled{opacity:.5;cursor:default}
+.domain-chip-row{display:flex;align-items:center;gap:6px;padding:5px 10px;border-bottom:1px solid var(--line)}
+.domain-chip{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:2px 4px 2px 8px;border-radius:999px;background:color-mix(in srgb,var(--accent,#5b8def) 24%,transparent);font-size:11px}
+.domain-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.domain-chip button{display:grid;place-items:center;width:16px;height:16px;padding:0;border:0;border-radius:50%;background:transparent;color:inherit;cursor:pointer}
+.domain-chip button:hover{background:var(--hover)}

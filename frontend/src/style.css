@@ -169,3 +169,18 @@ dialog[open]::backdrop{animation:backdrop-in .2s ease}
 .toast>svg{flex-shrink:0;margin-top:2px;color:var(--accent)}.toast>span{flex:1}.toast .icon-button{flex-shrink:0}
 @keyframes toast-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.toast{animation:none}}
+
+.settings-layout{display:grid;grid-template-columns:120px minmax(0,1fr);gap:18px}.settings-nav{display:flex;flex-direction:column;gap:2px}.settings-nav button{justify-content:flex-start;border:0;background:transparent;color:var(--muted)}.settings-nav button[aria-pressed=true]{background:var(--selection);color:var(--text)}.settings-pane [hidden]{display:none}.settings-pane h3{margin:0}.settings-link{align-self:flex-start;border:0;background:transparent;color:var(--accent);padding:0}
+
+/* Traffic table: multi-select, bulk bar, toast action, spinners */
+.traffic tbody tr{user-select:none;scroll-margin-top:32px;scroll-margin-bottom:8px}
+.bulk-bar{display:flex;align-items:center;gap:6px;min-height:30px;padding:3px 10px;border-bottom:1px solid var(--line);background:var(--selection);font-size:11px}
+.bulk-bar strong{font-weight:600;margin-right:6px}
+.bulk-bar button{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;font-size:11px}
+.bulk-bar button.danger{color:#ff7b7b}
+.toast-action{flex-shrink:0;border:0;background:transparent;color:var(--accent);font-weight:600;padding:0 4px;cursor:pointer}
+.spin{animation:sg-spin .8s linear infinite}
+@keyframes sg-spin{to{transform:rotate(360deg)}}
+.search-spinner{flex-shrink:0;color:var(--muted)}
+.tools-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:60vh;color:var(--muted)}
+@media(prefers-reduced-motion:reduce){.spin{animation-duration:2.4s}}

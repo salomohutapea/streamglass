@@ -12,7 +12,7 @@ export function validateMenuState(input) {
 
 export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getToolsOwner, openAbout }) {
   const states = new WeakMap(), detachedWindows = new WeakSet(), editorWindows = new WeakSet(), toolsWindows = new WeakSet();
-  const isToolCommand = id => id === 'map-local' || id === 'network-profile' || id.startsWith('lab-') || id.startsWith('daily-');
+  const isToolCommand = id => id === 'map-local' || id === 'map-remote' || id === 'rewrite-rules' || id === 'block-rules' || id === 'network-profile' || id.startsWith('lab-') || id.startsWith('daily-');
   const focused = () => {
     const win = BrowserWindow.getFocusedWindow();
     return win && windows.has(win) && !win.isDestroyed() ? win : null;
@@ -78,23 +78,25 @@ export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getTo
       command('scripts', 'JavaScript Rules…'), command('script-new', 'New JavaScript Rule from Selected Request…'),
     ] },
     { label: 'Tools', submenu: [
-      command('map-local', 'Map Local…'), command('network-profile', 'Network Conditioner…'), separator,
+      command('map-local', 'Map Local…'), command('map-remote', 'Map Remote…'), command('rewrite-rules', 'Rewrite…'), command('block-rules', 'Block…'), command('network-profile', 'Network Conditioner…'), separator,
       command('daily-journeys', 'Search Journeys…'), command('daily-watches', 'JSONPath Watches…'),
       command('daily-assertions', 'Capture Assertions…'), command('daily-repeat', 'Repeated Replay…'),
       command('daily-views', 'Saved Views and Notes…'), separator,
       command('lab-compare', 'Compare Captures…'), command('lab-replay', 'Edit and Resend…'),
       command('lab-scenarios', 'Test Scenarios…'), command('lab-fixture', 'Save Capture as Mock…'),
       command('lab-share', 'Redacted Export…'), separator,
-      command('lab-workspaces', 'Configuration Workspaces…'), command('lab-codecs', 'Body Codecs…'),
+      command('lab-workspaces', 'Configuration Workspaces…'), command('lab-codecs', 'Body Codecs…'), command('lab-mcp', 'Agent (MCP) Setup…'),
     ] },
     { label: 'Certificate / Setup', submenu: setupCommands },
     { label: 'View', submenu: [
       command('inspector-right', 'Inspector on Right'), command('inspector-below', 'Inspector Below'), separator,
       command('view-all', 'All Requests', undefined, 'checkbox'), command('view-sse', 'SSE Requests', undefined, 'checkbox'), separator,
-      command('focus-search', 'Find in Captured Traffic…', 'CmdOrCtrl+F'), separator,
+      command('focus-search', 'Find in Captured Traffic…', 'CmdOrCtrl+F'),
+      command('command-palette', 'Command Palette…', 'CmdOrCtrl+K'), separator,
       command('theme-light', 'Light Appearance', undefined, 'checkbox'), command('theme-dark', 'Dark Appearance', undefined, 'checkbox'), separator,
       { role: 'togglefullscreen' },
     ] },
+    { role: 'help', submenu: [command('shortcut-sheet', 'Keyboard Shortcuts', 'CmdOrCtrl+/')] },
     { role: 'windowMenu', submenu: [{ role: 'minimize' }, { role: 'zoom' }, separator, { role: 'front' }] },
   ]);
   function sync() {
@@ -110,7 +112,7 @@ export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getTo
       if (checked !== undefined) item.checked = checked;
       if (label) item.label = label;
     };
-    for (const id of ['settings', 'connect-device', 'breakpoints', 'scripts', 'map-local', 'network-profile', ...platforms.map(([platform]) => `setup-${platform}`)]) set(id, ready);
+    for (const id of ['settings', 'connect-device', 'breakpoints', 'scripts', 'map-local', 'map-remote', 'rewrite-rules', 'block-rules', 'network-profile', ...platforms.map(([platform]) => `setup-${platform}`)]) set(id, ready);
     set('capture-toggle', ready, undefined, state?.proxyRunning === false ? 'Start Capture and Rules' : state?.capturePaused ? 'Resume Capture and Rules' : 'Pause Capture and Rules');
     set('proxy-toggle', ready, undefined, state?.proxyRunning === false ? 'Start Proxy' : 'Stop Proxy');
     set('clear-selected', selected);
@@ -118,7 +120,7 @@ export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getTo
     set('clear-all', ready && state.hasRecords);
     set('export-all', ready && state.hasRecords);
     for (const id of ['daily-sessions', 'daily-journeys', 'daily-watches', 'daily-assertions', 'daily-repeat', 'daily-views']) set(id, ready);
-    for (const id of ['lab-replay', 'lab-scenarios', 'lab-workspaces', 'lab-codecs']) set(id, ready);
+    for (const id of ['lab-replay', 'lab-scenarios', 'lab-workspaces', 'lab-codecs', 'lab-mcp']) set(id, ready);
     set('lab-compare', ready && state.hasRecords);
     set('lab-fixture', inspectable && state.hasResponse);
     set('lab-share', inspectable);
@@ -129,6 +131,7 @@ export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getTo
     set('detach-inspector', selected && !detachedWindows.has(win));
     set('view-all', library, state?.kind === 'all'); set('view-sse', library, state?.kind === 'sse');
     set('focus-search', library);
+    set('command-palette', ready); set('shortcut-sheet', ready);
     set('inspector-right', ready && library); set('inspector-below', ready && library);
     set('theme-light', active, state?.theme === 'light'); set('theme-dark', active, state?.theme === 'dark');
   }

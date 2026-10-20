@@ -6,6 +6,7 @@
 | --- | --- |
 | Favorite / pin | Persistent per-capture pins, row/context-menu actions, Pinned library, protection from automatic eviction within the capture budget |
 | Map Local | Ordered method/wildcard rules with imported file snapshots, status, duplicate-preserving header pairs, enable/disable and reorder controls |
+| Map Remote, Rewrite, Block | Ordered method/wildcard lists (Block, Map Local, Map Remote, request Rewrite, upstream, response Rewrite); per-rule header overrides for staging/production credentials, group labels, applied-rule notes on captures |
 | Inspector placement | Right/below modes, persisted sizes and placement, native View menu actions |
 | Platform setup menus | Certificate / Setup entries for This Mac, iOS Simulator, iOS Device, Android Emulator and Android Device |
 | Network conditions | Presets/custom request latency and per-flow upload/download rates, host/device scope, asynchronous forwarding and pause bypass |

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronRight, Search, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 
 type Rule = {id:string;name:string;enabled:boolean;pattern:string;method:string;statusCode:number;headers:[string,string][];bodyBase64:string;fileName?:string};
-type Settings = {mapLocalRules:Rule[];network:{enabled:boolean;delayMs:number;downloadKbps:number;uploadKbps:number;hostPattern:string;deviceId:string}};
+type Settings = {mapRemoteRules?:unknown[];rewriteRules?:unknown[];blockRules?:unknown[];mapLocalRules:Rule[];network:{enabled:boolean;delayMs:number;downloadKbps:number;uploadKbps:number;hostPattern:string;deviceId:string}};
 type Props = {api:(path:string,method?:string,body?:any)=>Promise<any>;onChanged:()=>Promise<void>;section:'map-local'|'network';active:boolean};
 const PRESETS=[{id:'offline',label:'Offline',delayMs:30000,downloadKbps:1,uploadKbps:1},{id:'2g',label:'2G',delayMs:300,downloadKbps:50,uploadKbps:20},{id:'slow-3g',label:'Slow 3G',delayMs:400,downloadKbps:400,uploadKbps:100},{id:'fast-3g',label:'Fast 3G',delayMs:150,downloadKbps:1600,uploadKbps:750},{id:'4g',label:'4G/LTE',delayMs:50,downloadKbps:12000,uploadKbps:5000},{id:'wifi',label:'Wi-Fi',delayMs:10,downloadKbps:30000,uploadKbps:15000},{id:'none',label:'No limit',delayMs:0,downloadKbps:0,uploadKbps:0}];
 const freshRule = ():Rule => ({id:crypto.randomUUID(),name:'Local response',enabled:true,pattern:'*',method:'*',statusCode:200,headers:[],bodyBase64:''});
@@ -20,6 +20,7 @@ export default function TrafficTools({api,onChanged,section:tab,active}:Props) {
       if(JSON.stringify(value[section])===original){Object.assign(value,{[section]:latest.config[section]});}
       else if(JSON.stringify(latest.config[section])!==original){throw new Error(`${section==='network'?'Network profile':'Map Local rules'} changed in another window or MCP session. Close and reopen Tools before saving.`);}
     }
+    for(const key of ['mapRemoteRules','rewriteRules','blockRules'] as const)Object.assign(value,{[key]:(latest.config as any)[key]??[]});
     const saved=await api('/api/traffic-tools','PUT',{revision:latest.revision,config:value});baseline.current=saved.config;setSettings(saved.config);setHeaders({});await onChanged();}catch(e:any){setError(e.message);}finally{setBusy(false);}}
   async function pick(){setError('');try{const file=await window.streamglass?.pickMapLocalFile();if(file)update(file);}catch(e:any){setError(e.message);}}
   function move(index:number,amount:number){setSettings(value=>{if(!value)return value;const rules=[...value.mapLocalRules];const target=index+amount;if(target<0||target>=rules.length)return value;[rules[index],rules[target]]=[rules[target],rules[index]];return{...value,mapLocalRules:rules};});}

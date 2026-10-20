@@ -228,3 +228,32 @@ test('MCP traffic tool changes report a concurrent desktop edit without overwrit
   assert.match(result.value, /HTTP 409: revision_conflict/);
   assert.equal((await c.call('get_traffic_tools')).value.network.enabled, false);
 });
+
+test('Map Remote, Rewrite and Block tools share the revisioned traffic configuration and group toggles', async t => {
+  const f = await fixture(t), c = f.client();
+  const common = (id, group) => ({ id, name: id, enabled: true, pattern: 'https://api.example.com/*', method: '*', ...(group ? { group } : {}) });
+  const remote = { ...common('remote', 'Staging'), scheme: 'https', host: 'staging.example.com', port: 0, pathFrom: '/v1', pathTo: '/v2', keepHost: false,
+    headerOps: [{ op: 'set', name: 'Authorization', value: 'Bearer staging-token' }, { op: 'remove', name: 'Cookie' }] };
+  const rewrite = { ...common('rewrite', 'Staging'), phase: 'response', headerOps: [], statusCode: 503, bodyFind: 'a', bodyReplace: 'b' };
+  const block = { ...common('block'), action: 'respond', statusCode: 451, body: 'Blocked' };
+  assert.equal((await c.call('upsert_map_remote_rule', { rule: remote })).value.saved, true);
+  assert.equal((await c.call('upsert_rewrite_rule', { rule: rewrite })).value.saved, true);
+  assert.equal((await c.call('upsert_block_rule', { rule: block })).value.saved, true);
+  assert.equal(c.tools.get('upsert_block_rule').config.annotations.destructiveHint, true);
+  assert.equal(c.tools.get('list_block_rules').config.annotations.readOnlyHint, true);
+  const listed = (await c.call('list_map_remote_rules')).value;
+  assert.equal(listed.total, 1);
+  assert.equal(listed.rules[0].headerOps, undefined);
+  assert.equal(listed.rules[0].headerOpsCount, 2);
+  assert.equal(JSON.parse((await c.call('get_map_remote_rule', { ruleId: 'remote' })).value.text).headerOps[0].value, 'Bearer staging-token');
+  assert.equal((await c.call('list_rewrite_rules', { group: 'Other' })).value.total, 0);
+  const toggled = (await c.call('set_traffic_rule_group_enabled', { group: 'Staging', enabled: false })).value;
+  assert.equal(toggled.changed, 2);
+  const config = f.requests.at(-1).body.config;
+  assert.deepEqual([config.mapRemoteRules[0].enabled, config.rewriteRules[0].enabled, config.blockRules[0].enabled], [false, false, true]);
+  assert.equal((await c.call('set_block_rule_enabled', { ruleId: 'block', enabled: false })).value.enabled, false);
+  assert.equal((await c.call('reorder_block_rules', { ruleIds: ['missing'] })).isError, true);
+  assert.equal((await c.call('delete_rewrite_rule', { ruleId: 'missing' })).isError, true);
+  assert.equal((await c.call('delete_rewrite_rule', { ruleId: 'rewrite' })).value.deleted, 'rewrite');
+  assert.equal((await c.call('list_rewrite_rules')).value.total, 0);
+});

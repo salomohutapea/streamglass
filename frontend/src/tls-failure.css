@@ -1,0 +1,6 @@
+.tls-failure-badge{color:var(--q-warn,#b7791f);font-weight:600;font-size:11px}
+.tls-failure-callout{margin:0 0 12px;padding:10px 12px;border:1px solid var(--q-warn,#b7791f);border-radius:8px;background:color-mix(in srgb,var(--q-warn,#b7791f) 10%,transparent)}
+.tls-failure-callout h3{display:flex;align-items:center;gap:6px;margin:0 0 6px;font-size:13px}
+.tls-failure-callout p,.tls-failure-callout li{font-size:12px;line-height:1.45}
+.tls-failure-callout ul{margin:6px 0;padding-left:18px}
+.tls-failure-callout code{overflow-wrap:anywhere}

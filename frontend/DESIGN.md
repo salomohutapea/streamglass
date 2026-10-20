@@ -8,7 +8,7 @@ Toolbar 46px, pane toolbars 38px, sidebar 48px rail (expanding to 216px on hover
 
 Validation: TypeScript and production UI build passed. Actual Electron smoke passed with source and packaged engines, including settings roundtrip, rules, breakpoint editing, and detached inspector. Physical-device setup and exhaustive visual/accessibility checks remain unverified.
 
-Scripts use independent editable wildcard rules with method and stage selectors. Proxy settings expose the listen port and explicit local-network access. Paused body edits preserve the original byte representation when text is untouched. Failed saves keep their editor open with an inline error.
+Scripts use independent editable wildcard rules with method and stage selectors. Settings is split into Proxy (listen port, local-network access), HTTPS / TLS and Appearance sections; agent (MCP) setup lives in Tools → Agent (MCP). Paused body edits preserve the original byte representation when text is untouched. Failed saves keep their editor open with an inline error.
 
 ## Visual design
 
@@ -21,3 +21,15 @@ Every window (main, detached inspector, rules editors, Tools, About) uses a hidd
 ## Sidebar and theme motion
 
 The sidebar rail expands on hover or focus with an animated width change, and a pin button at its top keeps it expanded (`streamglass.sidebar.pinned` in local storage, `data-sidebar-pinned` on the root). Switching light/dark adds `.theme-transition` to the root for 400 ms so colors cross-fade. Both honor `prefers-reduced-motion`.
+
+## Keyboard and navigation
+
+⌘K opens the command palette (every tool, rule window, setting, device and saved view). ⌘/ shows the shortcut sheet. In the traffic table, ↑/↓, Home and End move the selection, ⌘-click and ⇧-click multi-select, ⌘A selects all visible rows, ⌫ deletes with a 5-second Undo toast, and ⌘C copies the selected request as cURL. Esc in the search clears it and any extra conditions.
+
+## Connect Device
+
+Connect Device is a four-step flow: choose a platform, proxy details (with a QR summary for physical devices and emulators), certificate trust, then a live "waiting for the first request" check.
+
+## Domains
+
+The sidebar Domains section groups captured records by host, then by up to two leading path segments, as a collapsible tree with counts (hosts sorted by count, a search box above 8 hosts, at most 40 paths per node). Encrypted CONNECT tunnels count under their host and show a lock; the lock turns green when SSL inspection is enabled. Clicking a host or path sets a single domain filter that composes with the search, conditions, library, device and application filters, and appears as a removable "Domain:" chip above the table. Hover or right-click a host for Focus, Hide, Enable SSL inspection (reuses `enableInspection`) and Copy host. Hidden hosts are excluded from the table, persisted in local storage (`streamglass.domains.hidden`, guarded by try/catch) and listed in a "Hidden domains" footer with restore. The collapsed 48px rail shows only a globe button. Pure grouping and matching live in `domain-tree.mjs`.

@@ -1,0 +1,9 @@
+.timing-section .waterfall{position:relative;display:flex;height:10px;border-radius:4px;overflow:hidden;background:var(--input);margin-bottom:10px}
+.timing-section .waterfall i{display:block;height:100%;min-width:2px}
+.timing-section .seg-connectMs{background:#8f8cff}.timing-section .seg-tlsMs{background:#c58cf0}.timing-section .seg-requestMs{background:#6fb7a8}
+.timing-section .seg-serverMs{background:var(--accent)}.timing-section .seg-downloadMs{background:#76bd8b}.timing-section .seg-pausedMs{background:#d9a441}
+.timing-section dl{grid-template-columns:110px minmax(0,1fr)}
+.timing-section dt i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px}
+.event-gap{font:10px ui-monospace,monospace;color:var(--muted);font-variant-numeric:tabular-nums}
+.event-gap.long{color:#d9a441;font-weight:600}
+.event-gap.long::before{content:"\25B2 ";font-size:8px}

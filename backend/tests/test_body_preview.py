@@ -64,3 +64,30 @@ class BoundedBodyTests(unittest.TestCase):
             self.assertEqual(value["bodyBase64"], "")
             self.assertLessEqual(len(value["bodyPreview"]), 65536)
             self.assertEqual(len(response.raw_content), 100000)
+
+
+class BodySizeTests(unittest.TestCase):
+    def test_sizes_report_decoded_and_encoded_bytes(self):
+        raw = gzip.compress(b"y" * 5000)
+        response = http.Response.make(200, raw, {"content-encoding": "gzip"})
+        response.raw_content = raw
+        value = message_value(response)
+        self.assertEqual(value["size"], 5000)
+        self.assertEqual(value["encodedSize"], len(raw))
+        plain = http.Response.make(200, b"abc", {})
+        value = message_value(plain)
+        self.assertEqual((value["size"], value["encodedSize"]), (3, 3))
+
+    def test_unknown_decoded_size_when_over_limit(self):
+        raw = gzip.compress(b"x" * 100000)
+        response = http.Response.make(200, raw, {"content-encoding": "gzip"})
+        response.raw_content = raw
+        with patch("backend.service.MAX_BODY", 1024):
+            value = message_value(response)
+        self.assertIsNone(value["size"])
+        self.assertEqual(value["encodedSize"], len(raw))
+
+    def test_images_keep_base64_within_limit(self):
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+        response = http.Response.make(200, png, {"content-type": "image/png"})
+        self.assertEqual(message_value(response)["bodyBase64"], __import__("base64").b64encode(png).decode())

@@ -131,7 +131,7 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
     return { simulatorNotice, simulators, android, networkServices, activeNetworkId, networkNotice, adbAvailable: Boolean(adb), simulatorToolsAvailable: simText !== null, savedProxyTargets: Object.keys(state), certificatePath, proxyPort, monitorTarget: intent?.enabled ? intent.override || activeNetworkId : null, monitorEnabled: Boolean(intent?.enabled), monitorOverride: intent?.override ?? null, monitorError };
   }
   let pending = Promise.resolve();
-  async function performAction({ action, target, networkTarget, restoring = false, networkOnly = false } = {}) {
+  async function performAction({ action, target, networkTarget, restoring = false, networkOnly = false, metro = false } = {}) {
     if (['mac-trust-ca', 'simulator-install-ca', 'simulator-prepare', 'simulator-certificates', 'android-install-ca'].includes(action)) {
       const certificate = await readFile(certificatePath, 'utf8');
       if (!certificate.includes('-----BEGIN CERTIFICATE-----') || certificate.includes('PRIVATE KEY')) throw new Error('A public PEM certificate is required');
@@ -170,6 +170,19 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
       if (devices.simulators.find(item => item.id === target).state !== 'Booted') throw new Error('Boot the selected simulator first');
       await run('/usr/bin/xcrun', ['simctl', 'keychain', target, 'add-root-cert', certificatePath]);
       return { message: `Certificate installed in ${devices.simulators.find(item => item.id === target).name}. Enable Mac capture on the active network and add the intended domains to the TLS allowlist, then reload the simulator app or page.`, devices: await list() };
+    } else if (['android-reverse', 'android-reverse-remove'].includes(action)) {
+      requireTarget(devices.android);
+      const adb = await adbPath();
+      if (!adb) throw new Error('adb unavailable');
+      // Ports are fixed integers (the proxy port and Metro's default); nothing from the caller reaches the command line except the validated serial.
+      const ports = [proxyPort, ...(metro === true ? [8081] : [])];
+      for (const port of [...new Set(ports)]) {
+        if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid port');
+        try { await run(adb, action === 'android-reverse' ? ['-s', target, 'reverse', `tcp:${port}`, `tcp:${port}`] : ['-s', target, 'reverse', '--remove', `tcp:${port}`]); }
+        catch (error) { if (action === 'android-reverse' || !/not found|no such reverse/i.test(`${error.message} ${error.stderr ?? ''}`)) throw error; }
+      }
+      const portList = [...new Set(ports)].join(' and ');
+      return { message: action === 'android-reverse' ? `adb reverse active for port ${portList}. Set the device proxy to 127.0.0.1:${proxyPort}; the app reaches this Mac through the USB tunnel. Reversals end when the device disconnects or adb restarts.` : `adb reverse removed for port ${portList}.`, devices: await list() };
     } else if (['android-install-ca', 'android-enable-proxy', 'android-restore-proxy'].includes(action)) {
       requireTarget(devices.android);
       const adb = await adbPath();

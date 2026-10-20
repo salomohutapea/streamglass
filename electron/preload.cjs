@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   exportAllCaptures: () => ipcRenderer.invoke('export-all-captures'),
   sessionFile: (input) => ipcRenderer.invoke('session-file', input),
   listDevices: (options) => ipcRenderer.invoke('list-devices', options),
+  setupSite: (input) => ipcRenderer.invoke('setup-site', input),
   deviceAction: (action) => ipcRenderer.invoke('device-action', action),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   getUpdate: (force) => ipcRenderer.invoke('update-status', force),

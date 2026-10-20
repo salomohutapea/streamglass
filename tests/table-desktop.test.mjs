@@ -407,9 +407,11 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await openSidebar(page);
     await page.getByRole('button', { name: 'Connect device', exact: true }).click();
     const setup = page.getByRole('dialog');
+    await setup.getByRole('button', { name: 'Next', exact: true }).click();
     const proxyAddress = setup.getByRole('region', { name: 'HTTP proxy address', exact: true });
     assert.equal(await proxyAddress.getByRole('textbox', { name: 'Proxy IP address', exact: true }).inputValue(), '127.0.0.1');
-    await setup.getByRole('combobox', { name: 'Platform', exact: true }).selectOption('iosDevice');
+    await setup.getByRole('button', { name: 'Back', exact: true }).click();
+    await setup.getByRole('radio', { name: /^iOS Device/ }).click();
     const proxyIP = proxyAddress.getByRole('combobox', { name: 'Proxy IP address', exact: true });
     assert.equal(await proxyIP.inputValue(), '192.0.2.10');
     assert.deepEqual(await proxyIP.locator('option').allTextContents(), ['192.0.2.10', '192.0.2.20']);
@@ -428,7 +430,8 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     assert.equal(await manualCopy.inputValue(), `192.0.2.20:${displayedPort}`);
     assert.equal(await manualCopy.evaluate(input => input.readOnly && input.selectionStart === 0 && input.selectionEnd === input.value.length), true);
     assert.equal(await setup.getByRole('combobox', { name: 'Network service', exact: true }).count(), 0);
-    await setup.getByRole('combobox', { name: 'Platform', exact: true }).selectOption('iosSimulator');
+    await setup.getByRole('button', { name: 'Back', exact: true }).click();
+    await setup.getByRole('radio', { name: /^iOS Simulator/ }).click();
     assert.equal(await proxyAddress.getByRole('textbox', { name: 'Proxy IP address', exact: true }).inputValue(), '127.0.0.1');
     const simulator = setup.getByRole('combobox', { name: 'Simulator', exact: true });
     assert.equal(await setup.getByRole('combobox', { name: 'Mac network service', exact: true }).count(), 0);

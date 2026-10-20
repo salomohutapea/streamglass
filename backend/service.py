@@ -16,7 +16,9 @@ from urllib.parse import urlsplit
 
 from aiohttp import web, ClientSession, ClientTimeout, ClientError
 
+from . import traffic_rules
 from .traffic_tools import DEFAULT_NETWORK, summary as traffic_summary, network_for, wait as traffic_wait, map_response
+from .timings import compute_timings, gap_stats, note_pause
 from .sse import SSEParser, EventTooLarge, serialize
 from .large_body import before_responseheaders, observe_responsechunk, complete_response
 
@@ -65,7 +67,25 @@ def message_value(message, request=False):
     result.update({"url": message.url, "method": message.method} if request else {"statusCode": message.status_code})
     if message.raw_content is None and message.stream:
         result.update(bodyUnavailable=True, bodyUnavailableReason="Body was streamed; only headers are available.")
+    else:
+        result.update(body_sizes(message, raw, limited))
     return result
+
+
+def body_sizes(message, raw, limited=False):
+    """Decoded (`size`) and on-the-wire (`encodedSize`) body byte counts; size is None when unknown."""
+    from .body_preview import decode_preview
+    encoded = len(raw)
+    encoding = message.headers.get("content-encoding", "").strip().lower()
+    if encoding in ("", "identity"):
+        return {"size": encoded, "encodedSize": encoded}
+    if limited:
+        return {"size": None, "encodedSize": encoded}
+    try:
+        decoded = len(decode_preview(raw, encoding, MAX_BODY))
+    except Exception:
+        return {"size": None, "encodedSize": encoded}
+    return {"size": decoded if decoded <= MAX_BODY else None, "encodedSize": encoded}
 
 
 def apply_message(message, value, request=False, headers_only=False):
@@ -160,7 +180,7 @@ class Service:
         self.assertion_summaries = {}
         self.codec_keys = {}
         self.folders = json.loads(config.get("folders", "[]"))
-        self.traffic_tools = json.loads(config.get("trafficTools", json.dumps({"mapLocalRules": [], "network": DEFAULT_NETWORK})))
+        self.traffic_tools = traffic_rules.normalize(json.loads(config.get("trafficTools", json.dumps({"mapLocalRules": [], "network": DEFAULT_NETWORK}))))
         self.traffic_tools_revision = int(config.get("trafficToolsRevision", "0"))
         self.records = {row[0]: json.loads(row[1]) for row in self.db.execute("SELECT id,payload FROM records ORDER BY started DESC LIMIT ?", (MAX_RECORDS,))}
         self.record_sizes = dict(self.db.execute("SELECT id,length(CAST(payload AS BLOB)) FROM records"))
@@ -171,6 +191,9 @@ class Service:
         self.streams = {}
         self.tunnels = {}
         self.active_tunnels = {}
+        self.tls_failure_counts = {}
+        self.tls_ok_devices = set()
+        self.tls_established_clients = set()
         self.applications = {}
         self.sockets = set()
         self.master = None
@@ -202,6 +225,11 @@ class Service:
         self.changed()
 
     def save(self, record):
+        for side, key in (("request", "requestSize"), ("response", "responseSize")):
+            message = record.get(side)
+            if isinstance(message, dict) and "size" in message:
+                record[key] = message["size"]
+                record[key + "Encoded"] = message.get("encodedSize")
         self.analysis_cache.pop(record["id"], None)
         if record.get("state") in ("complete", "error", "interrupted") and record.get("endedAt") is None:
             record["endedAt"] = time.time()
@@ -256,8 +284,8 @@ class Service:
         self.changed()
 
     def state(self):
-        keys = ("id", "url", "method", "statusCode", "device", "startedAt", "endedAt", "durationMs", "state", "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "clientIsLocal", "pinned", "annotation")
-        records = [{**{key: r.get(key) for key in keys}, "pinned": bool(r.get("pinned")), "isSSE": is_sse(r), "devicePlatform": device_platform(r), "assertionSummary": self.assertion_summaries.get(r["id"])} for r in sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True)]
+        keys = ("id", "url", "method", "statusCode", "device", "startedAt", "endedAt", "durationMs", "state", "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "clientIsLocal", "pinned", "annotation", "tlsFailure")
+        records = [{**{key: r.get(key) for key in keys}, "pinned": bool(r.get("pinned")), "isSSE": is_sse(r), "serverMs": (r.get("timings") or {}).get("serverMs"), "devicePlatform": device_platform(r), "assertionSummary": self.assertion_summaries.get(r["id"])} for r in sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True)]
         pending = [{key: val for key, val in gate.items() if key not in ("future", "original")} for gate in self.pending.values()]
         return {"settings": {**self.settings, "proxyRunning": bool(self.master)}, "rules": self.rules, "rulesRevision": self.rules_revision, "folders": self.folders, "trafficTools": traffic_summary(self.traffic_tools), "trafficToolsRevision": self.traffic_tools_revision, "records": records, "pending": pending,
                 "productivity": {"revision": self.productivity_revision, "watches": len(self.productivity["watches"]), "assertions": sum(r["enabled"] for r in self.productivity["assertions"]),
@@ -372,9 +400,11 @@ class Service:
             if flow.id in self.records:
                 self.records[flow.id]["state"] = "paused"
             self.changed()
+            paused_at = time.time()
             try:
                 value = await asyncio.wait_for(future, 15 * 60)
             finally:
+                note_pause(flow, stage, paused_at, time.time())
                 self.pending.pop(token, None)
                 if flow.id in self.records and self.records[flow.id]["state"] == "paused":
                     self.records[flow.id]["state"] = "streaming" if stage == "event" else "pending"
@@ -526,21 +556,65 @@ class Service:
             if not entry["task"]:
                 self.applications.pop(client.id, None)
         self.active_tunnels.pop(client.id, None)
+        established = client.id in self.tls_established_clients
+        self.tls_established_clients.discard(client.id)
         record_id = self.tunnels.pop(client.id, None)
         if record := self.records.get(record_id):
             if record["state"] not in ("error", "interrupted"):
                 record["state"] = "complete"
+                # TLS with our certificate succeeded but no request followed: typical of pinning checked after the
+                # handshake (e.g. OkHttp CertificatePinner), or an unused pre-connection.
+                if established and not record.get("tlsFailure"):
+                    record["sslInspected"] = True
+                    record["tlsFailure"] = {"side": "client", "reason": "Client closed the connection after the TLS handshake without sending a request",
+                                            "at": time.time(), "likelyCause": "closed-after-handshake"}
                 self.save(record)
 
     def server_connect_error(self, data):
         if record_id := self.tunnels.get(data.client.id):
             self.cancel(record_id, str(data.server.error))
 
-    def tls_failed_client(self, data):
-        if record_id := self.tunnels.get(data.context.client.id):
-            self.cancel(record_id, str(data.conn.error))
+    def tls_failure_cause(self, side, reason, device, host):
+        text = (reason or "").lower()
+        if side == "server":
+            return "protocol" if any(w in text for w in ("protocol", "does not speak tls", "no shared cipher", "handshake failure")) else "unknown"
+        count = self.tls_failure_counts[(device, host)] = self.tls_failure_counts.get((device, host), 0) + 1
+        if "disconnected during the handshake" in text or "closed" in text or "eof" in text:
+            return "pinning"
+        if any(w in text for w in ("unknown ca", "bad certificate", "certificate unknown", "unknown_ca", "does not trust")):
+            # Repeated rejections while the same device completes other handshakes point at pinning rather than a missing CA.
+            return "pinning" if count > 1 and device in self.tls_ok_devices else "untrusted-ca"
+        if any(w in text for w in ("protocol", "does not speak tls", "no shared cipher", "handshake failure", "version")):
+            return "protocol"
+        return "unknown"
 
-    tls_failed_server = tls_failed_client
+    def tls_failed_client(self, data, side="client"):
+        client = data.context.client
+        reason = str(data.conn.error or "TLS handshake failed")
+        server = getattr(data.context, "server", None)
+        address = getattr(server, "address", None) or (None, None)
+        record_id = self.tunnels.get(client.id)
+        record = self.records.get(record_id) if record_id else None
+        host = (record or {}).get("host") or address[0] or getattr(client, "sni", None)
+        port = (record or {}).get("port") or address[1] or 443
+        device = str(client.peername[0]) if client.peername else ""
+        failure = {"side": side, "reason": reason, "at": time.time(), "likelyCause": self.tls_failure_cause(side, reason, device, host)}
+        if record is None:
+            if self.settings["capturePaused"] or not host:
+                return
+            record_id = str(uuid.uuid4())
+            authority = f"[{host}]:{port}" if ":" in str(host) else f"{host}:{port}"
+            record = self.attribute_record(client, {"id": record_id, "kind": "tunnel", "isEncrypted": True, "sslInspected": True,
+                      "host": host, "port": port, "url": authority, "method": "CONNECT", "device": device,
+                      "startedAt": time.time(), "state": "pending", "eventCount": 0, "events": []})
+            self.save(record)
+        record["tlsFailure"] = failure
+        record["sslInspected"] = True
+        self.save(record)
+        self.cancel(record_id, reason)
+
+    def tls_failed_server(self, data):
+        self.tls_failed_client(data, "server")
 
     def done(self):
         for entry in self.applications.values():
@@ -557,18 +631,22 @@ class Service:
 
     def tls_established_client(self, data):
         self.active_tunnels.pop(data.context.client.id, None)
+        self.tls_established_clients.add(data.context.client.id)
+        if data.context.client.peername:
+            self.tls_ok_devices.add(str(data.context.client.peername[0]))
 
     async def requestheaders(self, flow):
         if self.settings["capturePaused"]:
             flow.metadata["streamglass_passthrough"] = True
             return
         self.flows[flow.id] = flow
-        if any(rule["enabled"] for rule in self.traffic_tools["mapLocalRules"]):
+        map_local_active = any(rule["enabled"] for rule in self.traffic_tools["mapLocalRules"])
+        if map_local_active or traffic_rules.needs_request_buffer(self, flow):
             flow.metadata["streamglass_map_buffer"] = True
             flow.request.stream = False
             length = flow.request.headers.get("content-length", "")
             if length.isdecimal() and int(length) > MAX_BODY:
-                flow.metadata["streamglass_map_upload_error"] = "Map Local requires request uploads of at most 8 MiB; no upstream request was sent."
+                flow.metadata["streamglass_map_upload_error"] = ("Map Local" if map_local_active else "Block rules") + " require request uploads of at most 8 MiB; no upstream request was sent."
                 from mitmproxy import http
                 flow.response = http.Response.make(413, flow.metadata["streamglass_map_upload_error"].encode())
                 flow.metadata["streamglass_passthrough"] = True
@@ -603,18 +681,32 @@ class Service:
                           "url": flow.request.url, "method": flow.request.method, "device": str(flow.client_conn.peername[0]),
                           "startedAt": time.time(), "state": "pending", "eventCount": 0, "events": [], "request": message_value(flow.request, True)}
                 self.save(self.attribute_record(flow.client_conn, record))
-            original_request = copy.deepcopy(flow.request) if any(rule["enabled"] for rule in self.traffic_tools["mapLocalRules"]) or any(rule["enabled"] for rule in self.scenarios) else None
+            original_request = copy.deepcopy(flow.request) if any(rule["enabled"] for rule in self.traffic_tools["mapLocalRules"]) or any(rule["enabled"] for rule in self.scenarios) or traffic_rules.rules_active(self.traffic_tools) else None
             original = message_value(flow.request, True)
             value = await self.process(flow, "request", original)
             if value != original:
                 apply_message(flow.request, value, True)
-            map_response(self, flow)
-            from .lab import on_request
-            on_request(self, flow)
+            # Order: Block, then Map Local, then (when no response was supplied) Map Remote and request Rewrite.
+            blocked = traffic_rules.block_request(self, flow)
+            if blocked == "close":
+                if flow.id in self.records:
+                    self.records[flow.id]["appliedRules"] = list(flow.metadata["streamglass_applied_rules"])
+                self.fail(flow, "Connection closed by Block rule " + flow.metadata["streamglass_applied_rules"][-1]["name"])
+                return
+            if not blocked:
+                map_response(self, flow)
+                if flow.response is None:
+                    traffic_rules.map_remote(self, flow)
+                    traffic_rules.rewrite_request(self, flow)
+                from .lab import on_request
+                on_request(self, flow)
             if flow.metadata.get("streamglass_map_local"):
                 flow.metadata["streamglass_original_request"] = original_request
+            flow.metadata["streamglass_forwarded_at"] = time.time()
             if flow.id in self.records:
                 self.records[flow.id].update(request=message_value(flow.request, True), url=flow.request.url, method=flow.request.method)
+                if flow.metadata.get("streamglass_applied_rules"):
+                    self.records[flow.id]["appliedRules"] = list(flow.metadata["streamglass_applied_rules"])
                 self.save(self.records[flow.id])
         except Exception as exc:
             self.fail(flow, str(exc))
@@ -622,6 +714,7 @@ class Service:
     async def responseheaders(self, flow):
         flow.metadata["streamglass_headers_at"] = time.time()
         try:
+            traffic_rules.rewrite_response_headers(self, flow)
             if self.bypass_rules(flow):
                 flow.metadata["streamglass_response_processed"] = True
                 if flow.metadata.pop("streamglass_map_local", None):
@@ -773,14 +866,24 @@ class Service:
         try:
             raw = event.pop("_bytes")
             received = time.time()
+            gap_ms = None
             if record := self.records.get(flow.id):
                 diagnostics = record.setdefault("sseDiagnostics", {})
+                previous_at = diagnostics.get("lastEventAt") or diagnostics.get("headersAt")
+                if previous_at is not None:
+                    gap_ms = max(0.0, (received - previous_at) * 1000)
+                    gaps = flow.metadata.setdefault("streamglass_sse_gaps", [])
+                    gaps.append(gap_ms)
+                    del gaps[:-10000]
+                    diagnostics["gapStats"] = gap_stats(gaps)
                 diagnostics.update(firstEventAt=diagnostics.get("firstEventAt") or received, lastEventAt=received, eventCount=event["sequence"], eventBytes=diagnostics.get("eventBytes", 0) + len(raw))
             from .lab import on_event
             forward = await on_event(self, flow, event)
             value = await self.process(flow, "event", dict(event))
             raw = raw if value == event else serialize(value)
             value["receivedAt"] = received
+            if gap_ms is not None:
+                value["gapMs"] = gap_ms
             value["forwarded"] = forward
             value["processedAt"] = time.time()
             value["timingDeferred"] = bool(flow.metadata.get("streamglass_fixture_delays") or flow.metadata.get("streamglass_transfer_rates", (0, 0))[1])
@@ -816,6 +919,8 @@ class Service:
 
     async def response(self, flow):
         try:
+            if (record := self.records.get(flow.id)) and flow.response and not flow.metadata.get("streamglass_map_local"):
+                record["timings"] = compute_timings(flow, flow.metadata.get("streamglass_forwarded_at"), getattr(flow.response, "timestamp_end", None) or time.time())
             if self.bypass_rules(flow):
                 if flow.metadata.pop("streamglass_map_local", None):
                     flow.response = None
@@ -826,6 +931,8 @@ class Service:
                     record.update(state="complete", statusCode=flow.response.status_code, response=response)
                     self.save(record)
                 return
+            traffic_rules.rewrite_response_headers(self, flow)
+            traffic_rules.rewrite_response_body(self, flow)
             if flow.metadata.get("streamglass_map_local") and flow.id in self.streams:
                 hook = SimpleNamespace(flow=flow, data=flow.response.raw_content or b"", end=True, chunks=[])
                 await self.streamglass_responsechunk(hook)

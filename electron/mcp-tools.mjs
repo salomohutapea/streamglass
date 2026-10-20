@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { setTimeout as delay } from 'node:timers/promises';
+import { registerTrafficRuleTools } from './mcp-traffic-rules.mjs';
 
 // All MCP sessions share this queue because the HTTP rule API replaces the list.
 const mutations = new Map();
@@ -149,7 +150,7 @@ export function registerTools(server, { baseUrl, token, workspaces }) {
     const value = await record(a.recordId); const retained = value.events || [];
     return { recordId: a.recordId, state: value.state, diagnostics: value.sseDiagnostics || {}, captureWarning: value.captureWarning || '',
       incomplete: value.state !== 'complete' || Boolean(value.captureWarning) || (value.eventCount || 0) > retained.length,
-      timings: page(retained.map(event => ({ sequence: event.sequence, id: event.id, event: event.event, receivedAt: event.receivedAt, forwarded: event.forwarded })), a.offset, a.limit) };
+      timings: page(retained.map(event => ({ sequence: event.sequence, id: event.id, event: event.event, receivedAt: event.receivedAt, gapMs: event.gapMs, forwarded: event.forwarded })), a.offset, a.limit) };
   });
   tool('get_status', 'Read proxy and capture settings, counts, and supported limits.', {}, true, async () => {
     const s = await state();
@@ -282,6 +283,7 @@ export function registerTools(server, { baseUrl, token, workspaces }) {
     });
     return { saved: true, revision };
   }), true);
+  registerTrafficRuleTools({ tool, serializeMutation, updateTrafficTools, api, page, textPage, offset, limit, maxChars });
   tool('pin_capture', 'Pin or unpin a retained capture using the shared HTTP record validator.', { recordId: id, pinned: z.boolean() }, false,
     a => api(`/api/records/${encodeURIComponent(a.recordId)}/pin`, 'POST', { pinned: a.pinned }));
 

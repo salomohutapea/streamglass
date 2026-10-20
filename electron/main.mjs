@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, protocol, session, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import path from 'node:path';
@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startScriptService } from './script-service.mjs';
 import { createUpdateChecker, releasesPrefix } from './updater.mjs';
 import { createDeviceService } from './devices.mjs';
+import { createSetupHandler, createSetupSite } from './setup-site.mjs';
 import { createApplicationMenu } from './menu.mjs';
 import { startMcpServer } from './mcp-server.mjs';
 import { loadMcpConfig, saveMcpConfig } from './mcp-config.mjs';
@@ -32,6 +33,7 @@ let applicationMenu;
 let pendingTimer;
 let mcpService;
 let startupReady = false;
+let setupSiteTimer, setupSiteClose;
 let toolsWindow, toolsOwner, mainWindow;
 let toolsContext = {section:'Sessions'};
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -323,6 +325,38 @@ async function start() {
   let monitorRestoreError = '';
   try { await initialDevices.restoreMonitor(); } catch (error) { monitorRestoreError = error.message; }
   handle('bootstrap', () => ({ ...bootstrap, lanAddresses: lanAddresses() }));
+  // Phone setup site: runs only while LAN access is enabled. Serves the public CA, a CA-only profile and a PAC file.
+  const engineSettings = async () => {
+    const response = await fetch(`${bootstrap.baseUrl}/api/state`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) throw new Error('Cannot read proxy settings');
+    return (await response.json()).settings;
+  };
+  let setupProxyPort = 0, setupPort = 0;
+  const setupSite = createSetupSite({ handler: createSetupHandler({
+    readCertificate: () => readFile(path.join(dataDir, 'mitmproxy/mitmproxy-ca-cert.pem'), 'utf8'),
+    getAddresses: lanAddresses, getProxyPort: () => setupProxyPort, getSetupPort: () => setupPort,
+  }) });
+  const syncSetupSite = async () => {
+    try {
+      const settings = await engineSettings();
+      const override = Number(process.env.STREAMGLASS_SETUP_PORT);
+      setupProxyPort = settings.proxyPort;
+      setupPort = Number.isInteger(override) && override >= 1024 && override <= 65535 ? override : settings.proxyPort + 1;
+      await setupSite.sync({ enabled: settings.listenHost === '0.0.0.0', port: setupPort });
+      return { lanEnabled: settings.listenHost === '0.0.0.0', port: setupPort, ...setupSite.status() };
+    } catch (error) { return { lanEnabled: false, port: setupPort || null, running: false, error: error.message }; }
+  };
+  setupSiteTimer = setInterval(() => void syncSetupSite(), 3000);
+  setupSiteTimer.unref?.();
+  setupSiteClose = () => { clearInterval(setupSiteTimer); return setupSite.close(); };
+  void syncSetupSite();
+  handle('setup-site', async (_event, input) => {
+    if (input?.enableLan === true) {
+      const response = await fetch(`${bootstrap.baseUrl}/api/settings`, { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ listenHost: '0.0.0.0' }) });
+      if (!response.ok) throw new Error('Cannot enable local network access');
+    }
+    return syncSetupSite();
+  });
   handle('copy-text', (_event, value) => {
     if (typeof value !== 'string' || Buffer.byteLength(value) > 256 * 1024 * 1024) throw new Error('Invalid clipboard text');
     clipboard.writeText(value);
@@ -400,6 +434,8 @@ async function start() {
       'android-install-ca': 'Copy the public CA to the selected Android device and open Settings',
       'android-enable-proxy': 'Route the selected Android device through Streamglass',
       'android-restore-proxy': 'Restore the selected Android device’s saved proxy settings',
+      'android-reverse': 'Forward the proxy port (and optionally Metro 8081) from the selected Android device to this Mac with adb reverse',
+      'android-reverse-remove': 'Remove the adb reverse forwarding for the selected Android device',
       'mac-enable-proxy': 'Enable Mac monitoring on the active network, following connection changes automatically',
       'mac-restore-proxy': 'Disable Mac monitoring and restore every saved network proxy',
     };
@@ -473,6 +509,7 @@ app.on('before-quit', event => {
     shuttingDown = true;
     clearTimeout(pendingTimer);
     await mcpService?.close();
+    await setupSiteClose?.();
     scriptService?.close();
     if (engine && engine.exitCode === null) {
       engine.kill('SIGTERM');

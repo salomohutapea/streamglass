@@ -30,7 +30,7 @@ For a physical device, enable LAN proxy access, connect to the same network, and
 
 ## Android
 
-Physical Android devices do not require ADB or USB debugging for Wi-Fi proxy setup. LAN access is on by default for new profiles (Proxy settings → Allow devices on the local network; profiles that already saved the setting keep their choice). Connect the phone and Mac to the same network, and enter the displayed Mac IP address and port in the phone’s Wi-Fi proxy settings. Open `http://mitm.it` on the phone to download the public CA and install it in Android Settings. Disable the phone’s manually configured Wi-Fi proxy when Streamglass is closed; the Mac cannot undo a manual setting on the phone.
+Physical Android devices do not require ADB or USB debugging for Wi-Fi proxy setup. LAN access is on by default for new profiles (Settings → Proxy → Allow devices on the local network; profiles that already saved the setting keep their choice). Connect the phone and Mac to the same network, and enter the displayed Mac IP address and port in the phone’s Wi-Fi proxy settings. Open `http://mitm.it` on the phone to download the public CA and install it in Android Settings. Disable the phone’s manually configured Wi-Fi proxy when Streamglass is closed; the Mac cannot undo a manual setting on the phone.
 
 **Optional ADB helpers** is collapsed by default for physical devices. Only these automatic actions require installed Android platform-tools and an authorized USB or wireless debugging connection. Actions accept only connected, authorized serials. Install certificate copies the public certificate to Downloads and opens Security Settings; the user selects Install certificate → CA certificate. The app cannot silently grant CA trust. Enable proxy saves existing global HTTP proxy settings before changing them; Restore uses that snapshot. OEM permissions may prevent settings changes. Restore an ADB-configured proxy before quitting; unresolved snapshots still produce a quit warning.
 
@@ -39,6 +39,27 @@ For emulators, use the Android System Proxy, with `10.0.2.2` as the host address
 Modern Android apps do not trust user-installed CAs by default. Owned debug builds should explicitly add debug-only trust anchors in Network Security Configuration. Independent library pinning or apps ignoring system proxies still require app cooperation. Streamglass does not root devices, modify system CA partitions, or bypass certificate pinning.
 
 The current proxy capture identifies source devices by connection address; it does not identify the originating Mac application. A local proxy sees the socket peer and HTTP data, without a reliable bundle identifier. Reliable application attribution needs a separate native traffic-capture mechanism; guessing from a User-Agent would mislabel many apps.
+
+## Phone setup page, PAC and QR code
+
+While LAN access is enabled, Streamglass runs a small read-only HTTP setup site on the proxy port plus one (for example `9091` for proxy `9090`). Set `STREAMGLASS_SETUP_PORT` to choose another port. It starts only while LAN access is on and stops when it is turned off or the app quits. If the port is in use, Connect device shows the error instead of the QR code.
+
+**Connect device** shows a QR code for `http://<mac-lan-ip>:<setup-port>/` for iOS devices, Android devices and emulators. Scan it with the phone camera to open a mobile page with the proxy host and port, numbered iOS and Android steps, and certificate downloads. If LAN access is off, the dialog offers a button to turn it on. The page is reachable only from the local network and needs no proxy to be set first, unlike `http://mitm.it`.
+
+| Path | Content |
+| --- | --- |
+| `/` | Setup instructions with the proxy address |
+| `/cert.crt`, `/cert.pem` | Public CA certificate (DER with `application/x-x509-ca-cert`, PEM) |
+| `/streamglass.mobileconfig` | Unsigned iOS profile containing only the CA certificate payload |
+| `/proxy.pac` | PAC file returning `PROXY <mac-lan-ip>:<proxy-port>; DIRECT` |
+
+For **Auto proxy**, enter the PAC URL (`http://<mac-lan-ip>:<setup-port>/proxy.pac`) in the Wi-Fi proxy settings (iOS: Configure Proxy, Automatic; Android: Proxy Auto-Config). The PAC URL is shown in the dialog with a copy button. The profile is unsigned, so iOS marks it as not verified; this is expected. Remove the profile and proxy setting when you finish.
+
+### adb reverse and React Native
+
+For an Android emulator or a USB-attached device, **Reverse ports** in Connect device runs `adb -s <serial> reverse tcp:<proxy-port> tcp:<proxy-port>` for an authorized device only. Tick **Also reverse Metro (8081)** to add `tcp:8081`. **Remove reverse** deletes the same forwardings. Reversals end when the device disconnects or adb restarts.
+
+React Native: Metro uses `localhost:8081`, so reverse it for the app to reach your Mac. When using adb reverse, set the device proxy to `127.0.0.1:<proxy-port>`. Without it, use the Mac LAN address (physical device) or `10.0.2.2` (emulator).
 
 ## Boundaries
 
@@ -57,3 +78,9 @@ Where your organization allows it, apps with independent proxy settings can poin
 ## Local network exposure
 
 Because LAN access is on by default for new profiles, the proxy port listens on all interfaces and any device on the same network can route traffic through it. Turn off **Allow devices on the local network** in Proxy settings on untrusted networks. The management API and MCP server remain loopback-only and token-protected.
+
+## TLS handshake failures
+
+If a host in the TLS allowlist shows a "TLS handshake failed" badge, the device rejected the Streamglass certificate. Open the row's Overview for the likely cause. iOS needs the profile installed and full trust enabled in Settings, General, About, Certificate Trust Settings. Android 7+ apps ignore user CAs unless debug builds use a network security config with `<certificates src="user"/>`. React Native follows the native platform; disable OkHttp CertificatePinner, TrustKit, or react-native-ssl-pinning in debug. For pinned apps, disable pinning in debug builds or remove the host from the TLS allowlist to pass through.
+
+An allowlisted host can also stay as an encrypted CONNECT row with no requests: the client completed TLS with the Streamglass certificate and then closed the connection. Streamglass flags this as "closed after handshake". It usually means pinning checked after the handshake (for example OkHttp `CertificatePinner` on Android or React Native), and occasionally an unused pre-connection. Disable pinning in debug builds for that host.

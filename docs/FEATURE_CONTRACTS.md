@@ -25,17 +25,27 @@ When adding an operation, trace it through the management route, service mutatio
 - Do not buffer an entire long-lived SSE response to implement search, export, throttling, or a new viewer.
 - Preserve duplicate headers using header pairs. Keep content encoding and length consistent when applying edits; reuse current mutation helpers.
 
+## TLS failure diagnostics
+
+When the engine terminates TLS (SSL inspection) and a handshake fails, `tls_failed_client`/`tls_failed_server` record `tlsFailure: {side, reason, at, likelyCause}` on the CONNECT/tunnel record, creating an error tunnel record if none exists (nothing is recorded while capture is paused). `likelyCause` is `untrusted-ca`, `pinning`, `protocol`, or `unknown`; it is a heuristic (client disconnects mid-handshake, or repeated rejections from a device that completed other handshakes, suggest pinning). The table shows a warning badge and a "TLS errors" quick filter; the Overview callout lists per-platform fixes and a button that removes covering patterns from `tlsDomains` through the existing settings API. Diagnostics never change forwarded bytes.
+
 ## Pause, rules, and gates
 
 Scripts run before the matching breakpoint presents the resulting message. Request, response, and event stages have distinct edit capabilities: an event cannot change HTTP status or headers already sent.
 
 **Pause capture and rules** is pass-through: no new capture, breakpoints, or scripts. Waiting gates release their original values and unsent transformations are discarded. Already-transmitted edits cannot be undone. Requests begun paused and streams switched to pass-through retain that mode until completion. **Stop Proxy** instead interrupts traffic.
 
-Map Local and network conditions also honor pause. An unsent mapped response returns to the origin path when pause releases its response gate; network waits are cancelled. Do not add a separate toggle that appears paused while an engine tool still alters traffic.
+Map Local and network conditions also honor pause.Map Remote, Rewrite and Block follow the same rule: nothing applies while paused, and a flow marked pass-through never receives them. Their order is Block, Map Local, Map Remote, request Rewrite, upstream, response Rewrite; response body replacement is limited to complete UTF-8 non-SSE bodies of at most 8 MiB and otherwise forwards the original bytes.  An unsent mapped response returns to the origin path when pause releases its response gate; network waits are cancelled. Do not add a separate toggle that appears paused while an engine tool still alters traffic.
 
 Gate tokens are the authority for Continue/Drop. Reject stale or duplicate resolutions, including concurrent UI/MCP submissions. Continue should apply the current validated draft, support Command+Enter, and close the editor after success. Validation failures must leave the editor open with its draft intact. Closing the editor alone is not a resolution.
 
-The inspector stays read-only; edits use detached windows. Request context remains available beside response/event editing, and prior SSE events remain read-only and copyable.
+The inspector stays read-only; edits use detached windows. Request context remains available beside response/event editing, and prior SSE events remain read-only and copyable. Request/Response tabs add read-only structured views (query, form, multipart, cookies, Set-Cookie, image preview via data URL) with a Structured/Raw toggle; records carry `requestSize`/`responseSize` (decoded bytes, null if unknown) plus `...Encoded` sizes.
+
+## Timing details
+
+`backend/timings.py` stores `record.timings` (epoch milliseconds plus derived durations) when the response hook runs: `requestStart`, `requestSent`, `responseHeaders`, `responseEnd`, upstream `connectStart`/`tcpSetup`/`tlsSetup`, and `connectMs`, `tlsMs`, `requestMs`, `serverMs`, `downloadMs`, `pausedMs`. Missing values are omitted (reused connections have no handshake). `requestSent` is the later of the request hook releasing the request (after rules and breakpoints) and the upstream handshake completing, so breakpoint time never counts as `serverMs` (`responseHeaders - requestSent`); it is reported as `pausedMs` and response-side pauses are removed from `downloadMs`. This is an approximation of the upstream send, not a socket-level measurement. Capture-list summaries carry `serverMs`; the optional Server time column and the Overview Timing waterfall render it with the Duration format. Timings are observational and must not change forwarded data.
+
+SSE events carry `gapMs` (time since the previous event; the first is relative to response headers) and `sseDiagnostics.gapStats` holds `count/minMs/avgMs/p95Ms/maxMs`. The Events view flags gaps over 3x the median (needs 4+ gaps). MCP `get_capture` metadata, `get_capture_events` and `get_sse_diagnostics` expose these fields without new tools.
 
 ## SSE and body handling
 

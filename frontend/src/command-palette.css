@@ -1,0 +1,22 @@
+dialog.command-palette,dialog.shortcut-sheet{padding:0;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 18px 60px #0009;margin:0;position:fixed;left:50%}
+dialog.command-palette::backdrop,dialog.shortcut-sheet::backdrop{background:#0007}
+dialog.command-palette{top:14vh;transform:translateX(-50%);width:min(560px,calc(100vw - 40px));overflow:hidden}
+.command-palette>input{width:100%;box-sizing:border-box;height:42px;padding:0 14px;font-size:13px;color:var(--text);background:transparent;border:0;border-bottom:1px solid var(--line);outline:none;border-radius:0}
+.command-palette ul{list-style:none;margin:0;padding:4px;max-height:min(380px,56vh);overflow:auto}
+.command-palette li{display:flex;align-items:center;gap:10px;height:30px;padding:0 10px;border-radius:6px;cursor:default}
+.command-palette li[aria-selected="true"]{background:var(--raised)}
+.command-palette .palette-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.command-palette mark{background:none;color:var(--accent);font-weight:600}
+.command-palette li small{font-size:10px;color:var(--muted)}
+.command-palette kbd,.shortcut-sheet kbd{font:inherit;font-size:10px;color:var(--muted);background:var(--input);border:1px solid var(--line);border-radius:4px;padding:1px 5px;white-space:nowrap}
+.command-palette .palette-empty{color:var(--muted);justify-content:center}
+dialog.shortcut-sheet{top:10vh;transform:translateX(-50%);width:min(720px,calc(100vw - 40px));max-height:80vh;overflow:auto}
+.shortcut-sheet header{display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 10px 0 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+.shortcut-sheet h2{margin:0;font-size:13px;font-weight:600}
+.shortcut-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px 28px;padding:16px}
+.shortcut-sheet h3{margin:0 0 6px;font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.shortcut-sheet dl{margin:0}.shortcut-sheet dl>div{display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px solid var(--line)}
+.shortcut-sheet dt{margin:0}.shortcut-sheet dd{margin:0}
+@keyframes palette-in{from{opacity:0;transform:translateX(-50%) translateY(8px) scale(.97)}to{opacity:1;transform:translateX(-50%)}}
+dialog.command-palette[open],dialog.shortcut-sheet[open]{animation:palette-in .2s cubic-bezier(.2,.8,.2,1)}
+@media(prefers-reduced-motion:reduce){dialog.command-palette[open],dialog.shortcut-sheet[open]{animation:none}}

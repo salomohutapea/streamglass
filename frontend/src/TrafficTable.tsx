@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 
-export type TrafficRecord = { id: string; method: string; url: string; startedAt?: string | number; kind?: 'request' | 'tunnel'; isSSE?: boolean; eventCount?: number; events?: unknown[]; state?: string; status?: number; statusCode?: number; duration?: number; durationMs?: number|null; device?:string; deviceId?:string; application?:{name:string}|null; response?: { headers?: unknown } };
-export type SortColumn = 'method' | 'request' | 'time' | 'status' | 'duration' | 'device' | 'application' | 'protocol' | 'host' | 'path' | 'events';
+export type TrafficRecord = { id: string; method: string; url: string; startedAt?: string | number; kind?: 'request' | 'tunnel'; isSSE?: boolean; eventCount?: number; events?: unknown[]; state?: string; status?: number; statusCode?: number; duration?: number; durationMs?: number|null; serverMs?: number|null; device?:string; deviceId?:string; application?:{name:string}|null; response?: { headers?: unknown } };
+export type SortColumn = 'method' | 'request' | 'time' | 'status' | 'duration' | 'serverTime' | 'device' | 'application' | 'protocol' | 'host' | 'path' | 'events';
 export {isSSE} from './traffic-preferences.mjs';
 export function startedAtMs(value: TrafficRecord['startedAt']): number | undefined {
   if (value == null || value === '') return undefined;
@@ -25,6 +25,7 @@ export function columnValue(record: TrafficRecord, column: SortColumn): string |
   if (column === 'request') return record.url;
   if (column === 'status') return record.status ?? record.statusCode;
   if (column === 'duration') return record.durationMs ?? record.duration;
+  if (column === 'serverTime') return record.serverMs ?? undefined;
   if (column === 'device') return record.deviceId ?? record.device;
   if (column === 'application') return record.application?.name;
   if (column === 'protocol') return protocol(record);

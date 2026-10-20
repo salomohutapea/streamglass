@@ -425,3 +425,48 @@ test('quit waits for an already queued enable before restoring it', async t => {
   await service.reconcileMonitor();
   assert.equal(commands.length, before);
 });
+
+async function adbFixture(t, { removeFails = false } = {}) {
+  const { mkdir, chmod } = await import('node:fs/promises');
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'streamglass-adb-'));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const sdk = path.join(dataDir, 'sdk');
+  await mkdir(path.join(sdk, 'platform-tools'), { recursive: true });
+  const adb = path.join(sdk, 'platform-tools/adb');
+  await writeFile(adb, '#!/bin/sh\n'); await chmod(adb, 0o755);
+  const previous = process.env.ANDROID_HOME;
+  process.env.ANDROID_HOME = sdk;
+  t.after(() => { if (previous === undefined) delete process.env.ANDROID_HOME; else process.env.ANDROID_HOME = previous; });
+  const commands = [];
+  const executeCommand = async (file, args) => {
+    commands.push([file, ...args]);
+    if (file === adb && args[0] === 'devices') return { stdout: 'List of devices attached\nemulator-5554\tdevice\nRF8M123ABC\tunauthorized\n' };
+    if (file === adb && args.includes('--remove') && removeFails) throw Object.assign(new Error('failed'), { stderr: "adb: error: listener 'tcp:9090' not found" });
+    if (file === adb) return { stdout: '9090' };
+    throw new Error('Tool not installed');
+  };
+  const service = createDeviceService({ dataDir, certificatePath: path.join(dataDir, 'ca.pem'), proxyPort: 9090, getProxyHost: () => '192.0.2.1', platform: 'linux', executeCommand });
+  t.after(() => service.dispose());
+  return { service, commands, adb };
+}
+
+test('adb reverse tunnels the proxy port and optionally Metro for an authorized device only', async t => {
+  const { service, commands, adb } = await adbFixture(t);
+  await service.perform({ action: 'android-reverse', target: 'emulator-5554' });
+  assert.deepEqual(commands.filter(c => c.includes('reverse')), [[adb, '-s', 'emulator-5554', 'reverse', 'tcp:9090', 'tcp:9090']]);
+  commands.length = 0;
+  await service.perform({ action: 'android-reverse', target: 'emulator-5554', metro: true });
+  assert.deepEqual(commands.filter(c => c.includes('reverse')).map(c => c.slice(3)), [['reverse', 'tcp:9090', 'tcp:9090'], ['reverse', 'tcp:8081', 'tcp:8081']]);
+  commands.length = 0;
+  await service.perform({ action: 'android-reverse-remove', target: 'emulator-5554', metro: true });
+  assert.deepEqual(commands.filter(c => c.includes('reverse')).map(c => c.slice(3)), [['reverse', '--remove', 'tcp:9090'], ['reverse', '--remove', 'tcp:8081']]);
+  commands.length = 0;
+  for (const target of ['RF8M123ABC', 'emulator-5554; rm -rf /', '', undefined]) await assert.rejects(service.perform({ action: 'android-reverse', target }), /Select an available device/);
+  assert.equal(commands.some(c => c.includes('reverse')), false);
+});
+
+test('removing an absent adb reverse is not an error', async t => {
+  const { service } = await adbFixture(t, { removeFails: true });
+  const result = await service.perform({ action: 'android-reverse-remove', target: 'emulator-5554' });
+  assert.match(result.message, /removed/);
+});

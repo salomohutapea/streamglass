@@ -1,0 +1,13 @@
+export type DomainFilter = { host:string; path?:string };
+export type DomainNode = { host:string; path?:string; label:string; count:number; encrypted?:number; children:DomainNode[]; more:number };
+type R = { url?:string; host?:string; kind?:string; isEncrypted?:boolean };
+export const hiddenHostsKey: string;
+export function recordHost(record:R): string;
+export function recordSegments(record:R): string[];
+export function buildDomainTree(records:R[], options?:{depth?:number; hidden?:Set<string>}): DomainNode[];
+export function matchesDomain(record:R, filter:DomainFilter|null|undefined): boolean;
+export function isHiddenHost(record:R, hidden:Set<string>): boolean;
+export function filterHostNodes(tree:DomainNode[], query:string): DomainNode[];
+export function domainFilterLabel(filter:DomainFilter|null|undefined): string;
+export function readHiddenHosts(storage?:Pick<Storage,'getItem'>): Set<string>;
+export function writeHiddenHosts(hosts:Set<string>, storage?:Pick<Storage,'setItem'>): void;

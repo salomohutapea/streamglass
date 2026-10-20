@@ -1,0 +1,7 @@
+.traffic-tools .tr-groups{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.traffic-tools .tr-groups>.muted{font-size:11px}
+.traffic-tools .tr-ops{display:grid;gap:6px}
+.traffic-tools .tr-op{display:grid;grid-template-columns:84px minmax(0,1fr) minmax(0,1.4fr) auto;gap:6px;align-items:center}
+.traffic-tools .tr-op select,.traffic-tools .tr-op input{min-width:0}
+.traffic-tools .tr-check{display:flex;align-items:center;gap:8px}
+.traffic-tools .tr-note{margin:0;font-size:11px;color:var(--muted)}
