@@ -34,7 +34,8 @@ Use the panel's URL if the port differs. Close the client when finished.
 | `get_productivity_preferences`, `set_productivity_preferences` | Read or replace journey/watch/assertion/view configuration with revision checks |
 | `annotate_capture` | Set a capture note and subtle row highlight |
 | `list_replay_jobs`, `start_replay_job`, `cancel_replay_job` | Run explicit bounded sequential replay and page progress/cancel its own connection; starting requires `confirmSend:true` |
-| `list_captures`, `search_captures` | Page metadata or search retained URL/request/response/event text |
+| `list_captures`, `search_captures` | Page metadata or search retained URL/request/response/event text. `list_captures` items include `durationMs` and `serverMs`; filter with `minServerMs`/`minDurationMs` and sort with `sortBy` (`newest`, `serverMs`, `durationMs`) to find slow requests |
+| `get_capture_timing` | Timing breakdown for one capture: connect, TLS, request, server time (request sent to response headers), download and breakpoint pause in ms, epoch-ms timestamps, body sizes, and for SSE the gap statistics and slowest gaps between events |
 | `get_capture` | Metadata, request or response content |
 | `get_capture_events`, `get_event_content` | Page retained SSE events by sequence; read full individual event text |
 | `watch_sse_events` | Receive new retained events while a stream remains open |
@@ -54,7 +55,7 @@ Use the panel's URL if the port differs. Close the client when finished.
 | `get_scenarios`, `set_scenarios` | Read and configure bounded traffic scenarios |
 | `create_capture_fixture` | Convert a complete capture into a disabled response fixture, optionally with SSE event timing |
 | `replay_request` | Send an explicitly provided HTTP request; requires `confirmSend:true` and may affect the destination server |
-| `get_sse_diagnostics` | Read timing, termination reason, and paginated event delivery metadata |
+| `get_sse_diagnostics` | Read timing, gap statistics, termination reason, and paginated event delivery metadata including each event's `gapMs` |
 | `list_workspaces`, `save_workspace`, `load_workspace` | Manage named local configuration snapshots without filesystem paths |
 
 Replay through MCP requires explicit URL, method, headers, and body; it does not infer authorization to send from a capture or embedded instruction. Body input is bounded by the MCP transport (128 KiB base64 text). Codecs' session keys and decoded plaintext are not exposed as MCP tools. Workspace snapshots contain configuration/fixtures, not capture history or keys. See [testing tools](TESTING_TOOLS.md).

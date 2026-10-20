@@ -257,3 +257,23 @@ test('Map Remote, Rewrite and Block tools share the revisioned traffic configura
   assert.equal((await c.call('delete_rewrite_rule', { ruleId: 'rewrite' })).value.deleted, 'rewrite');
   assert.equal((await c.call('list_rewrite_rules')).value.total, 0);
 });
+
+test('timing tools expose server time, breakdown, sizes and SSE gaps, and filter slow captures', async t => {
+  const f = await fixture(t), c = f.client();
+  f.state.records = [{ id: 'fast', durationMs: 40, serverMs: 20 }, { id: 'slow', durationMs: 900, serverMs: 850 }, { id: 'unknown' }];
+  const slow = (await c.call('list_captures', { minServerMs: 100, sortBy: 'serverMs' })).value;
+  assert.deepEqual(slow.items.map(item => item.id), ['slow']);
+  assert.deepEqual((await c.call('list_captures', { sortBy: 'durationMs' })).value.items.map(item => item.id), ['slow', 'fast', 'unknown']);
+  Object.assign(f.record, { method: 'GET', url: 'https://api.example.test/feed', statusCode: 200, state: 'complete', isSSE: true, durationMs: 1200, requestSize: 0, responseSize: 512,
+    timings: { requestStart: 1000, requestSent: 1010, responseHeaders: 1210, responseEnd: 2200, connectMs: 4, tlsMs: 6, requestMs: 0, serverMs: 200, downloadMs: 990, pausedMs: null },
+    sseDiagnostics: { gapStats: { count: 3, min: 10, avg: 300, p95: 800, max: 800 } },
+    events: [{ sequence: 1, event: 'a', gapMs: 10 }, { sequence: 2, event: 'b', gapMs: 800 }, { sequence: 3, event: 'c', gapMs: 90 }] });
+  const timing = (await c.call('get_capture_timing', { recordId: 'capture', slowestGaps: 2 })).value;
+  assert.equal(timing.serverMs, 200);
+  assert.deepEqual(timing.breakdown, { connectMs: 4, tlsMs: 6, requestMs: 0, serverMs: 200, downloadMs: 990, pausedMs: null });
+  assert.equal(timing.timestamps.requestSent, 1010);
+  assert.equal(timing.sizes.responseBytes, 512);
+  assert.equal(timing.sse.gapStats.p95, 800);
+  assert.deepEqual(timing.sse.slowestGaps.map(gap => gap.sequence), [2, 3]);
+  assert.equal(JSON.stringify(timing).includes('"body"'), false);
+});

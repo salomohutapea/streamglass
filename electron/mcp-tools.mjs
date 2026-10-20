@@ -160,8 +160,29 @@ export function registerTools(server, { baseUrl, token, workspaces }) {
   });
   tool('get_settings', 'Read complete proxy and capture settings, including TLS domain patterns, as paginated JSON text.', { offset, maxChars }, true,
     async a => textPage(JSON.stringify((await state()).settings), a.offset, a.maxChars));
-  tool('list_captures', 'List retained capture metadata, newest first. Filters are optional.', { offset, limit, device: z.string().max(256).optional(), state: z.string().max(64).optional(), sseOnly: z.boolean().default(false) }, true,
-    async a => page((await state()).records.filter(r => (!a.device || r.device === a.device) && (!a.state || r.state === a.state) && (!a.sseOnly || r.isSSE)).map(withoutApplicationIcon), a.offset, a.limit));
+  tool('list_captures', 'List retained capture metadata, newest first. Filters are optional. Each item includes durationMs (total) and serverMs (request sent to response headers received, i.e. backend time). Use minServerMs/minDurationMs and sortBy to find slow requests.', { offset, limit, device: z.string().max(256).optional(), state: z.string().max(64).optional(), sseOnly: z.boolean().default(false),
+    minServerMs: z.number().min(0).max(86400000).optional(), minDurationMs: z.number().min(0).max(86400000).optional(), sortBy: z.enum(['newest', 'serverMs', 'durationMs']).default('newest') }, true,
+    async a => {
+      const records = (await state()).records.filter(r => (!a.device || r.device === a.device) && (!a.state || r.state === a.state) && (!a.sseOnly || r.isSSE)
+        && (a.minServerMs === undefined || (r.serverMs ?? -1) >= a.minServerMs) && (a.minDurationMs === undefined || (r.durationMs ?? -1) >= a.minDurationMs));
+      if (a.sortBy !== 'newest') records.sort((x, y) => (y[a.sortBy] ?? -1) - (x[a.sortBy] ?? -1));
+      return page(records.map(withoutApplicationIcon), a.offset, a.limit);
+    });
+  tool('get_capture_timing', 'Read the timing breakdown of one capture in milliseconds: total duration, connect, TLS, request send, server time (request sent to response headers received), download, and time paused at breakpoints, plus the epoch-ms timestamps and body sizes. requestSent is approximated at the moment the proxy releases the request upstream. For SSE captures it also returns per-event gap statistics (min/avg/p95/max) and the slowest gaps. No bodies are included.', { recordId: id, slowestGaps: z.number().int().min(0).max(50).default(5) }, true, async a => {
+    const value = await record(a.recordId);
+    const t = value.timings || {};
+    const events = (value.events || []).filter(event => typeof event.gapMs === 'number');
+    return {
+      recordId: a.recordId, method: value.method, url: value.url, statusCode: value.statusCode ?? null, state: value.state,
+      durationMs: value.durationMs ?? null, serverMs: t.serverMs ?? null,
+      breakdown: { connectMs: t.connectMs ?? null, tlsMs: t.tlsMs ?? null, requestMs: t.requestMs ?? null, serverMs: t.serverMs ?? null, downloadMs: t.downloadMs ?? null, pausedMs: t.pausedMs ?? null },
+      timestamps: Object.fromEntries(['requestStart', 'connectStart', 'tcpSetup', 'tlsSetup', 'requestSent', 'responseHeaders', 'responseEnd'].filter(key => t[key] != null).map(key => [key, t[key]])),
+      sizes: { requestBytes: value.requestSize ?? null, requestEncodedBytes: value.requestSizeEncoded ?? null, responseBytes: value.responseSize ?? null, responseEncodedBytes: value.responseSizeEncoded ?? null },
+      ...(value.isSSE || events.length ? { sse: { eventCount: value.eventCount ?? events.length, gapStats: value.sseDiagnostics?.gapStats ?? null,
+        firstEventAt: value.sseDiagnostics?.firstEventAt ?? null, lastEventAt: value.sseDiagnostics?.lastEventAt ?? null,
+        slowestGaps: [...events].sort((x, y) => y.gapMs - x.gapMs).slice(0, a.slowestGaps).map(event => ({ sequence: event.sequence, event: event.event, gapMs: event.gapMs, receivedAt: event.receivedAt })) } } : {}),
+    };
+  });
   tool('search_captures', 'Search retained URL, request, response or SSE event text. Returns metadata and incomplete-retention warning.', {
     q: z.string().max(1024), scope: z.enum(['url', 'request', 'response', 'event']).default('url'),
     mode: z.enum(['contains', 'not_contains', 'equals', 'starts_with', 'ends_with', 'wildcard']).default('contains'), offset, limit }, true, async a => {
