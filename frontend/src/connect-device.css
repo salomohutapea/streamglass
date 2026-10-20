@@ -35,3 +35,11 @@
 
 .setup-step-required{background:color-mix(in srgb,#e8a23d 16%,transparent);border:1px solid color-mix(in srgb,#e8a23d 55%,transparent);border-radius:7px;padding:8px 10px;line-height:1.5}
 ol.setup-steps li.setup-step-required{margin:4px 0}
+
+/* Wider dialog so the QR card, proxy address and helpers fit without scrolling */
+dialog[aria-label="Connect a device"]{width:min(780px,calc(100vw - 40px))}
+.connect-body>.connect-qr{margin-bottom:4px}
+.connect-qr .qr-code{width:120px;height:120px}
+.connect-qr strong{font:600 13px ui-monospace,SFMono-Regular,Menlo,monospace}
+dialog[aria-label="Connect a device"] .proxy-address-values input,dialog[aria-label="Connect a device"] .proxy-address-values select{font-size:15px;padding:7px 9px}
+dialog[aria-label="Connect a device"] .proxy-address{padding:12px 14px}
