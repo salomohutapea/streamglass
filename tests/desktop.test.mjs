@@ -182,7 +182,8 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     headerPairs.push(['X-Edited', 'one'], ['X-Edited', 'two']);
     await headers.fill(JSON.stringify(headerPairs));
     await editor.getByRole('button', { name: 'Continue', exact: true }).focus();
-    await editor.keyboard.press('Meta+Enter');
+    // Continuing the last paused item closes the window, possibly before the key-up arrives.
+    await editor.keyboard.press('Meta+Enter').catch(error => { if (!editor.isClosed()) throw error; });
     // The single Breakpoints window closes once every paused request is handled.
     await eventually(() => editor.isClosed(), 'The Breakpoints window must close once its list is empty');
     editorOpened = app.waitForEvent('window');
@@ -254,7 +255,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     assert.equal(await editor.getByRole('region', { name: 'Request context', exact: true }).locator('textarea:not(.inputarea)').count(), 0, 'Read-only JSON must not offer inputs');
     const eventBody = bodyEditor.getByRole('textbox', { name: 'Event data', exact: true });
     // Direct text editing: replace only the array, as a user would by selecting and typing.
-    await setMonacoText(eventBody, (await readMonacoText(app, eventBody)).replace(/\[[^\]]*\]/, '[{"id":9007199254740993999}]'));
+    await setMonacoText(app, eventBody, (await readMonacoText(app, eventBody)).replace(/\[[^\]]*\]/, '[{"id":9007199254740993999}]'));
     const editedEvent = await readMonacoText(app, eventBody);
     assert.match(editedEvent, /\[\{"id":9007199254740993999\}\]/);
     assert.match(editedEvent, /"untouched": 9007199254740993123/);

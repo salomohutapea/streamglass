@@ -8,9 +8,11 @@ export async function readMonacoText(app, textbox) {
   return app.evaluate(({ clipboard }) => clipboard.readText());
 }
 
-export async function setMonacoText(textbox, text) {
+// Replaces the whole text by pasting, as a user would; typing would trigger auto-closing quotes and brackets.
+export async function setMonacoText(app, textbox, text) {
   const page = textbox.page();
+  await app.evaluate(({ clipboard }, value) => clipboard.writeText(value), text);
   await textbox.focus();
   await page.keyboard.press('Meta+A');
-  await page.keyboard.insertText(text);
+  await page.keyboard.press('Meta+V');
 }
