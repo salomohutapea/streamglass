@@ -115,7 +115,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3')], { input: JSON.stringify(
       }, `setup-${platform}`);
       await page.getByRole('dialog', { name: 'Connect a device' }).waitFor();
       const selectedPlatform = { macos: 'This Mac', 'ios-simulator': 'iOS Simulator', 'ios-device': 'iOS Device', 'android-emulator': 'Android Emulator', 'android-device': 'Android Device' }[platform];
-      assert.equal(await page.getByRole('dialog', { name: 'Connect a device' }).getByRole('heading', { level: 3 }).first().innerText(), selectedPlatform, label);
+      assert.equal(await page.getByRole('dialog', { name: 'Connect a device' }).getByRole('heading', { level: 3 }).first().textContent(), selectedPlatform, label);
       if (platform === 'android-device') {
         const dialog = page.getByRole('dialog', { name: 'Connect a device' });
         assert.equal(await dialog.getByText('Wi-Fi setup does not require ADB or USB debugging.', {exact:false}).isVisible(), true);
