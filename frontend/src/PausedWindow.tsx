@@ -210,8 +210,11 @@ export default function PausedWindow() {
   const hadGates = useRef(false);
   useEffect(() => {
     if (!data) return;
-    if (gates.length) hadGates.current = true;
-    else if (hadGates.current) window.close();
+    if (gates.length) { hadGates.current = true; return; }
+    if (!hadGates.current) return;
+    // Grace period: a continued response is often followed at once by its SSE event (or a request by its response).
+    const timer = setTimeout(() => window.close(), 2500);
+    return () => clearTimeout(timer);
   }, [data, gates.length]);
 
   const draft = current ? drafts[current.token] ?? draftFor(current) : null;

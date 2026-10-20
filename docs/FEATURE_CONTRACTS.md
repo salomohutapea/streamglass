@@ -33,7 +33,7 @@ When the engine terminates TLS (SSL inspection) and a handshake fails, `tls_fail
 
 Scripts run before the matching breakpoint presents the resulting message. Request, response, and event stages have distinct edit capabilities: an event cannot change HTTP status or headers already sent.
 
-Breakpoint gates have no timeout. They wait until continued or dropped by the user or MCP, released by pausing capture, or ended by proxy stop, client disconnect or app quit. All pending gates are shown in a single Breakpoints window (oldest first, live wait time); resolving one selects the next, and the window closes once its last gate is resolved. The window must not steal focus when a new gate arrives.
+Breakpoint gates have no timeout. They wait until continued or dropped by the user or MCP, released by pausing capture, or ended by proxy stop, client disconnect or app quit. All pending gates are shown in a single Breakpoints window (oldest first, live wait time); resolving one selects the next, and the window closes about 2.5 seconds after its last gate is resolved if no new gate arrives. The window must not steal focus when a new gate arrives.
 
 **Pause capture and rules** is pass-through: no new capture, breakpoints, or scripts. Waiting gates release their original values and unsent transformations are discarded. Already-transmitted edits cannot be undone. Requests begun paused and streams switched to pass-through retain that mode until completion. **Stop Proxy** instead interrupts traffic.
 
