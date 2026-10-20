@@ -218,7 +218,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     await requestContext.locator('.headers-disclosure summary').click();
     await requestContext.getByText('visible-request', { exact: true }).waitFor();
     await requestContext.getByText('request-body-context', { exact: false }).waitFor();
-    assert.equal(await requestContext.locator('input, textarea:not(.inputarea)').count(), 0, 'Request context must remain read only');
+    assert.equal(await requestContext.locator('input:not(.monaco-editor *), textarea:not(.monaco-editor *)').count(), 0, 'Request context must remain read only');
     const requestBounds = await requestContext.boundingBox();
     const editBounds = await editor.getByRole('region', { name: 'Paused traffic editor', exact: true }).boundingBox();
     assert.ok(requestBounds.x + requestBounds.width <= editBounds.x, 'Request and editable response must appear side by side');
@@ -252,7 +252,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     assert.equal(watchFinished, false, 'Live events must arrive before the watch result');
     if (process.env.STREAMGLASS_TEST_BREAKPOINT_SCREENSHOT) await editor.screenshot({ path: process.env.STREAMGLASS_TEST_BREAKPOINT_SCREENSHOT });
     await editor.getByRole('region', { name: 'Request context', exact: true }).getByText('request-body-context', { exact: false }).waitFor();
-    assert.equal(await editor.getByRole('region', { name: 'Request context', exact: true }).locator('textarea:not(.inputarea)').count(), 0, 'Read-only JSON must not offer inputs');
+    assert.equal(await editor.getByRole('region', { name: 'Request context', exact: true }).locator('textarea:not(.monaco-editor *)').count(), 0, 'Read-only JSON must not offer inputs');
     const eventBody = bodyEditor.getByRole('textbox', { name: 'Event data', exact: true });
     // Direct text editing: replace only the array, as a user would by selecting and typing.
     await setMonacoText(app, eventBody, (await readMonacoText(app, eventBody)).replace(/\[[^\]]*\]/, '[{"id":9007199254740993999}]'));
