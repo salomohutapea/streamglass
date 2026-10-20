@@ -281,7 +281,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 3);
     await target.click({ button: 'right' });
     let opened = app.waitForEvent('window');
-    await page.getByRole('menuitem', { name: 'Create breakpoint…', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Add breakpoint…', exact: true }).click();
     let editor = await opened;
     assert.equal(await (await app.browserWindow(editor)).evaluate(window => window.isFullScreenable()), false);
     assert.equal(await (await app.browserWindow(editor)).evaluate(window => window.isFullScreen()), false);
@@ -289,7 +289,14 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await pattern.waitFor();
     assert.match(await pattern.inputValue(), /z-search\/sse/);
     await editor.getByRole('textbox', { name: 'Name', exact: true }).fill('POST https://example.test/z-search/sse');
+    assert.equal(await editor.getByRole('heading', { name: 'New breakpoint', exact: true }).count(), 1);
+    assert.equal(await editor.getByRole('button', { name: 'Add rule', exact: true }).count(), 0, 'A breakpoint opened from a request shows only its form');
+    const closed = editor.waitForEvent('close');
     await editor.getByRole('button', { name: 'Save rule', exact: true }).click();
+    await closed;
+    opened = app.waitForEvent('window');
+    await clickMenu('breakpoints');
+    editor = await opened;
     await editor.getByRole('button', { name: 'Add rule', exact: true }).waitFor();
     assert.equal(await editor.locator('.compact-rule-target code').count(), 1);
     assert.equal(await editor.locator('.compact-rule-name').count(), 0);

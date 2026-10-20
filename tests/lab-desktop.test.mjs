@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { createServer, request as httpRequest } from 'node:http';
 import net from 'node:net';
 import { _electron as electron } from 'playwright';
+import { setMonacoText } from './monaco-helpers.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 test('testing tools compare, redact, save mocks, switch workspaces, decode and explicitly replay', {timeout:90000}, async()=>{
@@ -55,7 +56,7 @@ c.commit()`,path.join(directory,'captures.sqlite3'),String(proxyPort)],{input:JS
     const newWindow=app.waitForEvent('window');
     const result=new Promise((resolve,reject)=>{const req=httpRequest({hostname:'127.0.0.1',port:proxyPort,path:url+'/encoded-edit',headers:{Host:new URL(url).host}},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve({body:Buffer.concat(chunks).toString(),nonce:res.headers['x-nonce']}));});req.on('error',reject);req.end();});
     const editor=await newWindow;editor.setDefaultTimeout(12000);
-    await editor.getByRole('button',{name:'Decoded body',exact:true}).click();await editor.getByRole('button',{name:'Edit entire body',exact:true}).click();await editor.getByRole('textbox',{name:'Decoded response body',exact:true}).fill('{"after":true}');
+    await editor.getByRole('button',{name:'Decoded body',exact:true}).click();await setMonacoText(editor.getByRole('textbox',{name:'Decoded response body',exact:true}),'{"after":true}');
     await editor.getByRole('button',{name:'Continue',exact:true}).click();const edited=await result;assert.equal(Buffer.from(edited.body,'base64').toString(),'{"after":true}');assert.equal(edited.nonce,'fixture-nonce');
     assert.deepEqual(errors,[]);
   }catch(error){if(page){await page.screenshot({path:'/tmp/streamglass-lab-failure.png'}).catch(()=>{});console.error((await app.windows().find(window=>window.url().includes('editor=tools'))?.locator('.lab-window-panel').innerText().catch(()=>'' )??'').slice(0,1800));}throw error;}finally{if(app)await app.close();await new Promise(resolve=>origin.close(resolve));await rm(directory,{recursive:true,force:true});}

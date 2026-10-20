@@ -63,8 +63,8 @@ function windowURL(recordId, editor) {
   if (recordId) url.searchParams.set('record', recordId);
   if (editor) {
     url.searchParams.set('editor', editor.type);
-    if (editor.recordId) url.searchParams.set('record', editor.recordId);
-    if (editor.token) url.searchParams.set('gate', editor.token);
+    if (editor.type === 'paused') { if (editor.token) url.hash = `gate=${editor.token}`; }
+    else if (editor.recordId) url.searchParams.set('record', editor.recordId);
   }
   return url.href;
 }
@@ -72,7 +72,7 @@ function windowURL(recordId, editor) {
 function createWindow(recordId, editor) {
   const auxiliary = Boolean(editor || recordId);
   const win = new BrowserWindow({
-    width: editor ? editor.type === 'breakpoints' ? 760 : 980 : recordId ? 1100 : 1480,
+    width: editor ? editor.type === 'breakpoints' ? 760 : editor.type === 'paused' ? 1180 : 980 : recordId ? 1100 : 1480,
     height: editor ? editor.type === 'breakpoints' ? 560 : 820 : 940,
     minWidth: editor ? 600 : 900, minHeight: editor ? 400 : 600,
     title: 'Streamglass', backgroundColor: '#17191e',
@@ -155,15 +155,20 @@ function openAboutWindow() {
 function openEditor(input, automatic = false) {
   if (!input || !['breakpoints', 'scripts', 'paused'].includes(input.type) ||
       Object.keys(input).some(key => !['type', 'recordId', 'token'].includes(key)) ||
-      ['recordId', 'token'].some(key => input[key] !== undefined && (typeof input[key] !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(input[key]))) ||
-      input.type === 'paused' && (!input.token || !input.recordId)) throw new Error('Invalid editor');
-  const key = `${input.type}:${input.type === 'paused' ? input.token : input.recordId || ''}`;
+      ['recordId', 'token'].some(key => input[key] !== undefined && (typeof input[key] !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(input[key])))) throw new Error('Invalid editor');
+  // One Breakpoints window lists every paused gate; a token only selects within it.
+  const key = input.type === 'paused' ? 'paused' : `${input.type}:${input.recordId || ''}`;
   let win = editorWindows.get(key);
   if (win && !win.isDestroyed()) {
-    const url = windowURL(undefined, input);
-    if (win.webContents.getURL() !== url) void win.loadURL(url);
-    win.restore();
-    win.focus();
+    if (input.type === 'paused') {
+      // Deep-link by hash so the open window keeps its drafts; the token matches the validated pattern above.
+      if (input.token && !automatic) void win.webContents.executeJavaScript(`location.hash = ${JSON.stringify(`gate=${input.token}`)}`).catch(() => {});
+    } else {
+      const url = windowURL(undefined, input);
+      if (win.webContents.getURL() !== url) void win.loadURL(url);
+    }
+    // New gates must not steal focus from an already open Breakpoints window.
+    if (!automatic) { win.restore(); win.focus(); }
   } else {
     if (windows.size >= 8) {
       if (automatic) return false;
@@ -173,7 +178,7 @@ function openEditor(input, automatic = false) {
     editorWindows.set(key, win);
     win.on('closed', () => editorWindows.delete(key));
   }
-  if (input.type === 'paused') openedGates.add(input.token);
+  if (input.type === 'paused' && input.token) openedGates.add(input.token);
   return true;
 }
 
@@ -187,15 +192,15 @@ async function pollPendingEditors() {
     const pending = state.settings?.capturePaused ? [] : state.pending ?? [];
     if (shuttingDown) return;
     const active = new Set(pending.map(gate => gate.token));
-    for (const gate of openedGates) if (!active.has(gate)) {
-      openedGates.delete(gate);
-      const editor = editorWindows.get(`paused:${gate}`);
-      if (editor && !editor.isDestroyed()) editor.close();
-    }
+    for (const gate of openedGates) if (!active.has(gate)) openedGates.delete(gate);
+    // The Breakpoints window stays open when its list empties; only the user closes it.
     for (const gate of pending) {
-      // Keep closed gates dismissed; a later token for the same flow opens its editor again.
+      // Gates the user dismissed by closing the window stay dismissed; a new gate opens it again.
       if (!openedGates.has(gate.token)) openEditor({ type: 'paused', recordId: gate.recordId, token: gate.token }, true);
     }
+    const editor = editorWindows.get('paused');
+    const focused = Boolean(editor && !editor.isDestroyed() && editor.isFocused());
+    app.dock?.setBadge(pending.length && !focused ? String(pending.length) : '');
   } catch { /* Retry after engine restarts or temporary connection failures. */ }
   finally { if (!shuttingDown) pendingTimer = setTimeout(() => void pollPendingEditors(), 500); }
 }
@@ -519,4 +524,9 @@ app.on('before-quit', event => {
     app.quit();
   })();
 });
-start().catch(error => { dialog.showErrorBox('Streamglass could not start', error.message); app.quit(); });
+start().catch(error => {
+  // Include the engine's own output so failures like "fetch failed" (engine exited after startup) are diagnosable.
+  const detail = startupError && !error.message.includes(startupError) ? `\n\nEngine output:\n${startupError.slice(-2000)}` : '';
+  dialog.showErrorBox('Streamglass could not start', `${error.message}${detail}`);
+  app.quit();
+});

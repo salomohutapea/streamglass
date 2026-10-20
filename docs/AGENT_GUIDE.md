@@ -21,7 +21,7 @@ Paths below are relative to the repository root. Read the relevant caller and it
 | Feature area | Source entry points | Existing verification to extend when appropriate |
 | --- | --- | --- |
 | Traffic table, sorting, search, column UI | `frontend/src/TrafficTable.tsx`, `frontend/src/App.tsx`, `backend/search.py` | `tests/table-desktop.test.mjs`, `backend/tests/test_search.py` |
-| Inspector and detached breakpoint editor | `frontend/src/App.tsx`, `frontend/src/EditorWindow.tsx`, `frontend/src/editor-draft.mjs`, `electron/main.mjs` | `frontend/src/editor-draft.test.mjs`, `tests/desktop.test.mjs` |
+| Inspector and detached breakpoint editor | `frontend/src/App.tsx`, `frontend/src/EditorWindow.tsx` (rule editors), `frontend/src/PausedWindow.tsx` (Breakpoints window), `frontend/src/editor-draft.mjs`, `electron/main.mjs` | `frontend/src/editor-draft.test.mjs`, `tests/desktop.test.mjs` |
 | JSON display and editing | `frontend/src/JsonViewer.tsx`, `frontend/src/JsonBodyEditor.tsx`, `frontend/src/json-viewer.mjs` | `tests/json-viewer.test.mjs` |
 | Rules, folders, pending gates, capture settings | `backend/service.py`, `backend/api.py`, `frontend/src/RuleList.tsx` | `backend/tests/test_service.py`, `test_folders.py`, `test_pause.py` under `backend/tests/` |
 | SSE framing and async forwarding | `backend/sse.py`, `backend/engine.py`, `backend/service.py` | `backend/tests/test_sse.py`, `test_engine.py`, `test_integration.py` under `backend/tests/` |

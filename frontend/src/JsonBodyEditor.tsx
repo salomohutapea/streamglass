@@ -1,25 +1,53 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import JsonViewer from './JsonViewer';
-import { prepareJson, replaceJsonContainer } from './json-viewer.mjs';
-import type { JsonContainer } from './json-viewer.mjs';
+import { useEffect, useRef } from 'react';
+import type * as Monaco from 'monaco-editor/editor/editor.api';
+import { ensureMonaco, MAX_EDITOR_HEIGHT, sharedEditorOptions } from './monaco-setup';
+import './json-viewer.css';
 
+// Fully editable body backed by Monaco. JSON syntax is validated by the JSON language service (squiggles); nothing is rewritten.
 type Props = { value: string; label: string; disabled?: boolean; onChange: (value: string) => void; onReplacingChange: (editing: boolean) => void };
+const MIN_HEIGHT = 190;
 export default function JsonBodyEditor({ value, label, disabled = false, onChange, onReplacingChange }: Props) {
-  const isJson = useMemo(() => prepareJson(value).isJson, [value]);
-  const [raw, setRaw] = useState(false);
-  const [replacement, setReplacement] = useState<{ range: JsonContainer; text: string } | null>(null);
-  const [error, setError] = useState('');
-  const textarea = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { if (replacement) { textarea.current?.focus(); textarea.current?.select(); } }, [Boolean(replacement)]);
+  const host = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const programmatic = useRef(false);
+  const change = useRef(onChange);
+  change.current = onChange;
+  const initial = useRef({ value, label, disabled });
+  useEffect(() => { onReplacingChange(false); }, [onReplacingChange]);
+  useEffect(() => {
+    const monaco = ensureMonaco();
+    const element = host.current;
+    if (!element) return;
+    const editor = monaco.editor.create(element, {
+      ...sharedEditorOptions(initial.current.value.length),
+      value: initial.current.value,
+      language: 'json',
+      readOnly: initial.current.disabled,
+      ariaLabel: initial.current.label,
+      tabFocusMode: false,
+      renderValidationDecorations: 'on',
+      fixedOverflowWidgets: true
+    });
+    editorRef.current = editor;
+    // Monaco would otherwise consume Cmd+Enter (insert line below); hand it to the window's Continue shortcut instead.
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+    });
+    const fit = () => {
+      const height = Math.min(MAX_EDITOR_HEIGHT, Math.max(editor.getContentHeight(), MIN_HEIGHT));
+      element.style.height = `${height}px`;
+      editor.layout();
+    };
+    fit();
+    const sizeListener = editor.onDidContentSizeChange(fit);
+    const contentListener = editor.onDidChangeModelContent(() => { if (!programmatic.current) change.current(editor.getValue()); });
+    return () => { sizeListener.dispose(); contentListener.dispose(); editor.getModel()?.dispose(); editor.dispose(); editorRef.current = null; };
+  }, []);
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (editor && editor.getValue() !== value) { programmatic.current = true; try { editor.setValue(value); } finally { programmatic.current = false; } }
+  }, [value]);
+  useEffect(() => { editorRef.current?.updateOptions({ readOnly: disabled, ariaLabel: label }); }, [disabled, label]);
   useEffect(() => () => onReplacingChange(false), [onReplacingChange]);
-  const close = () => { setReplacement(null); setError(''); onReplacingChange(false); };
-  return <div className="json-body-editor">
-    {isJson && !replacement && <div className="json-editor-mode"><button type="button" disabled={disabled} onClick={() => setRaw(previous => !previous)}>{raw ? 'Foldable JSON' : 'Edit entire body'}</button><span>{raw ? 'Changes edit the entire body.' : 'Collapse an object, then use Replace to edit it in place.'}</span></div>}
-    {replacement ? <div className="json-subtree-editor" role="group" aria-label={`Replace ${replacement.range.kind}`}>
-      <p>Replace this {replacement.range.kind}. Only this value will change.</p>
-      <textarea ref={textarea} className="mono editor-body" aria-label={`Replacement ${replacement.range.kind}`} spellCheck={false} value={replacement.text} disabled={disabled} onChange={event => setReplacement({ ...replacement, text: event.target.value })} onKeyDown={event => { if (event.metaKey && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); } }}/>
-      {error && <p className="error-text" role="alert">{error}</p>}
-      <div className="json-subtree-actions"><span>Apply or cancel before continuing traffic.</span><button type="button" onClick={close}>Cancel replacement</button><button type="button" className="primary" disabled={disabled} onClick={() => { try { onChange(replaceJsonContainer(value, replacement.range, replacement.text)); close(); } catch { setError('Replacement must be valid JSON.'); } }}>Apply replacement</button></div>
-    </div> : isJson && !raw ? <JsonViewer value={value} preserveFormatting disabled={disabled} onReplace={range => { setReplacement({ range, text: value.slice(range.start, range.end) }); setError(''); onReplacingChange(true); }}/> : <textarea className="mono editor-body" aria-label={label} spellCheck={false} disabled={disabled} value={value} onChange={event => onChange(event.target.value)}/>}
-  </div>;
+  return <div className="json-body-editor"><div className="json-viewer json-monaco-editable"><div className="json-monaco" ref={host}/></div></div>;
 }

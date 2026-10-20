@@ -197,6 +197,7 @@ class Service:
         self.applications = {}
         self.sockets = set()
         self.master = None
+        self.proxy_error = ""
         self.proxy_task = None
         self.dirty = False
         self.http = None
@@ -287,7 +288,7 @@ class Service:
         keys = ("id", "url", "method", "statusCode", "device", "startedAt", "endedAt", "durationMs", "state", "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "clientIsLocal", "pinned", "annotation", "tlsFailure")
         records = [{**{key: r.get(key) for key in keys}, "pinned": bool(r.get("pinned")), "isSSE": is_sse(r), "serverMs": (r.get("timings") or {}).get("serverMs"), "devicePlatform": device_platform(r), "assertionSummary": self.assertion_summaries.get(r["id"])} for r in sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True)]
         pending = [{key: val for key, val in gate.items() if key not in ("future", "original")} for gate in self.pending.values()]
-        return {"settings": {**self.settings, "proxyRunning": bool(self.master)}, "rules": self.rules, "rulesRevision": self.rules_revision, "folders": self.folders, "trafficTools": traffic_summary(self.traffic_tools), "trafficToolsRevision": self.traffic_tools_revision, "records": records, "pending": pending,
+        return {"settings": {**self.settings, "proxyRunning": bool(self.master), "proxyError": self.proxy_error}, "rules": self.rules, "rulesRevision": self.rules_revision, "folders": self.folders, "trafficTools": traffic_summary(self.traffic_tools), "trafficToolsRevision": self.traffic_tools_revision, "records": records, "pending": pending,
                 "productivity": {"revision": self.productivity_revision, "watches": len(self.productivity["watches"]), "assertions": sum(r["enabled"] for r in self.productivity["assertions"]),
                                  "replayRunning": any(job["state"] == "running" for job in getattr(self, "replay_jobs", {}).values())}}
 
@@ -396,13 +397,14 @@ class Service:
             future = asyncio.get_running_loop().create_future()
             self.pending[token] = {"token": token, "recordId": flow.id, "stage": stage, "value": value,
                                    "url": flow.request.url, "method": flow.request.method,
-                                   "matchedRules": [rule["id"] for rule in matches], "future": future, "original": original}
+                                   "matchedRules": [rule["id"] for rule in matches], "pausedAt": int(time.time() * 1000), "future": future, "original": original}
             if flow.id in self.records:
                 self.records[flow.id]["state"] = "paused"
             self.changed()
             paused_at = time.time()
             try:
-                value = await asyncio.wait_for(future, 15 * 60)
+                # No timeout: a gate waits until resolved, released by pause, or the flow ends (cancellation).
+                value = await future
             finally:
                 note_pause(flow, stage, paused_at, time.time())
                 self.pending.pop(token, None)
@@ -580,7 +582,9 @@ class Service:
             return "protocol" if any(w in text for w in ("protocol", "does not speak tls", "no shared cipher", "handshake failure")) else "unknown"
         count = self.tls_failure_counts[(device, host)] = self.tls_failure_counts.get((device, host), 0) + 1
         if "disconnected during the handshake" in text or "closed" in text or "eof" in text:
-            return "pinning"
+            # A hang-up mid-handshake usually means the device does not (fully) trust the CA, e.g. an iOS profile installed
+            # without enabling full trust. Only once this device has completed other inspected handshakes is pinning likelier.
+            return "pinning" if device in self.tls_ok_devices else "untrusted-ca"
         if any(w in text for w in ("unknown ca", "bad certificate", "certificate unknown", "unknown_ca", "does not trust")):
             # Repeated rejections while the same device completes other handshakes point at pinning rather than a missing CA.
             return "pinning" if count > 1 and device in self.tls_ok_devices else "untrusted-ca"
@@ -1059,5 +1063,9 @@ class Service:
             self.master.shutdown()
             await self.proxy_task
             self.master = None
+            self.proxy_error = (f"Could not listen on port {self.settings['proxyPort']}. Another app (for example Proxyman or Charles) "
+                                "is probably using it. Choose a different port in Settings → Proxy.")
+            self.changed()
             raise ValueError("Proxy listener failed to start")
+        self.proxy_error = ""
         self.changed()

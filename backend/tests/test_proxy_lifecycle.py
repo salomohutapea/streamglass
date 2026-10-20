@@ -73,3 +73,37 @@ class ProxyLifecycleTests(unittest.IsolatedAsyncioTestCase):
         finally:
             occupied.close()
             await occupied.wait_closed()
+
+    async def test_breakpoint_gate_has_no_timeout(self):
+        # Gates wait until resolved, released by pause, or cancelled with their flow; never on a timer.
+        import inspect
+        source = inspect.getsource(Service)
+        self.assertNotIn("wait_for(future", source)
+        self.assertNotIn("15 * 60", source)
+
+
+class OccupiedStartupPortTests(unittest.IsolatedAsyncioTestCase):
+    async def test_startup_on_occupied_port_reports_error_and_recovers_after_port_change(self):
+        directory = tempfile.TemporaryDirectory(prefix="streamglass-occupied-")
+        self.addCleanup(directory.cleanup)
+        occupied = await asyncio.start_server(lambda reader, writer: writer.close(), "0.0.0.0", 0)
+        service = Service(directory.name, "lifecycle-only-token-1234567890", free_port())
+        service.settings["proxyPort"] = occupied.sockets[0].getsockname()[1]
+        try:
+            with self.assertRaises(ValueError):
+                await service.start_proxy()
+            settings = service.state()["settings"]
+            self.assertFalse(settings["proxyRunning"])
+            self.assertIn("Proxyman", settings["proxyError"])
+            service.settings["proxyPort"] = free_port()
+            await service.start_proxy()
+            self.assertTrue(service.state()["settings"]["proxyRunning"])
+            self.assertEqual(service.state()["settings"]["proxyError"], "")
+        finally:
+            occupied.close()
+            await occupied.wait_closed()
+            if service.master:
+                await service.master.addons.get("proxyserver").servers.update([])
+                service.master.shutdown()
+                await service.proxy_task
+            service.db.close()

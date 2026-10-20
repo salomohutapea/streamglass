@@ -81,6 +81,10 @@ Because LAN access is on by default for new profiles, the proxy port listens on 
 
 ## TLS handshake failures
 
-If a host in the TLS allowlist shows a "TLS handshake failed" badge, the device rejected the Streamglass certificate. Open the row's Overview for the likely cause. iOS needs the profile installed and full trust enabled in Settings, General, About, Certificate Trust Settings. Android 7+ apps ignore user CAs unless debug builds use a network security config with `<certificates src="user"/>`. React Native follows the native platform; disable OkHttp CertificatePinner, TrustKit, or react-native-ssl-pinning in debug. For pinned apps, disable pinning in debug builds or remove the host from the TLS allowlist to pass through.
+If a host in the TLS allowlist shows a "TLS handshake failed" badge, the device rejected the Streamglass certificate. On iOS this most often means the profile is installed but full trust (Settings → General → About → Certificate Trust Settings) is still off. Open the row's Overview for the likely cause. iOS needs the profile installed and full trust enabled in Settings, General, About, Certificate Trust Settings. Android 7+ apps ignore user CAs unless debug builds use a network security config with `<certificates src="user"/>`. React Native follows the native platform; disable OkHttp CertificatePinner, TrustKit, or react-native-ssl-pinning in debug. For pinned apps, disable pinning in debug builds or remove the host from the TLS allowlist to pass through.
 
 An allowlisted host can also stay as an encrypted CONNECT row with no requests: the client completed TLS with the Streamglass certificate and then closed the connection. Streamglass flags this as "closed after handshake". It usually means pinning checked after the handshake (for example OkHttp `CertificatePinner` on Android or React Native), and occasionally an unused pre-connection. Disable pinning in debug builds for that host.
+
+## Proxy port already in use
+
+Streamglass listens on port 9090 by default, the same port Proxyman uses. If another app holds the port, Streamglass still opens, the proxy stays stopped, and a banner explains the conflict with a **Change port** button (Settings → Proxy). Check which app holds the port with `lsof -nP -iTCP:9090 -sTCP:LISTEN`.

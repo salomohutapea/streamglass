@@ -32,3 +32,6 @@
 .optional-adb .setup-actions{display:flex;flex-wrap:wrap;gap:8px}
 .connect-body details>p{margin:8px 0 10px}
 .connect-body details>button,.connect-body details>.setup-actions{margin-top:4px}
+
+.setup-step-required{background:color-mix(in srgb,#e8a23d 16%,transparent);border:1px solid color-mix(in srgb,#e8a23d 55%,transparent);border-radius:7px;padding:8px 10px;line-height:1.5}
+ol.setup-steps li.setup-step-required{margin:4px 0}

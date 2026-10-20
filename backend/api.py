@@ -126,10 +126,14 @@ def create_app(service):
             try:
                 await service.start_proxy()
             except Exception:
+                failure = service.proxy_error
                 service.settings = previous
                 service.master = None
-                await service.start_proxy()
-                raise ValueError("Could not start proxy listener; previous settings restored")
+                try:
+                    await service.start_proxy()
+                except ValueError:
+                    pass
+                raise ValueError(f"{(failure or 'Could not start proxy listener.').rstrip('.')}; previous settings restored.")
         elif service.master:
             service.master.options.update(allow_hosts=service.tls_patterns())
             if "tlsDomains" in changes:

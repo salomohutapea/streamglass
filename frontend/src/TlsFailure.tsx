@@ -4,8 +4,8 @@ import { AlertTriangle } from 'lucide-react';
 export type TlsFailure = {side: 'client' | 'server'; reason: string; at: number; likelyCause: 'untrusted-ca' | 'pinning' | 'protocol' | 'unknown' | 'closed-after-handshake'};
 
 const CAUSES: Record<TlsFailure['likelyCause'], string> = {
-  'untrusted-ca': 'The device does not trust the Streamglass certificate authority.',
-  pinning: 'The app most likely pins the server certificate and rejects the Streamglass certificate.',
+  'untrusted-ca': 'The device most likely does not fully trust the Streamglass certificate yet. No inspected connection from this device has succeeded so far.',
+  pinning: 'Other inspected connections from this device succeed, so the certificate is trusted. This app or SDK most likely pins the server certificate or uses its own trust store.',
   'closed-after-handshake': 'The client accepted the Streamglass certificate during the handshake, then closed the connection without sending a request. This usually means certificate pinning checked after the handshake (for example OkHttp CertificatePinner), or occasionally an unused pre-connection.',
   protocol: 'The two sides could not agree on a TLS protocol version or cipher.',
   unknown: 'The cause could not be determined from the handshake error.',
@@ -19,7 +19,7 @@ export function TlsFailureCallout({failure, host, busy, onRemove}: {failure: Tls
     <p>{server ? 'Streamglass could not complete TLS with the origin server.' : CAUSES[failure.likelyCause]} <code>{failure.reason}</code></p>
     {!server && <ul>
       {(failure.likelyCause === 'untrusted-ca' || failure.likelyCause === 'unknown') && <>
-        <li><strong>iOS:</strong> install the Streamglass profile, then enable full trust in Settings, General, About, Certificate Trust Settings.</li>
+        <li><strong>iOS:</strong> installing the profile is not enough. Also turn on full trust in Settings → General → About → Certificate Trust Settings, then reopen the app.</li>
         <li><strong>Android 7+:</strong> user CAs are ignored by apps unless debug builds add a network_security_config with <code>{'<certificates src="user"/>'}</code>.</li>
         <li><strong>React Native:</strong> same as native. Disable OkHttp CertificatePinner, TrustKit or react-native-ssl-pinning in debug builds.</li>
       </>}

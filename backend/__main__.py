@@ -23,7 +23,10 @@ async def run(args):
     runner = web.AppRunner(create_app(service), access_log=None)
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", args.port).start()
-    await service.start_proxy()
+    try:
+        await service.start_proxy()
+    except ValueError:
+        pass  # keep the management API up; the UI reports service.proxy_error and offers a port change
     broadcaster = asyncio.create_task(service.broadcast())
     icon_refresh = asyncio.create_task(service.refresh_application_icons())
     from .productivity import monitor

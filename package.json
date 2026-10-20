@@ -32,6 +32,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
     "lucide-react": "1.57.0",
+    "monaco-editor": "^0.57.0",
     "quickjs-emscripten": "0.32.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",

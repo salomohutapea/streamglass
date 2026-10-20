@@ -81,7 +81,7 @@ export function buildSetupPage(host, port, setupPort) {
   const proxy = `${escapeXml(host)}:${port}`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Streamglass phone setup</title>
-<style>body{font:16px/1.5 -apple-system,system-ui,sans-serif;margin:0 auto;max-width:36rem;padding:1rem;color:#1c1c1e;background:#f5f5f7}h1{font-size:1.4rem}h2{font-size:1.1rem;margin-top:1.6rem}code{background:#e5e5ea;padding:.1rem .35rem;border-radius:4px;word-break:break-all}a.btn{display:block;margin:.5rem 0;padding:.75rem 1rem;background:#0a84ff;color:#fff;text-decoration:none;border-radius:10px;text-align:center}li{margin:.4rem 0}.note{color:#555;font-size:.9rem}@media(prefers-color-scheme:dark){body{background:#000;color:#f2f2f7}code{background:#2c2c2e}.note{color:#aaa}}</style></head><body>
+<style>li.must{background:#fff4d6;border:1px solid #f0c64a;border-radius:8px;padding:.5rem .7rem;margin-top:.4rem}body{font:16px/1.5 -apple-system,system-ui,sans-serif;margin:0 auto;max-width:36rem;padding:1rem;color:#1c1c1e;background:#f5f5f7}h1{font-size:1.4rem}h2{font-size:1.1rem;margin-top:1.6rem}code{background:#e5e5ea;padding:.1rem .35rem;border-radius:4px;word-break:break-all}a.btn{display:block;margin:.5rem 0;padding:.75rem 1rem;background:#0a84ff;color:#fff;text-decoration:none;border-radius:10px;text-align:center}li{margin:.4rem 0}.note{color:#555;font-size:.9rem}@media(prefers-color-scheme:dark){body{background:#000;color:#f2f2f7}code{background:#2c2c2e}.note{color:#aaa}}</style></head><body>
 <h1>Streamglass phone setup</h1>
 <p>Proxy: <code>${proxy}</code><br>Auto proxy (PAC): <code>http://${escapeXml(host)}:${Number(setupPort)}/proxy.pac</code></p>
 <h2>iPhone / iPad</h2>
@@ -89,7 +89,7 @@ export function buildSetupPage(host, port, setupPort) {
 <li>Settings, Wi-Fi, (i) next to your network, Configure Proxy, Manual. Server <code>${escapeXml(host)}</code>, port <code>${port}</code>. Or choose Automatic and use the PAC address above.</li>
 <li><a class="btn" href="/streamglass.mobileconfig">Download iOS profile</a></li>
 <li>Settings, Profile Downloaded, Install.</li>
-<li>Settings, General, About, Certificate Trust Settings: enable full trust for Streamglass.</li>
+<li class="must"><strong>Required, easy to miss:</strong> Settings → General → About → <strong>Certificate Trust Settings</strong> → turn on full trust for the Streamglass certificate. Installing the profile alone is not enough; HTTPS fails until this is on. Then reopen your app.</li>
 </ol>
 <h2>Android</h2>
 <ol>

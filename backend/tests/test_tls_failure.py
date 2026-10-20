@@ -31,7 +31,13 @@ class TlsFailureTests(unittest.TestCase):
         self.service.tunnels["c2"] = "t1"
         self.service.tls_failed_client(hook_data("c2", "Client disconnected during the handshake."))
         self.assertEqual(len(self.service.records), 1)
-        self.assertEqual(self.service.records["t1"]["tlsFailure"]["likelyCause"], "pinning")
+        self.assertEqual(self.service.records["t1"]["tlsFailure"]["likelyCause"], "untrusted-ca")
+
+    def test_disconnect_after_other_successful_handshakes_is_pinning(self):
+        self.service.tls_established_client(hook_data("ok2", None))
+        self.service.tls_failed_client(hook_data("c9", "Client disconnected during the handshake."))
+        (record,) = self.service.records.values()
+        self.assertEqual(record["tlsFailure"]["likelyCause"], "pinning")
 
     def test_repeated_failure_on_working_device_is_pinning(self):
         self.service.tls_established_client(hook_data("ok", None))
