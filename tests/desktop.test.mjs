@@ -235,7 +235,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     watched.catch(() => {});
     await editor.getByRole('button', { name: 'Continue', exact: true }).click();
     const eventData = editor.getByRole('textbox', { name: 'Event data', exact: true });
-    await eventData.waitFor();
+    await eventData.waitFor({ state: 'attached' });
     const initialEventData = await readMonacoText(app, eventData);
     assert.match(initialEventData, /\n/);
     assert.match(initialEventData, /9007199254740993123/);
