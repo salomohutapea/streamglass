@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSetupHandler, createSetupSite, buildPac, buildMobileConfig, parsePublicCertificate } from '../electron/setup-site.mjs';
+import { createSetupHandler, createSetupSite, buildPac, buildSetupPage, buildMobileConfig, parsePublicCertificate } from '../electron/setup-site.mjs';
 
 const der = Buffer.from('synthetic-certificate-bytes-for-tests');
 const pem = `-----BEGIN CERTIFICATE-----\n${der.toString('base64')}\n-----END CERTIFICATE-----\n`;
@@ -78,4 +78,10 @@ test('site starts only when enabled and stops otherwise', async t => {
   assert.equal((await fetch(`http://127.0.0.1:${port}/`, { method: 'POST' })).status, 405);
   await site.sync({ enabled: false, port });
   assert.equal(site.status().running, false);
+});
+
+test('setup page opens the Android tab for Android browsers and iPhone otherwise', () => {
+  assert.match(buildSetupPage('192.168.1.20', 9090, 9091, 'android'), /id="os-android" checked/);
+  assert.match(buildSetupPage('192.168.1.20', 9090, 9091), /id="os-ios" checked/);
+  assert.match(buildSetupPage('192.168.1.20', 9090, 9091), /Certificate Trust Settings/);
 });

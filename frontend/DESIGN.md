@@ -28,7 +28,7 @@ The sidebar rail expands on hover or focus with an animated width change, and a 
 
 ## Connect Device
 
-Connect Device is a four-step flow: choose a platform, proxy details (with a QR summary for physical devices and emulators), certificate trust, then a live "waiting for the first request" check.
+Connect Device is a three-step flow: choose a platform; set up (proxy address, one-click Mac/simulator actions, and for phones and emulators a QR code that opens the LAN setup page with the certificate download and trust steps); then a live "waiting for the first request" check. The setup page follows the same quiet tokens (dark/light via prefers-color-scheme), opens the iPhone or Android tab from the browser user agent, and highlights the required trust step.
 
 ## Domains
 
