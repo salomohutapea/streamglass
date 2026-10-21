@@ -34,8 +34,8 @@ Use the panel's URL if the port differs. Close the client when finished.
 | `get_productivity_preferences`, `set_productivity_preferences` | Read or replace journey/watch/assertion/view configuration with revision checks |
 | `annotate_capture` | Set a capture note and subtle row highlight |
 | `list_replay_jobs`, `start_replay_job`, `cancel_replay_job` | Run explicit bounded sequential replay and page progress/cancel its own connection; starting requires `confirmSend:true` |
-| `list_captures`, `search_captures` | Page metadata or search retained URL/request/response/event text. `list_captures` items include `durationMs` and `serverMs`; filter with `minServerMs`/`minDurationMs` and sort with `sortBy` (`newest`, `serverMs`, `durationMs`) to find slow requests |
-| `get_capture_timing` | Timing breakdown for one capture: connect, TLS, request, server time (request sent to response headers), download and breakpoint pause in ms, epoch-ms timestamps, body sizes, and for SSE the gap statistics and slowest gaps between events |
+| `list_captures`, `search_captures` | Page metadata or search retained URL/request/response/event text. `list_captures` items include `durationMs` and `serverMs`; filter with `minServerMs`/`minDurationMs` and sort with `sortBy` (`newest`, `serverMs`, `durationMs`) to find slow requests. SSE items include `sseStatus`; filter with `sseStatus` (for example `client-closed`) |
+| `get_capture_timing` | Timing breakdown for one capture: connect, TLS, request, server time (request sent to response headers), download and breakpoint pause in ms, epoch-ms timestamps, body sizes, and for SSE the connection status with the original end message and phase times, plus the gap statistics and slowest gaps between events |
 | `get_capture` | Metadata, request or response content |
 | `get_capture_events`, `get_event_content` | Page retained SSE events by sequence; read full individual event text |
 | `watch_sse_events` | Receive new retained events while a stream remains open |

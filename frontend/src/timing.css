@@ -7,3 +7,28 @@
 .event-gap{font:10px ui-monospace,monospace;color:var(--muted);font-variant-numeric:tabular-nums}
 .event-gap.long{color:#d9a441;font-weight:600}
 .event-gap.long::before{content:"\25B2 ";font-size:8px}
+.sse-dot{display:inline-block;flex:none;width:7px;height:7px;border-radius:50%;background:var(--muted);vertical-align:middle}
+.sse-dot.sse-live{background:var(--q-get);box-shadow:0 0 0 0 color-mix(in srgb,var(--q-get) 60%,transparent);animation:sse-pulse 1.6s ease-out infinite}
+.sse-dot.sse-pending{background:transparent;border:1.5px solid var(--muted)}
+.sse-dot.sse-done{background:var(--muted)}
+.sse-dot.sse-warn{background:var(--q-warn)}
+.sse-dot.sse-bad{background:var(--danger)}
+@keyframes sse-pulse{70%{box-shadow:0 0 0 5px transparent}100%{box-shadow:0 0 0 0 transparent}}
+@media (prefers-reduced-motion:reduce){.sse-dot.sse-live{animation:none}}
+.sse-method .sse-dot{margin-left:5px;margin-top:-2px}
+.sse-status{margin:4px 0 12px}
+.sse-status ol{display:flex;gap:0;margin:0 0 6px;padding:0;list-style:none}
+.sse-status li{flex:1;min-width:0;display:grid;grid-template-columns:auto 1fr;column-gap:6px;align-items:center;padding-top:8px;border-top:2px solid var(--line);font-size:11px;color:var(--muted)}
+.sse-status li>i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--line)}
+.sse-status li>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sse-status li>small{grid-column:2;font:10px ui-monospace,monospace;font-variant-numeric:tabular-nums;min-height:13px}
+.sse-status li.done{border-top-color:var(--muted);color:var(--text)}
+.sse-status li.done>i{background:var(--muted)}
+.sse-status li.skipped>span{text-decoration:line-through}
+.sse-status li.current{color:var(--text);font-weight:600}
+.sse-status li.current.sse-live{border-top-color:var(--q-get)}
+.sse-status li.current.sse-warn{border-top-color:var(--q-warn)}
+.sse-status li.current.sse-bad{border-top-color:var(--danger)}
+.sse-status li.current.sse-done{border-top-color:var(--text)}
+.sse-status li.current>small{font-weight:400}
+.sse-status p{margin:0;font-size:11px}

@@ -10,6 +10,7 @@ from pathlib import Path
 from aiohttp import web
 
 from .service import MAX_BODY, is_sse
+from .sse_status import sse_status
 from .search import search as search_records
 
 
@@ -54,7 +55,7 @@ def create_app(service):
         value = service.records.get(request.match_info["id"])
         if not value:
             raise web.HTTPNotFound()
-        return web.json_response({**value, "isSSE": is_sse(value)})
+        return web.json_response({**value, "isSSE": is_sse(value), **({"sseStatus": sse_status(value)} if is_sse(value) else {})})
 
     async def traffic_tools(request):
         if request.method == "PUT":

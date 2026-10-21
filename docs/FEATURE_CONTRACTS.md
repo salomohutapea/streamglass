@@ -49,6 +49,8 @@ The inspector stays read-only; edits use detached windows. Request context remai
 
 SSE events carry `gapMs` (time since the previous event; the first is relative to response headers) and `sseDiagnostics.gapStats` holds `count/minMs/avgMs/p95Ms/maxMs`. The Events view flags gaps over 3x the median (needs 4+ gaps). MCP `get_capture` metadata, `get_capture_events` and `get_sse_diagnostics` expose these fields without new tools.
 
+SSE connection status comes from `backend/sse_status.py`: `connecting`, `open` and `streaming` while live, then one of `server-closed`, `client-closed`, `server-dropped`, `stream-reset`, `proxy-closed` or `error`. When a stream ends, the engine stores `sseDiagnostics.endReason` as that code, `endDetail` as the original message, and `endedAt`, once. Capture rows and `/api/records/{id}` add `sseStatus`. mitmproxy's error text is the only source of the end side; HTTP/2 resets read "reset by client" from either peer, so only a CANCEL reset counts as the client. Streamglass marks a flow `proxy-closed` before killing it. Older captures keep the raw message in `endReason` and are classified when read.
+
 ## SSE and body handling
 
 Use `backend/sse.py` and the async integration in `backend/engine.py`. The latter checks the pinned mitmproxy implementation; dependency upgrades require explicit compatibility work rather than bypassing that check.

@@ -33,6 +33,8 @@ const ruleSchema = z.object({ id, name: z.string().max(256).optional(), pattern:
   method: z.string().max(64).default('*'), stages: z.array(z.enum(['request', 'response', 'event'])).min(1).max(3),
   script: z.string().max(100000).default(''), enabled: z.boolean().default(true), breakpoint: z.boolean().default(true), folderId: id.optional() });
 
+// Mirrors backend/sse_status.py; the engine adds sseStatus to SSE capture rows and records.
+const SSE_STATUSES = ['connecting', 'open', 'streaming', 'server-closed', 'client-closed', 'server-dropped', 'stream-reset', 'proxy-closed', 'error'];
 export function registerTools(server, { baseUrl, token, workspaces }) {
   const base = new URL(baseUrl);
   if (base.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(base.hostname) || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !token) {
@@ -148,7 +150,7 @@ export function registerTools(server, { baseUrl, token, workspaces }) {
   }, false, a => serializeMutation(() => { const { confirmSend, ...request } = a; return api('/api/replay', 'POST', request); }), true, true);
   tool('get_sse_diagnostics', 'Read retained SSE timing diagnostics and a bounded page of event timing metadata. No event bodies are included.', { recordId: id, offset, limit }, true, async a => {
     const value = await record(a.recordId); const retained = value.events || [];
-    return { recordId: a.recordId, state: value.state, diagnostics: value.sseDiagnostics || {}, captureWarning: value.captureWarning || '',
+    return { recordId: a.recordId, state: value.state, status: value.sseStatus ?? null, diagnostics: value.sseDiagnostics || {}, captureWarning: value.captureWarning || '',
       incomplete: value.state !== 'complete' || Boolean(value.captureWarning) || (value.eventCount || 0) > retained.length,
       timings: page(retained.map(event => ({ sequence: event.sequence, id: event.id, event: event.event, receivedAt: event.receivedAt, gapMs: event.gapMs, forwarded: event.forwarded })), a.offset, a.limit) };
   });
@@ -160,15 +162,16 @@ export function registerTools(server, { baseUrl, token, workspaces }) {
   });
   tool('get_settings', 'Read complete proxy and capture settings, including TLS domain patterns, as paginated JSON text.', { offset, maxChars }, true,
     async a => textPage(JSON.stringify((await state()).settings), a.offset, a.maxChars));
-  tool('list_captures', 'List retained capture metadata, newest first. Filters are optional. Each item includes durationMs (total) and serverMs (request sent to response headers received, i.e. backend time). Use minServerMs/minDurationMs and sortBy to find slow requests.', { offset, limit, device: z.string().max(256).optional(), state: z.string().max(64).optional(), sseOnly: z.boolean().default(false),
+  tool('list_captures', `List retained capture metadata, newest first. Filters are optional. Each item includes durationMs (total) and serverMs (request sent to response headers received, i.e. backend time). Use minServerMs/minDurationMs and sortBy to find slow requests. SSE items include sseStatus (${SSE_STATUSES.join(', ')}); filter with sseStatus, e.g. client-closed for streams the client disconnected.`, { offset, limit, device: z.string().max(256).optional(), state: z.string().max(64).optional(), sseOnly: z.boolean().default(false),
+    sseStatus: z.enum(SSE_STATUSES).optional(),
     minServerMs: z.number().min(0).max(86400000).optional(), minDurationMs: z.number().min(0).max(86400000).optional(), sortBy: z.enum(['newest', 'serverMs', 'durationMs']).default('newest') }, true,
     async a => {
-      const records = (await state()).records.filter(r => (!a.device || r.device === a.device) && (!a.state || r.state === a.state) && (!a.sseOnly || r.isSSE)
+      const records = (await state()).records.filter(r => (!a.device || r.device === a.device) && (!a.state || r.state === a.state) && (!a.sseOnly || r.isSSE) && (!a.sseStatus || r.sseStatus === a.sseStatus)
         && (a.minServerMs === undefined || (r.serverMs ?? -1) >= a.minServerMs) && (a.minDurationMs === undefined || (r.durationMs ?? -1) >= a.minDurationMs));
       if (a.sortBy !== 'newest') records.sort((x, y) => (y[a.sortBy] ?? -1) - (x[a.sortBy] ?? -1));
       return page(records.map(withoutApplicationIcon), a.offset, a.limit);
     });
-  tool('get_capture_timing', 'Read the timing breakdown of one capture in milliseconds: total duration, connect, TLS, request send, server time (request sent to response headers received), download, and time paused at breakpoints, plus the epoch-ms timestamps and body sizes. requestSent is approximated at the moment the proxy releases the request upstream. For SSE captures it also returns per-event gap statistics (min/avg/p95/max) and the slowest gaps. No bodies are included.', { recordId: id, slowestGaps: z.number().int().min(0).max(50).default(5) }, true, async a => {
+  tool('get_capture_timing', 'Read the timing breakdown of one capture in milliseconds: total duration, connect, TLS, request send, server time (request sent to response headers received), download, and time paused at breakpoints, plus the epoch-ms timestamps and body sizes. requestSent is approximated at the moment the proxy releases the request upstream. For SSE captures it also returns the connection status (connecting/open/streaming, or how it ended: server-closed, client-closed, server-dropped, stream-reset, proxy-closed, error) with the original end message and the epoch-second time of each phase, per-event gap statistics (min/avg/p95/max) and the slowest gaps. No bodies are included.', { recordId: id, slowestGaps: z.number().int().min(0).max(50).default(5) }, true, async a => {
     const value = await record(a.recordId);
     const t = value.timings || {};
     const events = (value.events || []).filter(event => typeof event.gapMs === 'number');
@@ -178,7 +181,9 @@ export function registerTools(server, { baseUrl, token, workspaces }) {
       breakdown: { connectMs: t.connectMs ?? null, tlsMs: t.tlsMs ?? null, requestMs: t.requestMs ?? null, serverMs: t.serverMs ?? null, downloadMs: t.downloadMs ?? null, pausedMs: t.pausedMs ?? null },
       timestamps: Object.fromEntries(['requestStart', 'connectStart', 'tcpSetup', 'tlsSetup', 'requestSent', 'responseHeaders', 'responseEnd'].filter(key => t[key] != null).map(key => [key, t[key]])),
       sizes: { requestBytes: value.requestSize ?? null, requestEncodedBytes: value.requestSizeEncoded ?? null, responseBytes: value.responseSize ?? null, responseEncodedBytes: value.responseSizeEncoded ?? null },
-      ...(value.isSSE || events.length ? { sse: { eventCount: value.eventCount ?? events.length, gapStats: value.sseDiagnostics?.gapStats ?? null,
+      ...(value.isSSE || events.length ? { sse: { status: value.sseStatus ?? null, endDetail: value.sseDiagnostics?.endDetail ?? null,
+        phases: { startedAt: value.startedAt ?? null, headersAt: value.sseDiagnostics?.headersAt ?? null, firstEventAt: value.sseDiagnostics?.firstEventAt ?? null, endedAt: value.sseDiagnostics?.endedAt ?? value.endedAt ?? null },
+        eventCount: value.eventCount ?? events.length, gapStats: value.sseDiagnostics?.gapStats ?? null,
         firstEventAt: value.sseDiagnostics?.firstEventAt ?? null, lastEventAt: value.sseDiagnostics?.lastEventAt ?? null,
         slowestGaps: [...events].sort((x, y) => y.gapMs - x.gapMs).slice(0, a.slowestGaps).map(event => ({ sequence: event.sequence, event: event.event, gapMs: event.gapMs, receivedAt: event.receivedAt })) } } : {}),
     };

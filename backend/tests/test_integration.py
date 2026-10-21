@@ -77,6 +77,13 @@ class ProxyIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 return web.Response(body=gzip.compress(raw), headers={'Content-Type': 'text/event-stream', 'Content-Encoding': 'gzip'})
             response = web.StreamResponse(headers={'Content-Type': 'text/event-stream'})
             await response.prepare(request)
+            if request.query.get('hold'):
+                await response.write(b'data: first\n\n')
+                for _ in range(300):
+                    if request.transport is None or request.transport.is_closing():
+                        break
+                    await asyncio.sleep(.1)
+                return response
             for chunk in (raw[:13], raw[13:35], raw[35:]):
                 await response.write(chunk)
                 await asyncio.sleep(.02)
@@ -258,6 +265,20 @@ class ProxyIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self.capture(suffix), expected)
         state = await self.wait_for(lambda s: len(s['records']) == 2 and all(r['state'] == 'complete' for r in s['records']))
         self.assertEqual([r['eventCount'] for r in state['records']], [2, 2])
+        self.assertEqual([r['sseStatus'] for r in state['records']], ['server-closed', 'server-closed'])
+
+    async def test_sse_status_reports_live_stream_and_client_disconnect(self):
+        response = await self.client.get(self.url + '/events?hold=1', proxy=self.proxy)
+        self.assertEqual(await response.content.readuntil(b'\n\n'), b'data: first\n\n')
+        state = await self.wait_for(lambda s: s['records'] and s['records'][0].get('sseStatus') == 'streaming')
+        response.close()
+        state = await self.wait_for(lambda s: s['records'][0]['state'] == 'error')
+        self.assertEqual(state['records'][0]['sseStatus'], 'client-closed')
+        async with self.client.get(self.api + '/records/' + state['records'][0]['id'], headers=self.auth) as reply:
+            diagnostics = (await reply.json())['sseDiagnostics']
+        self.assertEqual(diagnostics['endReason'], 'client-closed')
+        self.assertIn('Client disconnected', diagnostics['endDetail'])
+        self.assertIsNotNone(diagnostics['endedAt'])
 
     async def test_compressed_rest_expansion_limits_capture_without_changing_forwarding(self):
         expected = self.compressed_payload

@@ -277,3 +277,17 @@ test('timing tools expose server time, breakdown, sizes and SSE gaps, and filter
   assert.deepEqual(timing.sse.slowestGaps.map(gap => gap.sequence), [2, 3]);
   assert.equal(JSON.stringify(timing).includes('"body"'), false);
 });
+
+test('SSE connection status is exposed and filterable', async t => {
+  const f = await fixture(t), c = f.client();
+  f.state.records = [{ id: 'live', isSSE: true, sseStatus: 'streaming' }, { id: 'dropped', isSSE: true, sseStatus: 'client-closed' }, { id: 'plain' }];
+  assert.deepEqual((await c.call('list_captures', { sseStatus: 'client-closed' })).value.items.map(item => item.id), ['dropped']);
+  await assert.rejects(c.call('list_captures', { sseStatus: 'nope' }));
+  Object.assign(f.record, { state: 'error', isSSE: true, sseStatus: 'client-closed', startedAt: 10, error: 'Client disconnected.',
+    sseDiagnostics: { headersAt: 10.2, firstEventAt: 10.5, endedAt: 14, endReason: 'client-closed', endDetail: 'Client disconnected.' }, events: [] });
+  const timing = (await c.call('get_capture_timing', { recordId: 'capture' })).value;
+  assert.equal(timing.sse.status, 'client-closed');
+  assert.equal(timing.sse.endDetail, 'Client disconnected.');
+  assert.deepEqual(timing.sse.phases, { startedAt: 10, headersAt: 10.2, firstEventAt: 10.5, endedAt: 14 });
+  assert.equal((await c.call('get_sse_diagnostics', { recordId: 'capture' })).value.status, 'client-closed');
+});

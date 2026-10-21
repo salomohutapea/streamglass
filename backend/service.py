@@ -20,6 +20,7 @@ from . import traffic_rules
 from .traffic_tools import DEFAULT_NETWORK, summary as traffic_summary, network_for, wait as traffic_wait, map_response
 from .timings import compute_timings, gap_stats, note_pause
 from .sse import SSEParser, EventTooLarge, serialize
+from .sse_status import finish as sse_finish, sse_status
 from .large_body import before_responseheaders, observe_responsechunk, complete_response
 
 MAX_BODY = 8 * 1024 * 1024
@@ -235,8 +236,7 @@ class Service:
         if record.get("state") in ("complete", "error", "interrupted") and record.get("endedAt") is None:
             record["endedAt"] = time.time()
             record["durationMs"] = max(0, (record["endedAt"] - record["startedAt"]) * 1000)
-        if record.get("sseDiagnostics") and record.get("state") in ("complete", "error", "interrupted"):
-            record["sseDiagnostics"]["endReason"] = record.get("error") or record.get("interruptionReason") or "upstream-eof"
+        sse_finish(record)
         payload = json.dumps(record, ensure_ascii=False)
         payload_size = len(payload.encode())
         if payload_size > MAX_CAPTURE:
@@ -286,7 +286,7 @@ class Service:
 
     def state(self):
         keys = ("id", "url", "method", "statusCode", "device", "startedAt", "endedAt", "durationMs", "state", "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "clientIsLocal", "pinned", "annotation", "tlsFailure")
-        records = [{**{key: r.get(key) for key in keys}, "pinned": bool(r.get("pinned")), "isSSE": is_sse(r), "serverMs": (r.get("timings") or {}).get("serverMs"), "devicePlatform": device_platform(r), "assertionSummary": self.assertion_summaries.get(r["id"])} for r in sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True)]
+        records = [{**{key: r.get(key) for key in keys}, "pinned": bool(r.get("pinned")), "isSSE": is_sse(r), "serverMs": (r.get("timings") or {}).get("serverMs"), "devicePlatform": device_platform(r), **({"sseStatus": sse_status(r)} if is_sse(r) else {}), "assertionSummary": self.assertion_summaries.get(r["id"])} for r in sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True)]
         pending = [{key: val for key, val in gate.items() if key not in ("future", "original")} for gate in self.pending.values()]
         return {"settings": {**self.settings, "proxyRunning": bool(self.master), "proxyError": self.proxy_error}, "rules": self.rules, "rulesRevision": self.rules_revision, "folders": self.folders, "trafficTools": traffic_summary(self.traffic_tools), "trafficToolsRevision": self.traffic_tools_revision, "records": records, "pending": pending,
                 "productivity": {"revision": self.productivity_revision, "watches": len(self.productivity["watches"]), "assertions": sum(r["enabled"] for r in self.productivity["assertions"]),
@@ -999,6 +999,8 @@ class Service:
         self.flows.pop(flow.id, None)
 
     def fail(self, flow, message):
+        if (diagnostics := self.records.get(flow.id, {}).get("sseDiagnostics")) is not None and not diagnostics.get("endedAt"):
+            diagnostics["endReason"] = "proxy-closed"
         flow.kill()
         self.cancel(flow.id, message)
 
