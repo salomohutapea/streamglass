@@ -20,17 +20,19 @@ export function RequestStructured({request, raw}: {request?:Message; raw:ReactNo
   const [mode,setMode]=useState<'structured'|'raw'>('structured');
   if (!request) return <>{raw}</>;
   const s = requestStructure(request);
-  const hasStructure = !!(s.query.length||s.cookies.length||s.form.length||s.parts.length);
-  if (!hasStructure) return <>{raw}</>;
+  const hasStructure = !!(s.query.length||s.form.length||s.parts.length);
+  // Cookies sit below the body as a collapsed disclosure, like Headers, in both views.
+  const cookies = s.cookies.length>0 && <details className="headers-disclosure"><summary>Cookies ({s.cookies.length})</summary><div className="structured-scroll"><table className="structured-table" aria-label="Cookies"><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody>{pairRows(s.cookies).map((row,i)=><tr key={i}>{row.map((cell,j)=><td key={j}>{cell}</td>)}</tr>)}</tbody></table></div></details>;
+  if (!hasStructure) return <>{raw}{cookies}</>;
   return <>
     <ViewToggle mode={mode} onChange={setMode}/>
     {mode==='raw' ? raw : <>
       <PairTable title="Query" rows={pairRows(s.query)}/>
       <PairTable title="Form" rows={pairRows(s.form)}/>
       {s.parts.length>0 && <section className="structured-section"><h3>Multipart parts ({s.parts.length})</h3><div className="structured-scroll"><table className="structured-table" aria-label="Multipart parts"><thead><tr><th>Name</th><th>Filename</th><th>Type</th><th>Size</th></tr></thead><tbody>{s.parts.map((p,i)=><tr key={i}><td><code>{p.name}</code></td><td><code>{p.filename||'—'}</code></td><td><code>{p.contentType||'—'}</code></td><td>{formatSize(p.size)}</td></tr>)}</tbody></table></div>{s.parts.map((p,i)=>p.text!==undefined&&p.text!==''&&<details key={i} className="part-preview"><summary>{p.name||`Part ${i+1}`} preview{p.truncated?' (truncated)':''}</summary><pre className="body-code">{p.text}</pre></details>)}</section>}
-      <PairTable title="Cookies" rows={pairRows(s.cookies)}/>
       {!s.form.length && !s.parts.length && raw}
     </>}
+    {cookies}
   </>;
 }
 
