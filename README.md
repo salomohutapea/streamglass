@@ -45,7 +45,7 @@ Clients send traffic through the local proxy. HTTPS content is visible only when
 On an Apple silicon Mac, run:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/salomohutapea/streamglass/main/scripts/install.sh | bash
+curl -fsSL https://salomo.dev/streamglass/install.sh | bash
 ```
 
 The script asks where to install Streamglass:
