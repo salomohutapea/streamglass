@@ -101,6 +101,16 @@ When changing compressed response handling, include cases whose decompressed siz
 
 Before labeling a 1.0.0 artifact, use the [release qualification checklist](RELEASE.md). It separates source checks, package checks, distribution signing, and target-device exercises, and records which were actually completed.
 
+### Showcase captures
+
+The screenshots and clips on the [product site](https://salomo.dev/streamglass) come from the real app. Regenerate them after UI changes:
+
+```sh
+npm run build:ui && node scripts/capture-showcase.mjs <output-dir> [live] [stills] [breakpoint] [connect] [tools]
+```
+
+Requires `ffmpeg`. The script launches the app with a temporary data directory and drives it with synthetic traffic only. The fixture backend listens on port 80 on all interfaces; `api.localtest.me` resolves to 127.0.0.1. Requests come from a copy of `node` named `TripApp`, and the device is labelled as an iOS simulator. The Connect Device still shows a placeholder LAN address, with a QR code that matches it.
+
 ## Troubleshooting
 
 **Startup dependency failure:** read the launcher's first error, verify the Node/Python versions, and rerun `npm run setup`. If using `STREAMGLASS_PYTHON`, install project dependencies into that environment yourself.
