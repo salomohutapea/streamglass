@@ -176,7 +176,11 @@ function openEditor(input, automatic = false) {
     }
     win = createWindow(undefined, input);
     editorWindows.set(key, win);
-    win.on('closed', () => editorWindows.delete(key));
+    // Forget the window as soon as it starts closing: a gate that arrives while it closes (the Breakpoints
+    // window closes itself once its list empties) must open a new window rather than land in the closing one.
+    const forget = () => { if (editorWindows.get(key) === win) editorWindows.delete(key); };
+    win.on('close', forget);
+    win.on('closed', forget);
   }
   if (input.type === 'paused' && input.token) openedGates.add(input.token);
   return true;
