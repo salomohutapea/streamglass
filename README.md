@@ -40,6 +40,29 @@ Clients send traffic through the local proxy. HTTPS content is visible only when
 - Configure optional decoded views and response re-encoding at breakpoints; app-specific encryption protocols require a matching codec.
 - Save and reopen capture archives, correlate search journeys with a waterfall, watch JSONPath values, evaluate assertions, repeat requests with limits, and save filters with capture notes/highlights.
 
+## Install or update
+
+On an Apple silicon Mac, run:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/salomohutapea/streamglass/main/scripts/install.sh | bash
+```
+
+The script asks where to install Streamglass:
+- `/Applications`, which may need an administrator password;
+- `~/Applications`, which needs no admin rights and suits managed office Macs;
+- the current folder;
+- or a folder you type.
+
+It defaults to the folder where Streamglass is already installed. It downloads the latest release and checks it against the release's `SHA256SUMS.txt`. It then quits a running Streamglass, replaces the app in that folder and opens the new copy.
+
+To update, run the same command and pick the same folder. If that version is already installed, it just opens the app. Releases are unsigned, so the script removes the macOS quarantine flag, which lets the app open without a Gatekeeper prompt. Only run it if you trust this repository's releases.
+
+Optional environment variables:
+- `STREAMGLASS_DIR=~/Applications` installs to that folder without asking.
+- `STREAMGLASS_VERSION=1.0.4` installs a specific version.
+- `STREAMGLASS_FORCE=1` reinstalls the version you already have.
+
 ## Start capturing
 
 Open Streamglass and choose **Connect device**. For Mac traffic, enable Mac capture; for HTTPS content, trust the local certificate and add the destination domains to the TLS allowlist. For a booted iOS simulator, **Prepare simulator capture** combines the setup steps. See [device setup](docs/DEVICES.md) for Android, physical iOS, certificate trust, managed Macs, and proxy restoration.
