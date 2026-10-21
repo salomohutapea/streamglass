@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import random
 import socket
 import ssl
 import sys
@@ -24,9 +25,16 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 
 def free_port():
-    with socket.socket() as sock:
-        sock.bind(('127.0.0.1', 0))
-        return sock.getsockname()[1]
+    # The engine binds these ports later, in a separate process. Ports the OS hands out (bind to 0, outgoing
+    # connections, the origin sites below) come from the ephemeral range, so pick below it to avoid a collision.
+    while True:
+        port = random.randint(20000, 40000)
+        with socket.socket() as sock:
+            try:
+                sock.bind(('0.0.0.0', port))
+            except OSError:
+                continue
+            return port
 
 
 class ProxyIntegrationTests(unittest.IsolatedAsyncioTestCase):
