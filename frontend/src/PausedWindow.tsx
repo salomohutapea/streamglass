@@ -5,11 +5,13 @@ import JsonBodyEditor from './JsonBodyEditor';
 import type { DecodedBody } from './CodecPanel';
 import { prepareJson } from './json-viewer.mjs';
 import { editableBody, resolvedBody } from './editor-draft.mjs';
+import { endedGates, isDisconnect, type EndedGate } from './paused-gates.mjs';
 import './editor-window.css';
 
 type Gate = { token: string; recordId: string; stage: string; url?: string; method?: string; pausedAt?: number; value: Record<string, any> };
 type EventHistory = { request?: { headers?: [string, string][]; body?: unknown; bodyUnavailable?: boolean }; events?: { event?: string; type?: string; data?: string; timestamp?: string | number; id?: string; sequence?: number }[]; eventCount?: number; captureWarning?: string };
-type State = { pending: Gate[]; records?: { id: string; device?: string | null }[] };
+type State = { pending: Gate[]; records?: { id: string; device?: string | null; state?: string; error?: string | null }[] };
+type Lost = EndedGate<Gate>;
 type Connection = { baseUrl: string; token: string };
 type Draft = { url: string; method: string; headers: string; body: string; status: string; event: string };
 const params = new URLSearchParams(location.search);
@@ -137,7 +139,9 @@ export default function PausedWindow() {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [now, setNow] = useState(Date.now());
+  const [lost, setLost] = useState<Lost[]>([]);
   const previousOrder = useRef<string[]>([]);
+  const seenGates = useRef(new Map<string, Gate>());
 
   useEffect(() => {
     document.title = 'Breakpoints — Streamglass';
@@ -185,6 +189,16 @@ export default function PausedWindow() {
   const devices = useMemo(() => new Map((data?.records ?? []).map(record => [record.id, record.device])), [data]);
   const current = gates.find(gate => gate.token === selected) ?? null;
 
+  // A gate that vanishes without being resolved here and whose flow ended in an error was cut off: usually the
+  // app (or the server) stopped waiting on its own timeout. Keep the window open and say so instead of closing.
+  useEffect(() => {
+    if (!data) return;
+    const live = new Map(data.pending.map(gate => [gate.token, gate]));
+    const ended = endedGates(seenGates.current, live, resolved, data.records);
+    seenGates.current = live;
+    if (ended.length) setLost(old => [...old, ...ended]);
+  }, [data, resolved]);
+
   useEffect(() => {
     if (!data) return;
     const live = new Set(data.pending.map(gate => gate.token));
@@ -212,11 +226,11 @@ export default function PausedWindow() {
   useEffect(() => {
     if (!loaded) return;
     if (gates.length) { hadGates.current = true; return; }
-    if (!hadGates.current) return;
+    if (!hadGates.current || lost.length) return;
     // Grace period: a continued response is often followed at once by its SSE event (or a request by its response).
     const timer = setTimeout(() => window.close(), 2500);
     return () => clearTimeout(timer);
-  }, [loaded, gates.length]);
+  }, [loaded, gates.length, lost.length]);
 
   const draft = current ? drafts[current.token] ?? draftFor(current) : null;
   const onResolved = useCallback((token: string, message: string) => {
@@ -226,6 +240,13 @@ export default function PausedWindow() {
   return <main className="editor-window paused-window">
     <header className="editor-window-heading window-header"><h1>Breakpoints</h1><span>{gates.length ? `${gates.length} paused` : 'Nothing paused'}</span></header>
     {error && <div className="editor-error" role="alert"><span>{error}</span><button onClick={() => setError('')}>Dismiss</button></div>}
+    {lost.map(({ gate, reason, pausedMs }) => {
+      const { path } = splitUrl(gate.url ?? gate.value.url);
+      return <div key={gate.token} className="editor-error paused-lost" role="alert">
+        <span><strong>{gate.method ?? gate.value.method ?? 'HTTP'} {path || '/'}</strong> ended after {formatWait(pausedMs)} paused at {stageLabel(gate.stage).toLowerCase()}: {reason}.{isDisconnect(reason) ? ' The app or the server stopped waiting, usually on its own timeout (OkHttp defaults to 10s; many iOS apps use 15–60s). Continue sooner, or raise the app\'s timeout while debugging.' : ''} Edits were not sent.</span>
+        <button onClick={() => setLost(old => old.filter(item => item.gate.token !== gate.token))}>Dismiss</button>
+      </div>;
+    })}
     <div className="paused-layout">
       <nav className="paused-list" aria-label="Paused requests">
         {gates.map(gate => {
