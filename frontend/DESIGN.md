@@ -8,7 +8,7 @@ Toolbar 46px, pane toolbars 38px, sidebar 48px rail (expanding to 216px on hover
 
 Validation: TypeScript and production UI build passed. Actual Electron smoke passed with source and packaged engines, including settings roundtrip, rules, breakpoint editing, and detached inspector. Physical-device setup and exhaustive visual/accessibility checks remain unverified.
 
-Scripts use independent editable wildcard rules with method and stage selectors. Settings is split into Proxy (listen port, local-network access), HTTPS / TLS and Appearance sections; agent (MCP) setup lives in Tools → Agent (MCP). Paused body edits preserve the original byte representation when text is untouched. Failed saves keep their editor open with an inline error.
+Scripts use independent editable wildcard rules with method and stage selectors. Settings is split into Proxy (listen port, local-network access), HTTPS / TLS and Appearance sections; agent (MCP) setup lives in Tools → Agent (MCP), the first item under AI agents. Paused body edits preserve the original byte representation when text is untouched. Failed saves keep their editor open with an inline error.
 
 ## Visual design
 
