@@ -21,6 +21,8 @@ The CSO helper could not create a snapshot because this folder is not a Git work
 
 The npm override remains until electron-builder updates its downloader dependency. Do not downgrade electron-builder merely to make the audit count disappear. The advisory describes attacker-controlled format-string precision; no path from captured traffic to the build logger was established. See [the advisory](https://github.com/advisories/GHSA-hp3w-g68c-fv3c) and [global-agent's major-version notes](https://github.com/gajus/global-agent/releases/tag/v4.0.0).
 
+The update check is the only Node request that leaves the Mac; other Node requests go to the local engine on 127.0.0.1. It asks GitHub for `Accept-Encoding: identity`, so Node's decoders never handle a compressed network response. This mitigates the Brotli out-of-bounds write CVE-2026-111497 from the [October 2026 Node.js security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases). Electron 44.8.0 bundles Node 24.22.0, and the fix is in 24.22.1. Upgrade Electron once a release bundles a patched Node. Captured traffic is decoded by the Python engine, not Node.
+
 SSE retry metadata also uses a bounded safe-integer conversion. A frame containing thousands of retry digits no longer raises Python's integer conversion error and interrupts capture; the original frame still forwards unchanged. A regression covers oversized values and long leading-zero values.
 
 ## Historical dependency findings and resolution
