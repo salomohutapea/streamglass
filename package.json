@@ -1,6 +1,6 @@
 {
   "name": "streamglass",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "license": "MIT",
   "description": "A local HTTP and event-stream inspection workbench",
