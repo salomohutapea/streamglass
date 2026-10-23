@@ -43,6 +43,10 @@ const backend = http.createServer(async (req, res) => {
   if (url.pathname === '/v1/recommendations') return json(res, 200, { items: ['Uluwatu', 'Nusa Penida', 'Munduk'] }, 140);
   if (url.pathname === '/v1/cart') return json(res, 409, { error: { code: 'fare_changed', message: 'The fare changed since search. Refresh to see the new price.' } }, 120);
   if (url.pathname === '/v1/loyalty/points') return json(res, 503, { error: { code: 'upstream_timeout', message: 'Loyalty service did not respond in time.' } }, 900);
+  const demo = { '/v2/cart/items': [201, { cartId: 'c_51', items: 2 }], '/v2/profile': [204], '/v2/notifications': [401, { error: 'token_expired' }],
+    '/v2/checkout': [500, { error: { code: 'payment_gateway', message: 'Upstream gateway error' } }], '/v2/wishlist': [200, { items: ['h_118', 'QZ-7510'] }],
+    '/oauth/token': [200, { access_token: 'demo', expires_in: 3600 }], '/v2/stores/nearby': [200, { stores: 3 }], '/v2/settings': [200, { theme: 'system' }] }[url.pathname];
+  if (demo) return demo[1] ? json(res, demo[0], demo[1], 60 + url.pathname.length * 7) : setTimeout(() => { res.writeHead(demo[0]); res.end(); }, 70);
   if (url.pathname === '/v1/assistant/stream') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
     res.write(`event: context\ndata: ${JSON.stringify({ conversationId: 'c_8812', model: 'trip-planner-2' })}\n\n`);
@@ -126,6 +130,16 @@ async function record(page, name, run) {
   await rm(dir, { recursive: true, force: true });
   console.log(`${name}.mp4: ${frames.length} frames, ${(end - start).toFixed(1)}s`);
 }
+// Page screenshots leave out the native window buttons; draw them where macOS puts them for the README image.
+const drawLights = (page, y = 20) => page.evaluate(top => {
+  const lights = document.createElement('div');
+  lights.id = 'showcase-lights';
+  lights.style.cssText = `position:fixed;left:16px;top:${top}px;display:flex;gap:8px;z-index:99999;pointer-events:none`;
+  for (const color of ['#ff5f57', '#febc2e', '#28c840']) { const dot = document.createElement('i'); dot.style.cssText = `width:12px;height:12px;border-radius:50%;background:${color};box-shadow:inset 0 0 0 .5px rgba(0,0,0,.25)`; lights.append(dot); }
+  document.body.append(lights);
+}, y);
+const removeLights = page => page.evaluate(() => document.getElementById('showcase-lights')?.remove());
+
 async function still(page, name) {
   await page.screenshot({ path: path.join(outDir, `${name}.png`) });
   execFileSync('sips', ['-s', 'format', 'jpeg', '-s', 'formatOptions', '82', '--resampleWidth', '1600', path.join(outDir, `${name}.png`), '--out', path.join(outDir, `${name}.jpg`)], { stdio: 'ignore' });
@@ -140,10 +154,12 @@ const sizeWindow = (app, page, width, height) => app.evaluate(({ BrowserWindow }
 // --- Run ---------------------------------------------------------------------------------------------------------
 await mkdir(outDir, { recursive: true });
 const directory = await mkdtemp(path.join(tmpdir(), 'streamglass-showcase-'));
-// Prefer the default ports so the setup screen shows 9090/9091.
+// Prefer the default ports so the setup screen shows 9090/9091. Listen on localhost so the header shows
+// 127.0.0.1 rather than this Mac's LAN address; the Connect Device scene turns LAN access on and masks it.
 const free = port => new Promise(resolve => { const probe = net.createServer().once('error', () => resolve(false)).listen(port, () => probe.close(() => resolve(true))); });
-let proxyPort = 9090;
-if (!(await free(9090) && await free(9091))) {
+let proxyPort = 0;
+for (const port of [9090, 8888]) if (!proxyPort && await free(port) && await free(port + 1)) proxyPort = port;
+if (!proxyPort) {
   const reservation = net.createServer();
   await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve));
   proxyPort = reservation.address().port;
@@ -152,7 +168,7 @@ if (!(await free(9090) && await free(9091))) {
 execFileSync(path.join(root, '.venv/bin/python'), ['-c', `import sqlite3,json,sys
 c=sqlite3.connect(sys.argv[1])
 c.execute('CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
-c.execute('INSERT INTO config VALUES (?,?)',('settings',json.dumps({'proxyPort':int(sys.argv[2])})))
+c.execute('INSERT INTO config VALUES (?,?)',('settings',json.dumps({'proxyPort':int(sys.argv[2]),'listenHost':'127.0.0.1'})))
 c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
 await new Promise((resolve, reject) => { backend.once('error', reject); backend.listen(80, resolve); });
 const tripApp = path.join(directory, 'TripApp');
@@ -210,6 +226,21 @@ try {
     await still(page, 'inspector-response');
   }
 
+  // README: a full window with a range of methods and statuses and a JSON response open.
+  if (wanted('readme')) {
+    for (const [method, pathname, body] of [['POST', '/oauth/token', { grant: 'password' }], ['GET', '/v2/settings'], ['GET', '/v2/stores/nearby?lat=-6.2&lng=106.8'], ['GET', '/v2/wishlist'],
+      ['POST', '/v2/checkout', { cartId: 'c_51' }], ['GET', '/v2/notifications'], ['PUT', '/v2/profile', { name: 'Ayu' }], ['POST', '/v2/cart/items', { sku: 'QZ-7510' }]]) { await send(method, pathname, body); await sleep(120); }
+    await sizeWindow(app, page, 1440, 868);
+    await row('/v1/flights/search').click();
+    await page.getByRole('tab', { name: 'Response', exact: true }).click();
+    await sleep(900);
+    await drawLights(page);
+    await page.screenshot({ path: path.join(outDir, 'readme.png') });
+    await removeLights(page);
+    await sizeWindow(app, page, 1440, 860);
+    console.log('readme.png');
+  }
+
   // 2. Breakpoint: pause the flight search response, change a fare, continue.
   if (wanted('breakpoint')) {
     await api('/api/rules', 'PUT', { revision: (await api('/api/state')).rulesRevision, rules: [{ id: 'fare', name: 'Flight search fares', enabled: true, method: 'GET', pattern: `${API}/v1/flights/search*`, stages: ['response'], breakpoint: true }] });
@@ -242,7 +273,6 @@ try {
 
   // 3. Phone setup: Connect Device on step 2 with local network access on.
   if (wanted('connect')) {
-    await page.getByRole('button', { name: 'Keep the sidebar expanded', exact: true }).click();
     await page.locator('.connect-button').click();
     await page.getByRole('radio', { name: /iOS Device/ }).click();
     const section = page.getByRole('region', { name: 'Phone setup page QR code' });
@@ -269,7 +299,6 @@ try {
     await sleep(600);
     await still(page, 'connect-device');
     await page.keyboard.press('Escape');
-    await page.getByRole('button', { name: 'Let the sidebar collapse', exact: true }).click();
     await sleep(400);
   }
 
