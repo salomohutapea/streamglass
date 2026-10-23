@@ -1,0 +1,63 @@
+/* Proxyman-style header: grouped capsule controls and a central status capsule. Doubles as the macOS title bar. */
+header.toolbar{height:52px;gap:12px;justify-content:flex-start}
+.toolbar-group{display:flex;align-items:center;gap:8px;flex-shrink:0;-webkit-app-region:no-drag}
+.toolbar-group:last-child{margin-left:auto}
+.tool-capsule{display:flex;align-items:center;gap:2px;padding:3px;border-radius:999px;background:var(--raised);border:1px solid var(--line)}
+.tool-button{position:relative;width:30px;height:28px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--text)}
+.tool-button svg{width:16px;height:16px}
+.tool-button:hover:not(:disabled){background:var(--hover)}
+.tool-button.active{color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.tool-dot{position:absolute;top:4px;right:5px;width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--raised)}
+.capture-button{width:36px;height:36px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--raised);color:var(--text)}
+.capture-button:hover:not(:disabled){background:var(--hover)}
+.capture-button.playing{color:var(--text)}
+.capture-button:not(.playing){color:var(--q-get,#3ecf8e)}
+
+.status-capsule{flex:1 1 auto;min-width:0;max-width:720px;margin:0 auto;display:flex;align-items:center;gap:8px;height:34px;padding:0 6px 0 14px;border-radius:999px;background:var(--raised);border:1px solid var(--line);font-size:12px;color:var(--muted);white-space:nowrap;-webkit-app-region:no-drag}
+.status-capsule strong{color:var(--text);font-weight:600}
+.status-capsule .brand-logo{width:16px;height:16px}
+.status-address{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.status-address b{color:var(--text);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;font-size:11px}
+.status-sep{color:color-mix(in srgb,var(--muted) 45%,transparent)}
+.status-state{border:0;background:transparent;padding:2px 4px;font-weight:600;color:var(--text)}
+.status-state:hover:not(:disabled){background:var(--hover)}
+.status-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;background:var(--muted)}
+.status-recording .status-dot{background:var(--q-get,#3ecf8e);box-shadow:0 0 0 3px color-mix(in srgb,var(--q-get,#3ecf8e) 22%,transparent)}
+.status-paused .status-dot{background:var(--q-warn,#e8a23d)}
+.status-paused .status-state{color:var(--q-warn,#e8a23d)}
+.status-stopped .status-dot,.status-disconnected .status-dot{background:var(--danger)}
+.status-stopped .status-state,.status-disconnected .status-state{color:var(--danger)}
+.status-badges{margin-left:auto;display:flex;gap:4px}
+.status-badge{padding:3px 10px;border:0;border-radius:999px;font-size:11px;font-weight:600}
+.status-badge.warn{background:color-mix(in srgb,var(--q-warn,#e8a23d) 20%,transparent);color:var(--q-warn,#e8a23d)}
+.status-badge.accent{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)}
+.detached .toolbar-group,.detached .status-badges{display:none}
+@media(max-width:1180px){.status-address{display:none}.status-address+.status-sep{display:none}}
+@media(max-width:980px){.status-capsule strong,.status-capsule .brand-logo,.status-capsule .status-sep:first-of-type{display:none}}
+
+/* Filter bar: opened with ⌘F; stays visible and tinted while any filter hides requests. */
+.filter-bar{display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--line);background:var(--panel);flex-shrink:0}
+.filter-bar.active{background:color-mix(in srgb,var(--accent) 7%,var(--panel));box-shadow:inset 3px 0 var(--accent)}
+.filter-bar select{height:28px;padding:0 8px;font-size:11px}
+.filter-scope{font-weight:600;color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--line))!important}
+.filter-input{flex:1;min-width:0;display:flex;align-items:center;gap:7px;height:28px;padding:0 6px 0 9px;border:1px solid var(--line);border-radius:6px;background:var(--input);color:var(--muted)}
+.filter-input:focus-within{border-color:var(--accent)}
+.filter-input input{flex:1;min-width:0;border:0;padding:0;background:transparent;outline:none}
+.filter-input input:focus-visible{outline:none}
+.filter-input .icon-button{width:20px;height:20px;padding:2px;color:var(--muted)}
+.filter-bar>.icon-button{width:26px;height:26px;color:var(--muted)}
+.filter-summary{display:flex;align-items:center;gap:8px;padding:5px 12px;font-size:11px;color:var(--muted);background:color-mix(in srgb,var(--accent) 7%,var(--panel));border-bottom:1px solid var(--line)}
+.filter-summary strong{color:var(--accent);font-weight:600}
+.filter-summary button{margin-left:auto;border:0;background:transparent;color:var(--accent);padding:2px 6px;font-size:11px}
+/* Extra conditions continue the filter bar below its first row, in the same tinted block. */
+.filter-bar:has(+.filter-conditions){border-bottom:0;padding-bottom:4px}
+.filter-bar+.filter-conditions{gap:4px;padding:0 10px 6px;background:color-mix(in srgb,var(--accent) 7%,var(--panel));box-shadow:inset 3px 0 var(--accent)}
+.filter-conditions .filter-condition{gap:6px;height:auto;padding:0;border:0;background:transparent}
+.filter-conditions .filter-condition select{height:28px;padding:0 8px;font-size:11px;color:var(--text);background:var(--input);border:1px solid var(--line);border-radius:6px}
+.filter-conditions .filter-condition .condition-joiner{width:64px;max-width:none;color:var(--accent);font-weight:600}
+.filter-conditions .filter-condition .condition-text{height:28px;padding:0 9px;background:var(--input);border:1px solid var(--line);border-radius:6px}
+.filter-conditions .filter-condition .condition-text:focus{border-color:var(--accent)}
+.filter-conditions .filter-condition>.icon-button{width:26px;height:26px;padding:5px;color:var(--muted)}
+.filter-bar .filter-scope{width:104px}
+.filter-bar select[aria-label="Match mode"],.filter-condition select[aria-label$="match mode"]{width:140px}
+.filter-condition select[aria-label$="search content"]{width:104px}

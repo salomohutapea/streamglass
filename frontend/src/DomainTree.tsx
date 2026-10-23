@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState, type MouseEvent } from 'react';
-import { ChevronRight, Copy, Crosshair, Eye, EyeOff, Globe, Lock, MoreVertical, Search } from 'lucide-react';
+import { ChevronRight, Copy, Crosshair, Eye, EyeOff, Globe, Lock, MoreVertical, Pin, PinOff } from 'lucide-react';
 import { buildDomainTree, filterHostNodes, type DomainFilter, type DomainNode } from './domain-tree.mjs';
 import './domain-tree.css';
 
@@ -16,17 +16,19 @@ type Props = {
   onRestore: (host: string | null) => void;
   onInspect: (host: string) => void;
   onCopy: (host: string) => void;
+  /** The sidebar filter text (⌘⇧F); narrows hosts and paths. */
+  query: string;
+  isPinned: (host: string) => boolean;
+  onPin: (host: string) => void;
 };
-
-const SEARCH_THRESHOLD = 8;
 
 function DomainTreeView(props: Props) {
   const { records, hidden, active, collapsed, busy, isInspected } = props;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const [query, setQuery] = useState('');
   const [menu, setMenu] = useState<{ host: string; x: number; y: number } | null>(null);
   const tree = useMemo(() => buildDomainTree(records, { hidden }), [records, hidden]);
-  const visible = useMemo(() => (tree.length > SEARCH_THRESHOLD ? filterHostNodes(tree, query) : tree), [tree, query]);
+  const { query } = props;
+  const visible = useMemo(() => filterHostNodes(tree, query), [tree, query]);
 
   useEffect(() => {
     if (!menu) return;
@@ -67,7 +69,6 @@ function DomainTreeView(props: Props) {
     <div className="sidebar-heading device-heading"><button className="sidebar-section-toggle" aria-expanded={!collapsed} aria-controls="sidebar-domains" onClick={props.onToggleSection}><ChevronRight aria-hidden="true" />Domains</button></div>
     <button type="button" className="nav-row domain-rail-button" aria-label="Domains" title="Domains" onClick={props.onToggleSection}><Globe /></button>
     <div id="sidebar-domains" className="domain-tree" hidden={collapsed}>
-      {tree.length > SEARCH_THRESHOLD && <label className="domain-search"><Search size={12} /><input aria-label="Search domains" placeholder="Search domains" value={query} onChange={event => setQuery(event.target.value)} /></label>}
       <div role="tree" aria-label="Captured domains">{visible.map(node => renderNode(node, 0))}</div>
       {!tree.length && <p className="sidebar-note">{hidden.size ? 'All domains are hidden.' : 'Hosts appear when they send traffic.'}</p>}
       {!!tree.length && !visible.length && <p className="sidebar-note">No matching domains.</p>}
@@ -78,6 +79,7 @@ function DomainTreeView(props: Props) {
     </div>
     {menu && <div className="domain-menu" role="menu" style={{ left: menu.x, top: menu.y }} onPointerDown={event => event.stopPropagation()}>
       <button role="menuitem" onClick={() => { props.onSelect({ host: menu.host }); setMenu(null); }}><Crosshair size={13} />Focus</button>
+      <button role="menuitem" onClick={() => { props.onPin(menu.host); setMenu(null); }}>{props.isPinned(menu.host) ? <><PinOff size={13} />Unpin from Favorites</> : <><Pin size={13} />Pin to Favorites</>}</button>
       <button role="menuitem" onClick={() => { props.onHide(menu.host); setMenu(null); }}><EyeOff size={13} />Hide</button>
       <button role="menuitem" disabled={busy || isInspected(menu.host)} onClick={() => { props.onInspect(menu.host); setMenu(null); }}><Lock size={13} />{isInspected(menu.host) ? 'SSL inspection on' : 'Enable SSL inspection'}</button>
       <button role="menuitem" onClick={() => { props.onCopy(menu.host); setMenu(null); }}><Copy size={13} />Copy host</button>

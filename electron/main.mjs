@@ -78,7 +78,8 @@ function createWindow(recordId, editor) {
     title: 'Streamglass', backgroundColor: '#17191e',
     fullscreenable: !auxiliary,
     icon: path.join(root, 'electron/assets/streamglass.png'),
-    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } } : {}),
+    // Traffic lights centre in the 52px main toolbar and in the 46px header of editor windows.
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: editor ? 16 : 20 } } : {}),
     webPreferences: { preload: path.join(root, 'electron/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
   if (auxiliary && process.platform === 'darwin') {

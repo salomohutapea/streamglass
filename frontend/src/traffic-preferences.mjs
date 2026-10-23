@@ -7,6 +7,16 @@ export function readColumns(raw) {
     return columns.length ? columns : defaultColumns;
   } catch { return defaultColumns; }
 }
+// Column widths the user dragged, in CSS pixels; unknown columns and out-of-range values are dropped.
+export const columnWidthsKey = 'streamglass.columnWidths.v1';
+export const MIN_COLUMN = 48, MAX_COLUMN = 900;
+export function readColumnWidths(raw) {
+  try {
+    const value = JSON.parse(raw ?? '{}');
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter(([id, width]) => columnIds.includes(id) && Number.isFinite(width) && width >= MIN_COLUMN && width <= MAX_COLUMN).map(([id, width]) => [id, Math.round(width)]));
+  } catch { return {}; }
+}
 export function isSSE(record) {
   if (record.kind === 'tunnel') return false;
   const headers = record.response?.headers ?? {};

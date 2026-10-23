@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readColumns,matchesLibrary,matchesQuickFilters} from './traffic-preferences.mjs';
+import {readColumnWidths,readColumns,matchesLibrary,matchesQuickFilters} from './traffic-preferences.mjs';
 test('column preferences discard unknown properties and retain a usable default',()=>{
  assert.deepEqual(readColumns('["status","status","secret"]'),['status']);
  for(const value of ['[]','{}','bad','["unknown"]',null]) assert.deepEqual(readColumns(value),['method','request','status','duration']);
@@ -28,4 +28,10 @@ test('quick filters OR within each group and AND between groups',()=>{
  assert.equal(matchesQuickFilters({url:'https://example.com',state:'streaming'},['SSE'],[]),false);
  assert.equal(matchesQuickFilters({url:'https://example.com',response:{headers:{'Content-Type':'text/event-stream'}}},['SSE'],[]),true);
  assert.equal(matchesQuickFilters({url:'https://example.com',response:{headers:[['content-type','text/event-stream']]}},['SSE'],[]),true);
+});
+
+test('column widths keep known columns within range', () => {
+ assert.deepEqual(readColumnWidths('{"method":90.4,"status":10,"secret":100,"request":"wide","path":2000}'),{method:90});
+ assert.deepEqual(readColumnWidths('nope'),{});
+ assert.deepEqual(readColumnWidths('[1]'),{});
 });

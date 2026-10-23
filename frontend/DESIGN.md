@@ -4,7 +4,7 @@ Operate mode. A daily debugging utility for engineers inspecting HTTP and SSE tr
 
 System typography at 12px, 11px metadata, 10px column labels; monospace only for payloads, methods, and measured values. Dark charcoal surfaces and muted blue selection keep traffic readable; light mode uses the same hierarchy.
 
-Toolbar 46px, pane toolbars 38px, sidebar 48px rail (expanding to 216px on hover), inspector initially 440px. Drag separators or focus them and use arrow keys. Rules, scripts, device setup and TLS settings use native dialog focus handling. Lucide icons use a consistent 16px stroke system; icon controls expose names and tooltips. No seeded traffic: empty and connection failure states describe the actual backend state.
+Toolbar 52px, pane toolbars 38px, sidebar expanded at 216px (resizable 180–420px, or collapsed to a 48px rail), inspector initially 440px. Drag separators or focus them and use arrow keys. Rules, scripts, device setup and TLS settings use native dialog focus handling. Lucide icons use a consistent 16px stroke system; icon controls expose names and tooltips. No seeded traffic: empty and connection failure states describe the actual backend state.
 
 Validation: TypeScript and production UI build passed. Actual Electron smoke passed with source and packaged engines, including settings roundtrip, rules, breakpoint editing, and detached inspector. Physical-device setup and exhaustive visual/accessibility checks remain unverified.
 
@@ -18,9 +18,17 @@ The interface uses the quiet design. Tokens live in `src/style.css`: background 
 
 Every window (main, detached inspector, rules editors, Tools, About) uses a hidden inset title bar on macOS, so the red/yellow/green controls sit inside the window's own header instead of a separate black bar. `main.tsx` sets `data-titlebar="inset"` on all windows. Any new window header must use the `.window-header` class (46px tall, drag region, 84px left inset for the controls, interactive children opt out of dragging). The main toolbar keeps its own equivalent padding and drops it in full screen.
 
+## Header and filtering
+
+The main toolbar follows Proxyman's layout: a round capture (play/pause) button and an export/delete capsule on the left; a status capsule in the middle with a status dot, the app name, `Listening on <address>:<port>` (the LAN address when local-network access is on) and the capture state, which toggles capture when clicked, plus badges for paused breakpoints and an active filter; and capsules on the right for the filter (⌘F), the command palette, Breakpoints, Scripts, Tools, Settings, the tour and the theme. Traffic lights sit at 16,20 in the main window so they centre in the 52px bar.
+
+The filter bar is hidden until ⌘F (or the toolbar's filter button). It stays open and tinted while any text filter or extra condition is active; Esc clears the text, then closes, and its × clears and closes. The scope select (URL, Request, Response, SSE events) is styled as the bar's label and changes the placeholder, so it is clear what is searched. Whenever any filter hides requests (text, conditions, library, application, device, domain, protocol, status or TLS errors), a summary line reads "Showing N of M" with every active filter spelled out and a Clear all button.
+
+The sidebar footer holds a Filter (⌘⇧F) field that narrows Favorites, Applications, Devices and Domains. Applications, devices and domains can be pinned to a Favorites section at the top (pin button on hover, or Pin to Favorites in a domain's menu); pins persist in local storage (`streamglass.sidebar.favorites`, logic in `sidebar-favorites.mjs`).
+
 ## Sidebar and theme motion
 
-The sidebar rail expands on hover or focus with an animated width change, and a pin button at its top keeps it expanded (`streamglass.sidebar.pinned` in local storage, `data-sidebar-pinned` on the root). Switching light/dark adds `.theme-transition` to the root for 400 ms so colors cross-fade. Both honor `prefers-reduced-motion`.
+The sidebar starts expanded and can be resized from its edge (width in `streamglass.sidebar.width`). Its pin button collapses it to a rail that expands on hover or focus with an animated width change; pinning again keeps it expanded (`streamglass.sidebar.pinned` in local storage, `data-sidebar-pinned` on the root). Switching light/dark adds `.theme-transition` to the root for 400 ms so colors cross-fade. Both honor `prefers-reduced-motion`.
 
 ## Keyboard and navigation
 
@@ -32,7 +40,7 @@ Connect Device is a three-step flow: choose a platform; set up (proxy address, o
 
 ## Domains
 
-The sidebar Domains section groups captured records by host, then by up to two leading path segments, as a collapsible tree with counts (hosts sorted by count, a search box above 8 hosts, at most 40 paths per node). Encrypted CONNECT tunnels count under their host and show a lock; the lock turns green when SSL inspection is enabled. Clicking a host or path sets a single domain filter that composes with the search, conditions, library, device and application filters, and appears as a removable "Domain:" chip above the table. Hover or right-click a host for Focus, Hide, Enable SSL inspection (reuses `enableInspection`) and Copy host. Hidden hosts are excluded from the table, persisted in local storage (`streamglass.domains.hidden`, guarded by try/catch) and listed in a "Hidden domains" footer with restore. The collapsed 48px rail shows only a globe button. Pure grouping and matching live in `domain-tree.mjs`.
+The sidebar Domains section groups captured records by host, then by up to two leading path segments, as a collapsible tree with counts (hosts sorted by count, narrowed by the sidebar filter, at most 40 paths per node). Encrypted CONNECT tunnels count under their host and show a lock; the lock turns green when SSL inspection is enabled. Clicking a host or path sets a single domain filter that composes with the search, conditions, library, device and application filters, and appears as a removable "Domain:" chip above the table. Hover or right-click a host for Focus, Hide, Enable SSL inspection (reuses `enableInspection`) and Copy host. Hidden hosts are excluded from the table, persisted in local storage (`streamglass.domains.hidden`, guarded by try/catch) and listed in a "Hidden domains" footer with restore. The collapsed 48px rail shows only a globe button. Pure grouping and matching live in `domain-tree.mjs`.
 
 ## JSON and body viewing
 

@@ -3,9 +3,6 @@
 .domain-rail-button{display:none}
 :root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) .domain-rail-button{display:flex}
 :root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) .domain-tree{display:none}
-.domain-search{display:flex;align-items:center;gap:5px;margin:2px 0 4px;padding:0 7px;height:24px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--muted)}
-.domain-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);font:inherit}
-.domain-search:focus-within{border-color:var(--accent,#5b8def)}
 .domain-row{position:relative;display:flex;align-items:center;gap:2px;min-height:24px;border-radius:6px;padding-right:2px}
 .domain-row:hover{background:var(--hover)}
 .domain-row.selected{background:color-mix(in srgb,var(--accent,#5b8def) 24%,transparent)}
@@ -41,5 +38,3 @@
 .domain-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .domain-chip button{display:grid;place-items:center;width:16px;height:16px;padding:0;border:0;border-radius:50%;background:transparent;color:inherit;cursor:pointer}
 .domain-chip button:hover{background:var(--hover)}
-/* The field itself shows focus through the box's accent border; the global input ring would double it. */
-.domain-search input:focus-visible{outline:none}

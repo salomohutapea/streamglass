@@ -2,7 +2,7 @@
 
 ## Organize the workbench
 
-Use the pin action on a row or its context menu, then open **Pinned** in the sidebar. Pins persist with the capture and protect it from automatic eviction within the bounded capture budget. Explicit delete/clear still removes pinned captures; pinning does not recover previously truncated content.
+Use the pin action on a row or its context menu, then open **Pinned** in the sidebar. Separately, applications, devices and domains can be pinned to **Favorites** at the top of the sidebar, and the Filter (⌘⇧F) field at the bottom of the sidebar narrows its lists. While any filter hides requests, a line above the table shows how many are visible and lists every active filter, with Clear all. Pins persist with the capture and protect it from automatic eviction within the bounded capture budget. Explicit delete/clear still removes pinned captures; pinning does not recover previously truncated content.
 
 Choose **Inspector below** or **Inspector on right** from the toolbar or View menu. Both layouts remain resizable and the placement and dimensions persist. The inspector remains read-only.
 
@@ -36,7 +36,7 @@ HTTPS connections are listed even when SSL inspection is disabled. These encrypt
 
 ## Finding and inspecting traffic
 
-Choose URL, Request, Response, or SSE events beside the search box, then choose Contains, Does not contain, Equals, Starts with, Ends with, or Wildcard. Matching is case-insensitive; wildcard supports `*` and `?`. Search covers retained content only, and the UI warns when a streamed body or truncated event capture limits coverage.
+Press ⌘F (or the magnifier in the toolbar) to open the filter bar. Choose URL, Request, Response, or SSE events in its first menu, which labels what you are searching, then choose Contains, Does not contain, Equals, Starts with, Ends with, or Wildcard. Matching is case-insensitive; wildcard supports `*` and `?`. Search covers retained content only, and the UI warns when a streamed body or truncated event capture limits coverage.
 
 Click Method, Request, or Time to sort; click the same heading again to reverse direction. Time shows the request start time in your local timezone with milliseconds. SSE requests include `| SSE` beside their HTTP method. The table uses a lock for encrypted connections; response status remains available in the inspector.
 

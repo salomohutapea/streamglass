@@ -139,9 +139,12 @@ dialog{border:1px solid var(--line);border-radius:12px}
 .sidebar-pin[aria-pressed=true]{color:var(--accent)}
 .sidebar>*:not(.sidebar-pin){animation:sidebar-fade .22s ease both}
 @keyframes sidebar-fade{from{opacity:0}to{opacity:1}}
-:root[data-sidebar-pinned] .sidebar,:root[data-sidebar-pinned] .sidebar:hover,:root[data-sidebar-pinned] .sidebar:has(:focus-visible){width:216px;margin-right:0;overflow:auto;background:var(--panel);box-shadow:none}
-:root[data-sidebar-pinned] .workspace.inspector-below{grid-template-columns:216px 0 minmax(0,1fr)}
-:root[data-sidebar-pinned] .inspector-below>.sidebar,:root[data-sidebar-pinned] .inspector-below>.sidebar:hover{width:216px}
+:root[data-sidebar-pinned] .sidebar,:root[data-sidebar-pinned] .sidebar:hover,:root[data-sidebar-pinned] .sidebar:has(:focus-visible){width:var(--sidebar-width,216px);margin-right:0;overflow:auto;background:var(--panel);box-shadow:none}
+:root[data-sidebar-pinned] .workspace.inspector-below{grid-template-columns:var(--sidebar-width,216px) 5px minmax(0,1fr)}
+:root[data-sidebar-pinned] .inspector-below>.sidebar,:root[data-sidebar-pinned] .inspector-below>.sidebar:hover{width:var(--sidebar-width,216px)}
+/* An expanded sidebar can be resized from its edge. */
+:root[data-sidebar-pinned] .splitter[aria-label="Resize sidebar"],:root[data-sidebar-pinned] .inspector-below>.splitter:first-of-type{display:block;cursor:col-resize}
+:root[data-sidebar-pinned] .sidebar{transition:none}
 
 /* Smooth appearance switch: View Transitions cross-fade a snapshot, so no per-element transitions */
 ::view-transition-old(root),::view-transition-new(root){animation-duration:.32s;animation-timing-function:ease}
@@ -184,3 +187,30 @@ dialog[open]::backdrop{animation:backdrop-in .2s ease}
 .search-spinner{flex-shrink:0;color:var(--muted)}
 .tools-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:60vh;color:var(--muted)}
 @media(prefers-reduced-motion:reduce){.spin{animation-duration:2.4s}}
+
+/* Sidebar footer: Proxyman-style filter (⌘⇧F) above the TLS allowlist, kept at the bottom while the list scrolls. */
+.sidebar-footer{position:sticky;bottom:0;margin-top:auto;background:inherit;padding-top:6px}
+.sidebar-footer .sidebar-bottom{margin-top:0}
+.sidebar-filter{display:flex;align-items:center;gap:7px;height:28px;margin:0 2px 4px;padding:0 6px 0 10px;border:1px solid var(--line);border-radius:999px;background:var(--raised);color:var(--muted)}
+.sidebar-filter:focus-within{border-color:var(--accent)}
+.sidebar-filter input{flex:1;min-width:0;border:0;padding:0;background:transparent;font-size:11px;outline:none}
+.sidebar-filter input:focus-visible{outline:none}
+.sidebar-filter .icon-button{width:18px;height:18px;padding:2px}
+:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) :is(.sidebar-filter,.favorites){display:none}
+.device-row>.icon-button.active{opacity:1;background:transparent}
+.favorites .device-row>.icon-button{opacity:0}
+.favorites .device-row:hover>.icon-button,.favorites .device-row:focus-within>.icon-button{opacity:1}
+
+/* Row actions sit right-aligned in order: last at 3px, then 25px, then 47px (pin, edit, delete on devices). */
+.device-row>.icon-button:nth-last-child(2){right:25px}
+.device-row>.icon-button:nth-last-child(3){right:47px}
+.device-row:has(>.icon-button:nth-last-child(3)) .nav-row{padding-right:78px}
+.device-row:has(>.icon-button:only-of-type) .nav-row{padding-right:30px}
+/* Column resize handles on the right edge of each header. */
+.traffic th{position:sticky}
+.column-resizer{position:absolute;top:4px;bottom:4px;right:-3px;width:7px;cursor:col-resize;z-index:2;touch-action:none}
+.column-resizer::after{content:"";position:absolute;left:3px;top:0;bottom:0;width:1px;background:var(--line);transition:background .15s}
+.column-resizer:hover::after,.column-resizer:focus-visible::after,body.column-resizing .column-resizer:hover::after{background:var(--accent);width:2px;left:2.5px}
+.column-resizer:focus-visible{outline:none}
+body.column-resizing,body.column-resizing *{cursor:col-resize!important;user-select:none}
+.app>.traffic-footer{flex-shrink:0;border-top:1px solid var(--line)}

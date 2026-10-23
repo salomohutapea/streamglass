@@ -9,6 +9,7 @@ import net from 'node:net';
 import { _electron as electron } from 'playwright';
 
 let sidebarNudge = 0;
+async function openFilter(page) { if (!await page.getByRole('textbox', { name: 'Filter requests', exact: true }).count()) await page.getByRole('button', { name: 'Filter requests', exact: true }).click(); }
 async function openSidebar(page) { for (let attempt = 0; attempt < 6; attempt++) { await page.mouse.move(600, 400); await page.locator('.sidebar').hover({ position: { x: 10 + (sidebarNudge++ % 7), y: 150 + (attempt % 3) * 20 } }); await page.waitForTimeout(60); if (await page.locator('.sidebar:hover').count()) return; } }
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -81,8 +82,11 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await page.getByRole('row').filter({ hasText: 'z-search/sse' }).waitFor();
     assert.equal(await page.locator('tbody tr.incoming-row').count(), 0);
     assert.equal(await page.getByRole('button', { name: 'Stop proxy', exact: true }).count(), 0);
-    assert.equal(await page.locator('.toolbar-controls button[aria-label$="capture and rules"]').count(), 1);
-    const searchStyle = await page.locator('.header-search').evaluate(element => { const style = getComputedStyle(element); return { background: style.backgroundColor, border: style.borderTopWidth, radius: style.borderRadius }; });
+    assert.equal(await page.locator('.toolbar button[aria-label$="capture and rules"]').count(), 1);
+    assert.equal(await page.getByRole('textbox', { name: 'Filter requests' }).count(), 0, 'The filter bar opens on demand');
+    await page.keyboard.press('Meta+f');
+    await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Filter requests');
+    const searchStyle = await page.locator('.filter-input').evaluate(element => { const style = getComputedStyle(element); return { background: style.backgroundColor, border: style.borderTopWidth, radius: style.borderRadius }; });
     assert.notEqual(searchStyle.background, 'rgba(0, 0, 0, 0)');
     assert.equal(searchStyle.border, '1px');
     assert.notEqual(searchStyle.radius, '0px');
@@ -187,6 +191,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     assert.notEqual(deviceWidth.selected, 'rgba(0, 0, 0, 0)');
     assert.equal(deviceWidth.editPosition, 'absolute');
     await safari.click();
+    await openFilter(page);
     const applicationQuery = page.getByRole('textbox', { name: 'Filter requests' });
     await applicationQuery.fill('a-json');
     await page.getByRole('heading', { name: 'No matching requests', exact: true }).waitFor();
@@ -221,6 +226,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
       await header.getByRole('button').click();
       assert.deepEqual(await rows.allTextContents(), [...first].reverse());
     }
+    await openFilter(page);
     const scope = page.getByRole('combobox', { name: 'Search content' });
     const mode = page.getByRole('combobox', { name: 'Match mode' });
     const query = page.getByRole('textbox', { name: 'Filter requests' });

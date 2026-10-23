@@ -103,6 +103,7 @@ c.commit()`,path.join(directory,'captures.sqlite3'),String(proxyPort)],{input:JS
     assert.equal((await api('/api/sessions')).sessions.length,2);
     await panel.getByRole('button',{name:'Close tools',exact:true}).click();
     await page.locator('.traffic tbody tr').filter({hasText:'/initial'}).filter({hasNotText:'/sse'}).getByText('failed checks',{exact:false}).waitFor();
+    await page.getByRole('button',{name:'Filter requests',exact:true}).click();
     await page.getByRole('textbox',{name:'Filter requests',exact:true}).fill('/initial');
     await openTools();
     await panel.getByRole('button',{name:'Views & notes',exact:true}).click();
@@ -117,7 +118,7 @@ c.commit()`,path.join(directory,'captures.sqlite3'),String(proxyPort)],{input:JS
     assert.deepEqual((await api('/api/records/initial')).annotation,{note:'Investigate this synthetic response',color:'amber'});
     await page.getByRole('textbox',{name:'Filter requests',exact:true}).fill('');
     await panel.getByRole('button',{name:'Only initial',exact:true}).click();
-    await page.waitForFunction(()=>document.querySelector('.search input')?.value==='/initial');
+    await page.waitForFunction(()=>document.querySelector('.filter-input input')?.value==='/initial');
     assert.equal(toolsPage.isClosed(),false,'Applying a view must keep Tools open');
     await panel.getByRole('button',{name:'Close tools',exact:true}).click();
     await page.locator('.traffic tbody tr.row-highlight-amber').waitFor();
