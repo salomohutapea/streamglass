@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import CompareWorker from './compare-worker.ts?worker';
 import type { CaptureComparison } from './capture-tools.mjs';
 
-export type CompareOptions = { section: 'request' | 'response' | 'events'; ignoreFields: string[]; eventKey: 'sequence' | 'id' };
+export type CompareOptions = { section: 'request' | 'response' | 'events'; ignoreFields: string[]; eventKey: 'sequence' | 'id'; bodyOnly?: boolean };
 export type ComparisonResult = { comparison: CaptureComparison; texts: { original: string; modified: string } | null };
 
 // Compares two captures in a worker. A newer request terminates the busy worker instead of queueing behind it, and
@@ -10,7 +10,7 @@ export type ComparisonResult = { comparison: CaptureComparison; texts: { origina
 export function useCaptureComparison(left: unknown, right: unknown, options: CompareOptions) {
   const [state, setState] = useState<{ result: ComparisonResult | null; pending: boolean; error: string }>({ result: null, pending: false, error: '' });
   const worker = useRef<Worker | null>(null), busy = useRef(false), request = useRef(0);
-  const key = `${options.section}|${options.eventKey}|${options.ignoreFields.join(',')}`;
+  const key = `${options.section}|${options.eventKey}|${options.bodyOnly ? 1 : 0}|${options.ignoreFields.join(',')}`;
   useEffect(() => () => { worker.current?.terminate(); worker.current = null; }, []);
   useEffect(() => {
     if (!left || !right) { setState({ result: null, pending: false, error: '' }); return; }

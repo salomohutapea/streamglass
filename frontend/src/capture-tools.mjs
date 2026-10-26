@@ -54,6 +54,7 @@ function headers(value, path, fields, result) {
 }
 function captureMap(record, options) {
   const result = new Map(); const fields = options.ignoreFields || []; const section = options.section || 'response';
+  if (options.bodyOnly) { if (!ignored(fields, 'body', '/body')) body(record.response?.body ?? '', '/body', fields, result); return result; }
   if (section === 'events') {
     const counts = new Map();
     for (const [index, event] of (record.events || []).entries()) {
@@ -116,6 +117,7 @@ function formatObject(entries, depth) {
 }
 export function comparisonText(record, options = {}) {
   const fields = options.ignoreFields || [], section = options.section || 'response';
+  if (options.bodyOnly) return formatBody(record.response?.body ?? '', '/body', fields, 0);
   if (section === 'events') {
     const events = (record.events || []).map((event, index) => {
       const key = options.eventKey === 'id' ? event.id ?? `missing-${index}` : event.sequence ?? index, path = childPath('/events', key) + '/0', entries = [];
@@ -141,6 +143,16 @@ export function comparisonText(record, options = {}) {
   if (message.bodyUnavailable) entries.push(['body', JSON.stringify('(body not retained)')]);
   else if (message.body !== undefined && message.body !== '' && !ignored(fields, 'body', `/${section}/body`)) entries.push(['body', formatBody(message.body, `/${section}/body`, fields, 1)]);
   return formatObject(entries, 0);
+}
+
+// Custom JSON (pasted or from the clipboard) has no headers or status, so a comparison that includes it compares bodies:
+// the capture's request or response body, or its SSE event data as one JSON array. `record.custom` holds the pasted text.
+export function bodyRecord(record, section = 'response') {
+  if (typeof record?.custom === 'string') return { state: 'complete', response: { body: record.custom } };
+  let text;
+  if (section === 'events') text = `[${(record.events || []).map(event => { const data = event.data; if (typeof data !== 'string') return JSON.stringify(data ?? null); try { parse(data); return data; } catch { return JSON.stringify(data); } }).join(',')}]`;
+  else text = record[section]?.body ?? '';
+  return { state: incomplete(record, section) ? 'partial' : 'complete', response: { body: text, bodyUnavailable: record[section]?.bodyUnavailable } };
 }
 
 export function compareCaptures(left, right, options = {}) {

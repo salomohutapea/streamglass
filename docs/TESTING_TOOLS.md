@@ -33,6 +33,8 @@ Captures that a rule changed carry `appliedRules` (type, id, name and a short de
 
 Choose two captures and compare Request, Response, or SSE events. The picker lists captures newest first, with each request's start time to the millisecond and its duration, so a request sent several times in a row is easy to tell apart. You can also search by time.
 
+Either side can be **Custom JSON** instead of a capture. Type it, paste it, or use **Paste from clipboard**. Custom JSON has no status or headers, so the comparison then uses bodies only: the capture's response or request body, or its SSE event data as one JSON array, depending on **Content**. Text that isn't valid JSON is compared as a string.
+
 Both captures appear as pretty JSON in a side-by-side diff (VS Code's diff editor). Changed text is red on A and green on B, and long identical stretches fold away. Object keys and header names are sorted so reordered fields line up; arrays keep their order. JSON numeric lexemes are preserved, including integers larger than JavaScript's safe integer range. **Changed paths** below the diff lists every differing path.
 
 Ignore comma-separated property names or paths, for example `timestamp,id` or `date,x-nonce` for volatile headers. Headers compare case-insensitively while keeping duplicate values. SSE can align by sequence or event ID; repeated IDs remain separate occurrences.

@@ -4,7 +4,6 @@ import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { LoggingMessageNotificationSchema, ProgressNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { startMcpServer } from '../electron/mcp-server.mjs';
@@ -34,12 +33,10 @@ async function until(check) {
   assert.ok(check(), 'condition did not become true');
 }
 
-for (const protocol of ['sse', 'streamable']) {
+for (const protocol of ['streamable']) {
   test(`${protocol}: official SDK initialize, tools, incremental progress, and cleanup`, async t => {
     const { server } = await fixture(t);
-    const transport = protocol === 'sse'
-      ? new SSEClientTransport(new URL(server.sseUrl), { requestInit: { headers } })
-      : new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers } });
+    const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers } });
     const client = new Client({ name: 'integration-test', version: '1.0' });
     t.after(() => client.close());
     await client.connect(transport);
@@ -90,23 +87,27 @@ test('every endpoint requires the dedicated token, exact local Host, and no brow
     assert.equal(badHost, 403);
   }
   assert.equal(server.sessionCount, 0);
+  // The deprecated HTTP+SSE transport is gone; only /mcp is served.
+  for (const path of ['/sse', '/messages']) assert.equal((await fetch(new URL(path, server.url), { headers })).status, 404);
   assert.equal((await fetch(server.url, { headers: { ...headers, 'Mcp-Session-Id': 'missing' } })).status, 404);
   assert.equal((await fetch(server.url, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: '{' })).status, 400);
 });
 
-test('sessions are bounded, legacy disconnect cleans up, shutdown closes streams, port conflict rejects', async t => {
+test('sessions are bounded, termination cleans up, shutdown closes streams, port conflict rejects', async t => {
   const { server, bootstrap } = await fixture(t);
   await assert.rejects(startMcpServer({ port: server.port, authToken, bootstrap }), { code: 'EADDRINUSE' });
-  const controllers = [];
-  t.after(() => controllers.forEach(controller => controller.abort()));
+  const initialize = () => fetch(server.url, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'bounded', version: '1.0' } } }) });
+  const ids = [];
   for (let i = 0; i < 16; i++) {
-    const controller = new AbortController(); controllers.push(controller);
-    const response = await fetch(server.sseUrl, { headers, signal: controller.signal });
+    const response = await initialize();
     assert.equal(response.status, 200);
+    ids.push(response.headers.get('mcp-session-id'));
+    await response.text();
   }
   assert.equal(server.sessionCount, 16);
-  assert.equal((await fetch(server.sseUrl, { headers })).status, 503);
-  controllers.pop().abort();
+  assert.equal((await initialize()).status, 503);
+  assert.equal((await fetch(server.url, { method: 'DELETE', headers: { ...headers, 'Mcp-Session-Id': ids.pop() } })).status, 200);
   await until(() => server.sessionCount === 15);
   await server.close();
   assert.equal(server.sessionCount, 0);

@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   deleteWorkspace: (input) => ipcRenderer.invoke('workspaces-delete', input),
   getBootstrap: () => ipcRenderer.invoke('bootstrap'),
   copyText: (text) => ipcRenderer.invoke('copy-text', text),
+  readClipboardText: () => ipcRenderer.invoke('read-clipboard-text'),
   getMcpConnection: () => ipcRenderer.invoke('mcp-connection'),
   setMcpEnabled: (enabled) => ipcRenderer.invoke('mcp-enabled', enabled),
   detachInspector: (recordId) => ipcRenderer.invoke('detach-inspector', recordId),

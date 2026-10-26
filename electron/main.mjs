@@ -298,7 +298,7 @@ async function start() {
   let mcpConfig;
   let mcpError = '';
   const mcpPort = Number(process.env.STREAMGLASS_MCP_PORT ?? 48722);
-  const mcpConnection = () => ({ running: Boolean(mcpService), url: mcpService?.url ?? `http://127.0.0.1:${mcpPort}/mcp`, sseUrl: mcpService?.sseUrl ?? `http://127.0.0.1:${mcpPort}/sse`, token: mcpConfig?.token ?? '', error: mcpError });
+  const mcpConnection = () => ({ running: Boolean(mcpService), url: mcpService?.url ?? `http://127.0.0.1:${mcpPort}/mcp`, token: mcpConfig?.token ?? '', error: mcpError });
   async function enableMcp(enabled) {
     if (typeof enabled !== 'boolean') throw new Error('Expected boolean');
     if (!mcpConfig) throw new Error(mcpError || 'MCP configuration unavailable');
@@ -382,6 +382,12 @@ async function start() {
   handle('copy-text', (_event, value) => {
     if (typeof value !== 'string' || Buffer.byteLength(value) > 256 * 1024 * 1024) throw new Error('Invalid clipboard text');
     clipboard.writeText(value);
+  });
+  // Renderer clipboard permissions are denied, so Compare's "Paste from clipboard" button reads text through here.
+  handle('read-clipboard-text', () => {
+    const text = clipboard.readText();
+    if (Buffer.byteLength(text) > 64 * 1024 * 1024) throw new Error('Clipboard text exceeds 64 MiB');
+    return text;
   });
   handle('detach-inspector', (_event, id) => {
     if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw new Error('Invalid record');

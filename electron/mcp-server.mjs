@@ -2,7 +2,6 @@ import http from 'node:http';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { registerTools } from './mcp-tools.mjs';
@@ -89,19 +88,7 @@ export async function startMcpServer({ port = 48722, authToken, bootstrap, works
     res.once('close', () => { activeRequests--; });
     try {
       const url = new URL(req.url, `http://127.0.0.1:${actualPort}`);
-      if (url.pathname === '/sse' && req.method === 'GET') {
-        if (sessions.size >= MAX_SESSIONS) { reply(res, 503, 'Too many MCP sessions'); return; }
-        const transport = new SSEServerTransport('/messages', res);
-        await createSession(transport, transport.sessionId);
-        return;
-      }
-      if (url.pathname === '/messages' && req.method === 'POST') {
-        const session = sessions.get(url.searchParams.get('sessionId'));
-        if (!(session?.transport instanceof SSEServerTransport)) { reply(res, 404, 'Session not found'); return; }
-        const body = await readBody(req);
-        await session.transport.handlePostMessage(req, res, body);
-        return;
-      }
+      // Streamable HTTP only; the deprecated HTTP+SSE transport (/sse, /messages) is not served.
       if (url.pathname !== '/mcp') { reply(res, 404, 'Endpoint not found'); return; }
       if (!['GET', 'POST', 'DELETE'].includes(req.method)) { reply(res, 405, 'Method not allowed'); return; }
       const body = req.method === 'POST' ? await readBody(req) : undefined;
@@ -142,7 +129,6 @@ export async function startMcpServer({ port = 48722, authToken, bootstrap, works
   return {
     port: actualPort,
     url: `http://127.0.0.1:${actualPort}/mcp`,
-    sseUrl: `http://127.0.0.1:${actualPort}/sse`,
     get sessionCount() { return sessions.size; },
     close() {
       closePromise ??= (async () => {

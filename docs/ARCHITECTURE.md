@@ -100,7 +100,7 @@ Scenario rules are persisted configuration; one-shot consumption is session stat
 
 Configuration workspaces atomically replace domains, rules/folders, traffic tools, scenarios and codec profiles through the management API. Electron serializes local snapshot file writes and preserves the current configuration before switching. Listener settings, OS proxy state, CA material, capture history and session keys are outside workspace scope.
 
-Electron exposes the running engine through the official MCP SDK using Streamable HTTP and legacy HTTP+SSE transports. The default endpoint is `http://127.0.0.1:48722/mcp`. MCP uses a dedicated persisted bearer token, loopback binding, Host validation, and rejection of browser Origin headers.
+Electron exposes the running engine through the official MCP SDK using the Streamable HTTP transport. The default endpoint is `http://127.0.0.1:48722/mcp`. MCP uses a dedicated persisted bearer token, loopback binding, Host validation, and rejection of browser Origin headers.
 
 Tools read retained captures and SSE events, manage rules/folders, resolve pending gates, update capture/proxy/TLS settings, and export text through the existing engine validators. They do not install certificates, change OS proxy settings, run shell commands, or expose arbitrary filesystem access. Reads, edits, and notifications have explicit output and transport bounds. See [MCP](MCP.md) for the tool contract and client setup.
 

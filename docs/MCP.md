@@ -2,7 +2,7 @@
 
 Streamglass exposes its running capture engine to local MCP clients. Open **Tools → Agent (MCP)** (also in the Tools menu and the command palette), enable the server, and copy its URL and dedicated bearer token. The app must remain open. The token is independent of the engine management token; treat it like a password because it grants access to retained traffic and editing controls.
 
-The default Streamable HTTP endpoint is `http://127.0.0.1:48722/mcp`. Legacy HTTP+SSE clients use `http://127.0.0.1:48722/sse`; the initial endpoint notification supplies `/messages?sessionId=…` for client POSTs. Both the SSE connection and POST requests require `Authorization: Bearer <token>`. This is standard MCP JSON-RPC over the official SDK, including initialization, capability negotiation, tools/list, tools/call, notifications and session lifecycle. `/sse` is an MCP transport; captured application SSE events are delivered by `watch_sse_events`.
+The endpoint is `http://127.0.0.1:48722/mcp`, using the Streamable HTTP transport; every request requires `Authorization: Bearer <token>`. This is standard MCP JSON-RPC over the official SDK, including initialization, capability negotiation, tools/list, tools/call, notifications and session lifecycle. The deprecated HTTP+SSE transport (`/sse` and `/messages`) was removed in 1.0.9; point older client entries at `/mcp` with `type: "http"`. Captured application SSE events are delivered by the `watch_sse_events` tool.
 
 Configure your MCP client's HTTP server entry with the copied URL and `Authorization: Bearer <token>`. Use an environment-variable token reference if the client supports one. Do not paste the real token into source control, issue reports, chat messages or logs. `STREAMGLASS_MCP_PORT` changes the app's MCP listener port at launch. A port conflict is shown in the connection panel.
 
@@ -115,7 +115,7 @@ For standard progress delivery, include a progress token in the tools/call reque
 
 `notifications/progress` carries that token; its `message` is JSON with `type:"context"` or `type:"event"`. Event notifications contain `recordId`, `sequence`, and a bounded JSON text page. `progress` is the number of delivered events. A client that does not provide a progress token receives standard `notifications/message` logging notifications at level `info`, logger `streamglass.sse`, with the same structured payload in `params.data`. Clients must support/display progress or logging notifications to show events before the tool result arrives. Register an explicit progress notification handler when using an SDK that discards its last onprogress callback after a final response.
 
-For an official JavaScript SDK client that is already connected, register handlers explicitly before starting the watch. This also handles the legacy SSE transport's final notification correctly:
+For an official JavaScript SDK client that is already connected, register handlers explicitly before starting the watch:
 
 ```js
 import {

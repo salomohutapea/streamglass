@@ -71,3 +71,15 @@ test('comparisons read captures beyond the old 4 MiB budget', () => {
   assert.equal(result.totalChanges, 1);
   assert.equal(result.changes[0].path, '/events/8/0/data/value');
 });
+
+test('custom JSON compares against a capture body, request body or event data', async () => {
+  const { bodyRecord } = await import('./capture-tools.mjs');
+  const record = { state: 'complete', request: { body: '{"q":1}' }, response: { statusCode: 200, headers: [['Date', 'x']], body: '{"a":1,"b":[1,2]}' }, events: [{ sequence: 1, data: '{"n":1}' }, { sequence: 2, data: 'plain' }] };
+  const body = { section: 'response', ignoreFields: [], eventKey: 'sequence', bodyOnly: true };
+  const result = compareCaptures(bodyRecord(record, 'response'), bodyRecord({ custom: '{"b":[1,3],"a":1}' }), body);
+  assert.deepEqual(result.changes, [{ path: '/body/b/1', before: '2', after: '3' }]);
+  assert.equal(comparisonText(bodyRecord({ custom: '{"b":1,"a":2}' }), body), '{\n  "a": 2,\n  "b": 1\n}');
+  assert.equal(compareCaptures(bodyRecord(record, 'request'), bodyRecord({ custom: '{"q":1}' }), body).totalChanges, 0);
+  assert.equal(bodyRecord(record, 'events').response.body, '[{"n":1},"plain"]');
+  assert.equal(compareCaptures(bodyRecord({ custom: 'not json' }), bodyRecord({ custom: 'not json!' }), body).totalChanges, 1);
+});
