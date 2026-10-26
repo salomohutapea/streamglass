@@ -1,4 +1,6 @@
 const SOURCE_BUDGET = 4 * 1024 * 1024;
+// Comparison runs in a worker, so it may read both captures in full: each is at most 32 MiB when retained.
+const COMPARE_BUDGET = 80 * 1024 * 1024;
 const sourceBytes = (text, remaining = SOURCE_BUDGET) => text.length > remaining ? remaining + 1 : new TextEncoder().encode(text).length;
 const sensitive = ['authorization', 'proxy-authorization', 'cookie', 'set-cookie', 'password', 'token', 'access_token', 'refresh_token', 'secret', 'api_key', 'x-api-key'];
 const token = /\s*("(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[\da-fA-F]{4}))*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null|[{}\[\],:])/y;
@@ -77,7 +79,7 @@ function incomplete(record, section) {
   return record.state !== 'complete' || Boolean(record.captureWarning || record.truncated || record.eventsTruncated || value.bodyUnavailable || value.bodyTruncated || value.truncated || (section === 'events' && record.eventCount > (record.events?.length || 0)));
 }
 function withinComparisonBudget(left, right, section) {
-  let remaining = SOURCE_BUDGET;
+  let remaining = COMPARE_BUDGET;
   function count(value) {
     if (typeof value === 'string') { remaining -= sourceBytes(value, remaining); return remaining >= 0; }
     if (Array.isArray(value)) return value.every(count);
@@ -144,7 +146,7 @@ export function comparisonText(record, options = {}) {
 export function compareCaptures(left, right, options = {}) {
   if (!withinComparisonBudget(left, right, options.section || 'response')) return {
     changes: [], totalChanges: 0, limited: true, incomplete: true,
-    warnings: ['Comparison not evaluated: retained source text exceeds the 4 MiB comparison budget. Choose smaller captures.'],
+    warnings: ['Comparison not evaluated: retained source text exceeds the 80 MiB comparison budget. Choose smaller captures.'],
   };
   const a = captureMap(left, options); const b = captureMap(right, options); const changes = []; let totalChanges = 0;
   for (const path of new Set([...a.keys(), ...b.keys()])) if (a.get(path) !== b.get(path)) {

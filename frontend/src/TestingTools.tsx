@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import JsonViewer from './JsonViewer';
 import CapturePicker from './CapturePicker';
 import { encodeReplayText, decodeReplayText, replayHeaders } from './replay-body.mjs';
-import { compareCaptures, redactCapture } from './capture-tools.mjs';
+import { redactCapture } from './capture-tools.mjs';
+import { useCaptureComparison } from './capture-compare';
+import { Loader2 } from 'lucide-react';
 import CaptureDiff from './CaptureDiff';
 import { requestTime } from './TrafficTable';
 
 type Api = (path: string, method?: string, body?: any) => Promise<any>;
-type Props = { api: Api; records: any[]; selectedId?: string; tab: string; active: boolean; onChanged: () => Promise<void>; onSelect: (id: string) => void; onOpenTab: (tab: string) => void };
+type Props = { api: Api; connection?: { baseUrl: string; token: string } | null; records: any[]; selectedId?: string; tab: string; active: boolean; onChanged: () => Promise<void>; onSelect: (id: string) => void; onOpenTab: (tab: string) => void };
 export const testingTabs = ['Compare', 'Replay', 'Create mock', 'Share'];
 const MAX_REPLAY = 20;
 const defaultRedactFields = ['authorization', 'cookie', 'set-cookie', 'password', 'token', 'access_token', 'refresh_token', 'secret', 'api_key'];
@@ -16,12 +18,13 @@ type ReplayResult = { key: string; sourceId: string; label: string; status?: num
 const statusOf = (c: any) => c?.response?.statusCode ?? c?.statusCode ?? c?.status;
 const durationOf = (c: any) => c?.durationMs ?? c?.duration ?? null;
 
-function useCapture(api: Api, id: string, onError: (message: string) => void) {
+// `compact` skips the raw wire copies of SSE events, which comparisons don't read.
+function useCapture(api: Api, id: string, onError: (message: string) => void, compact = false) {
   const [capture, setCapture] = useState<any>(null);
   useEffect(() => {
     let live = true;
     setCapture(null);
-    if (id) api(`/api/records/${encodeURIComponent(id)}`).then(value => { if (live) setCapture(value); }).catch(e => { if (live) onError(e.message ?? String(e)); });
+    if (id) api(`/api/records/${encodeURIComponent(id)}${compact ? '?compact=1' : ''}`).then(value => { if (live) setCapture(value); }).catch(e => { if (live) onError(e.message ?? String(e)); });
     return () => { live = false; };
   }, [id]);
   return capture;
@@ -38,7 +41,7 @@ function ResponseSummary({ capture, title }: { capture: any; title: string }) {
   </section>;
 }
 
-export default function TestingTools({ api, records, selectedId, tab, active, onChanged, onSelect, onOpenTab }: Props) {
+export default function TestingTools({ api, connection, records, selectedId, tab, active, onChanged, onSelect, onOpenTab }: Props) {
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
   async function act(operation: () => Promise<void>) { setBusy(true); setError(''); setNotice(''); try { await operation(); } catch (e: any) { setError(e.message ?? String(e)); } finally { setBusy(false); } }
   useEffect(() => { setError(''); setNotice(''); }, [tab]);
@@ -81,8 +84,12 @@ export default function TestingTools({ api, records, selectedId, tab, active, on
   // Compare
   const [slotA, setSlotA] = useState(initial), [slotB, setSlotB] = useState(''), [picking, setPicking] = useState<'A' | 'B' | null>(null);
   const [section, setSection] = useState<'request' | 'response' | 'events'>('response'), [ignore, setIgnore] = useState(''), [eventKey, setEventKey] = useState<'sequence' | 'id'>('sequence');
-  const captureA = useCapture(api, slotA, setError), captureB = useCapture(api, slotB, setError);
-  const comparison = useMemo(() => captureA && captureB ? compareCaptures(captureA, captureB, { section, ignoreFields: ignore.split(',').map(s => s.trim()).filter(Boolean), eventKey }) : null, [captureA, captureB, section, ignore, eventKey]);
+  // With an engine connection the comparison worker fetches and parses both captures itself, so even 30 MiB SSE
+  // captures never block this window; otherwise the captures load here first.
+  const captureA = useCapture(api, connection ? '' : slotA, setError, true), captureB = useCapture(api, connection ? '' : slotB, setError, true);
+  const sourceOf = (id: string, capture: any) => connection ? (id ? { fetchUrl: `${connection.baseUrl}/api/records/${encodeURIComponent(id)}?compact=1`, authorization: `Bearer ${connection.token}` } : null) : capture;
+  const sourceA = useMemo(() => sourceOf(slotA, captureA), [connection, slotA, captureA]), sourceB = useMemo(() => sourceOf(slotB, captureB), [connection, slotB, captureB]);
+  const comparison = useCaptureComparison(sourceA, sourceB, { section, ignoreFields: ignore.split(',').map(s => s.trim()).filter(Boolean), eventKey });
 
   // Create mock
   const [mockId, setMockId] = useState(initial), [mockName, setMockName] = useState('Captured response'), [timedSse, setTimedSse] = useState(false), [mockSaved, setMockSaved] = useState(false);
@@ -155,8 +162,7 @@ export default function TestingTools({ api, records, selectedId, tab, active, on
       <div className="lab-grid">{slot('A', slotA, captureA, setSlotA)}{slot('B', slotB, captureB, setSlotB)}</div>
       <div className="lab-actions"><button disabled={!slotA && !slotB} onClick={() => { setSlotA(slotB); setSlotB(slotA); }}>Swap A and B</button></div>
       <div className="lab-grid"><label>Content<select aria-label="Content" value={section} onChange={e => setSection(e.target.value as typeof section)}><option value="request">Request</option><option value="response">Response</option><option value="events">SSE events</option></select></label><label>Ignore fields or paths<input placeholder="timestamp,id" value={ignore} onChange={e => setIgnore(e.target.value)} /></label>{section === 'events' && <label>Match events by<select aria-label="Match events by" value={eventKey} onChange={e => setEventKey(e.target.value as typeof eventKey)}><option value="sequence">Sequence</option><option value="id">Event ID</option></select></label>}</div>
-      {!comparison && <p className="muted">Choose a capture for both A and B to see differences.</p>}
-      {comparison && <CaptureDiff left={captureA} right={captureB} comparison={comparison} options={{ section, ignoreFields: ignore.split(',').map(item => item.trim()).filter(Boolean), eventKey }} />}
+      {!sourceA || !sourceB ? (slotA && slotB ? <p className="capture-diff-loading" role="status"><Loader2 className="spin" size={14} aria-hidden="true" />Loading captures…</p> : <p className="muted">Choose a capture for both A and B to see differences.</p>) : <CaptureDiff result={comparison.result} pending={comparison.pending} error={comparison.error} />}
     </>}
 
     {tab === 'Create mock' && <>

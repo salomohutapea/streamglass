@@ -37,7 +37,9 @@ test('redaction removes alternate bytes, duplicate credentials, nested JSON and 
 test('large comparisons are explicitly unevaluated and large redactions omit source secrets', () => {
   const source='"'+'private-secret'.repeat(330000)+'"';
   const value=capture(source);
-  const comparison=compareCaptures(value,value,options);
+  // Two sides of 43 MB exceed the 80 MiB comparison budget; lengths alone decide, nothing is encoded.
+  const huge=capture('"'+'x'.repeat(43_000_000)+'"');
+  const comparison=compareCaptures(huge,huge,options);
   assert.equal(comparison.limited,true);assert.equal(comparison.incomplete,true);
   assert.equal(comparison.totalChanges,0);assert.deepEqual(comparison.changes,[]);
   assert.match(comparison.warnings[0],/not evaluated/i);
@@ -59,4 +61,13 @@ test('diff documents are sorted pretty JSON that keeps lexemes and honors ignore
   assert.equal(text, '{\n  "statusCode": 200,\n  "headers": {\n    "content-type": "application/json",\n    "set-cookie": ["one", "two"]\n  },\n  "body": {\n    "a": [\n      1,\n      {\n        "z": null\n      }\n    ],\n    "b": 9007199254740993123,\n    "e": {}\n  }\n}');
   assert.equal(comparisonText({ response: { body: 'not json' } }, { section: 'response', ignoreFields: [], eventKey: 'sequence' }), '{\n  "headers": {},\n  "body": "not json"\n}');
   assert.equal(comparisonText({ events: [{ sequence: 1, event: 'm', data: '{"n":1}' }] }, { section: 'events', ignoreFields: [], eventKey: 'sequence' }), '[\n  {\n    "sequence": 1,\n    "event": "m",\n    "data": {\n      "n": 1\n    }\n  }\n]');
+});
+
+test('comparisons read captures beyond the old 4 MiB budget', () => {
+  const events = n => Array.from({ length: 12000 }, (_, i) => ({ sequence: i + 1, data: JSON.stringify({ i, value: i === 7 ? n : 0, text: 'x'.repeat(400) }) }));
+  const left = { state: 'complete', events: events(1) }, right = { state: 'complete', events: events(2) };
+  const result = compareCaptures(left, right, { section: 'events', ignoreFields: [], eventKey: 'sequence' });
+  assert.equal(result.limited, undefined);
+  assert.equal(result.totalChanges, 1);
+  assert.equal(result.changes[0].path, '/events/8/0/data/value');
 });

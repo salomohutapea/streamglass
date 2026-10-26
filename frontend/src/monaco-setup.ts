@@ -159,6 +159,27 @@ let observing = false;
 export function applyMonacoTheme(): void {
   monaco.editor.setTheme(defineAppTheme());
 }
+// Colour-only JSON for very large read-only documents: same token names as the JSON language, so the theme applies,
+// but no worker validation, folding or symbols, which would block the window for seconds on tens of MiB.
+export const PLAIN_JSON = 'json-colors';
+monaco.languages.register({ id: PLAIN_JSON });
+monaco.languages.setMonarchTokensProvider(PLAIN_JSON, {
+  defaultToken: '',
+  tokenizer: {
+    root: [
+      [/\s+/, ''],
+      [/"(?:[^"\\]|\\.)*"(?=\s*:)/, 'string.key.json'],
+      [/"(?:[^"\\]|\\.)*"/, 'string.value.json'],
+      [/-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/, 'number.json'],
+      [/\b(?:true|false|null)\b/, 'keyword.json'],
+      [/[{}]/, 'delimiter.bracket.json'],
+      [/[[\]]/, 'delimiter.array.json'],
+      [/:/, 'delimiter.colon.json'],
+      [/,/, 'delimiter.comma.json'],
+    ],
+  },
+});
+
 export function ensureMonaco(): typeof monaco {
   if (!observing) {
     observing = true;

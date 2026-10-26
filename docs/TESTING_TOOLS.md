@@ -37,7 +37,9 @@ Both captures appear as pretty JSON in a side-by-side diff (VS Code's diff edito
 
 Ignore comma-separated property names or paths, for example `timestamp,id` or `date,x-nonce` for volatile headers. Headers compare case-insensitively while keeping duplicate values. SSE can align by sequence or event ID; repeated IDs remain separate occurrences.
 
-The changed-path list shows the first 500 differences. Incomplete capture warnings prevent an apparent match from being reported as full equality. Large comparisons have an explicit processing budget; an unavailable comparison is not a zero-difference result.
+The changed-path list shows the first 500 differences. Incomplete capture warnings prevent an apparent match from being reported as full equality.
+
+The comparison runs in a background worker that fetches and parses both captures itself, so the Tools window stays usable while a spinner shows progress. It reads up to 80 MiB of retained text in total, which covers two captures at the 32 MiB retention limit. Two 30 MB SSE captures take a few seconds. Documents over 2 MiB keep JSON colours but drop JSON language features (validation, folding, breadcrumbs) to stay responsive. A comparison over the budget is reported as not evaluated, which is not a zero-difference result.
 
 ## Capture to mock
 
