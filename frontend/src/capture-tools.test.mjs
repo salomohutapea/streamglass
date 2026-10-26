@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compareCaptures, redactCapture } from './capture-tools.mjs';
+import { compareCaptures, comparisonText, redactCapture } from './capture-tools.mjs';
 const options = {section:'response', ignoreFields:[], eventKey:'sequence'};
 const capture = body => ({state:'complete', response:{body, headers:[]}});
 test('structural comparison preserves large numbers and ignores exact keys and paths', () => {
@@ -51,4 +51,12 @@ test('redaction preserves an own __proto__ property without mutating prototypes'
   assert.equal(Object.getPrototypeOf(result),null);
   assert.equal(Object.hasOwn(result,'__proto__'),true);
   assert.equal(JSON.stringify(result).includes('secret'),false);
+});
+
+test('diff documents are sorted pretty JSON that keeps lexemes and honors ignore rules', () => {
+  const left = { response: { statusCode: 200, headers: [['X-Nonce', 'a'], ['Content-Type', 'application/json'], ['Set-Cookie', 'one'], ['Set-Cookie', 'two']], body: '{"b":9007199254740993123,"a":[1,{"z":null,"id":"x"}],"e":{}}' } };
+  const text = comparisonText(left, { section: 'response', ignoreFields: ['x-nonce', 'id'], eventKey: 'sequence' });
+  assert.equal(text, '{\n  "statusCode": 200,\n  "headers": {\n    "content-type": "application/json",\n    "set-cookie": ["one", "two"]\n  },\n  "body": {\n    "a": [\n      1,\n      {\n        "z": null\n      }\n    ],\n    "b": 9007199254740993123,\n    "e": {}\n  }\n}');
+  assert.equal(comparisonText({ response: { body: 'not json' } }, { section: 'response', ignoreFields: [], eventKey: 'sequence' }), '{\n  "headers": {},\n  "body": "not json"\n}');
+  assert.equal(comparisonText({ events: [{ sequence: 1, event: 'm', data: '{"n":1}' }] }, { section: 'events', ignoreFields: [], eventKey: 'sequence' }), '[\n  {\n    "sequence": 1,\n    "event": "m",\n    "data": {\n      "n": 1\n    }\n  }\n]');
 });

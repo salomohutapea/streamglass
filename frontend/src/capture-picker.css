@@ -13,6 +13,8 @@
 .capture-picker-method{font:600 10px ui-monospace,Menlo,monospace;color:var(--accent);min-width:42px}
 .capture-picker-url{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11px ui-monospace,Menlo,monospace}
 .capture-picker-status{font:11px ui-monospace,Menlo,monospace;color:var(--muted)}
+.capture-picker-time{font:11px ui-monospace,Menlo,monospace;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.capture-picker-duration{font:10px ui-monospace,Menlo,monospace;color:var(--muted);white-space:nowrap}
 .capture-picker-status.error{color:var(--danger)}.capture-picker-status.warn{color:#e0b155}.capture-picker-status.ok{color:#8acba4}
 .capture-picker-empty,.capture-picker-more{padding:10px;color:var(--muted);font-size:11px;margin:0}
 .testing-tools{display:flex;flex-direction:column;gap:14px;min-width:0}

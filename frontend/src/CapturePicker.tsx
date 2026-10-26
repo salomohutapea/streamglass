@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
+import { requestTime } from './TrafficTable';
 import './capture-picker.css';
 
-export type PickerRecord = { id: string; method: string; url: string; status?: number; statusCode?: number; kind?: string; isSSE?: boolean; device?: string };
+export type PickerRecord = { id: string; method: string; url: string; status?: number; statusCode?: number; kind?: string; isSSE?: boolean; device?: string; startedAt?: string | number; durationMs?: number };
 type Props = {
   records: PickerRecord[];
   /** Selected ids. Single mode uses at most one. */
@@ -26,7 +27,7 @@ export default function CapturePicker({ records, value, onChange, multiple = fal
   const candidates = useMemo(() => records.filter(r => r.kind !== 'tunnel'), [records]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return candidates.filter(r => (!q || `${r.method} ${r.url} ${statusOf(r) ?? ''}`.toLowerCase().includes(q)) && (!errorsOnly || (statusOf(r) ?? 0) >= 400));
+    return candidates.filter(r => (!q || `${r.method} ${r.url} ${statusOf(r) ?? ''} ${requestTime(r.startedAt)}`.toLowerCase().includes(q)) && (!errorsOnly || (statusOf(r) ?? 0) >= 400));
   }, [candidates, query, errorsOnly]);
   const shown = filtered.slice(0, limit);
   const toggle = (id: string) => {
@@ -36,7 +37,7 @@ export default function CapturePicker({ records, value, onChange, multiple = fal
   };
   return <section className="capture-picker" aria-label={label}>
     <div className="capture-picker-bar">
-      <label className="capture-picker-search"><Search size={13} /><input type="search" aria-label={`Search ${label.toLowerCase()}`} placeholder="Search method, URL or status" value={query} onChange={e => setQuery(e.target.value)} /></label>
+      <label className="capture-picker-search"><Search size={13} /><input type="search" aria-label={`Search ${label.toLowerCase()}`} placeholder="Search method, URL, status or time" value={query} onChange={e => setQuery(e.target.value)} /></label>
       <label className="capture-picker-check"><input type="checkbox" checked={errorsOnly} onChange={e => setErrorsOnly(e.target.checked)} />Errors only</label>
       {mainSelectionId && candidates.some(r => r.id === mainSelectionId) && <button type="button" disabled={!multiple && value[0] === mainSelectionId} onClick={() => onChange(multiple ? [...new Set([...value, mainSelectionId])] : [mainSelectionId])}>Use selected in main window</button>}
       {multiple && value.length > 0 && <button type="button" onClick={() => onChange([])}>Clear ({value.length})</button>}
@@ -47,8 +48,11 @@ export default function CapturePicker({ records, value, onChange, multiple = fal
         return <li key={r.id} role="option" aria-selected={selected}>
           <button type="button" className={selected ? 'selected' : ''} onClick={() => toggle(r.id)}>
             {multiple && <input type="checkbox" tabIndex={-1} readOnly checked={selected} aria-hidden="true" />}
+            {/* Start time with milliseconds tells apart requests sent several times in a row; the list is newest first. */}
+            <time className="capture-picker-time">{requestTime(r.startedAt)}</time>
             <span className="capture-picker-method" data-method={r.method}>{r.method}</span>
             <span className="capture-picker-url" title={r.url}>{r.url}</span>
+            {r.durationMs != null && <span className="capture-picker-duration">{r.durationMs >= 1000 ? `${(r.durationMs / 1000).toFixed(1)} s` : `${Math.round(r.durationMs)} ms`}</span>}
             <span className={`capture-picker-status ${tone(status)}`}>{status ?? '…'}</span>
           </button>
         </li>;

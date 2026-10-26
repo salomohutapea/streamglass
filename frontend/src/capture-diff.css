@@ -1,0 +1,12 @@
+/* Side-by-side JSON diff for Compare: labels over each pane, then the Monaco diff editor. */
+.capture-diff{display:flex;flex-direction:column;gap:8px;min-width:0}
+.capture-diff-summary{font-weight:600}
+.capture-diff-labels{display:grid;grid-template-columns:1fr 1fr;font-size:11px;font-weight:600;color:var(--muted)}
+.capture-diff-labels span{padding:0 4px}
+.capture-diff-editor{height:min(72vh,900px);min-height:320px;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.capture-diff-editor[hidden],.capture-diff-labels[hidden]{display:none}
+.capture-diff-paths summary{cursor:pointer;color:var(--muted);font-size:11px}
+.capture-diff-paths ul{margin:6px 0 0;padding-left:16px;font-size:11px;line-height:1.7;max-height:220px;overflow:auto}
+.capture-diff-paths code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
+.capture-diff-paths .added{color:#5bb98b}
+.capture-diff-paths .removed{color:var(--danger)}

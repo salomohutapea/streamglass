@@ -9,7 +9,7 @@ function parse(text) {
   function take() { token.lastIndex = offset; const match = token.exec(text); if (!match) throw new Error('Invalid JSON'); offset = token.lastIndex; return { raw: match[1], start: offset - match[1].length, end: offset }; }
   function value(depth = 0, first = take()) {
     if (depth > 200) throw new Error('JSON is too deeply nested');
-    const node = { ...first, children: [] };
+    const node = { ...first, children: [], open: first.raw };
     if (!['{', '['].includes(first.raw)) {
       if (/^[}\],:]$/.test(first.raw)) throw new Error('Invalid JSON value');
       return node;
@@ -90,6 +90,57 @@ function withinComparisonBudget(left, right, section) {
   return [left, right].every(record => section === 'events' ? count(record.events || []) :
     count({ method: record.method, url: record.url, message: record[section] || {} }));
 }
+// Pretty JSON for a side-by-side diff: the same content, ignore rules and numeric lexemes as compareCaptures. Object
+// keys and header names are sorted so that reordered fields line up; arrays keep their order.
+function formatNode(node, path, fields, depth) {
+  const pad = '  '.repeat(depth + 1), close = '  '.repeat(depth);
+  if (!node.children.length) return node.open === '{' ? '{}' : node.open === '[' ? '[]' : node.raw;
+  const occurrences = new Map(), entries = [];
+  for (const { key, node: child } of node.children) {
+    const count = occurrences.get(key) || 0; occurrences.set(key, count + 1);
+    const next = childPath(path, key) + (count ? `#${count + 1}` : '');
+    if (!ignored(fields, key, next)) entries.push({ key, text: formatNode(child, next, fields, depth + 1) });
+  }
+  if (node.open === '[') return entries.length ? `[\n${entries.map(entry => pad + entry.text).join(',\n')}\n${close}]` : '[]';
+  entries.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+  return entries.length ? `{\n${entries.map(entry => `${pad}${JSON.stringify(entry.key)}: ${entry.text}`).join(',\n')}\n${close}}` : '{}';
+}
+function formatBody(text, path, fields, depth) {
+  try { return formatNode(parse(String(text)), path, fields, depth); } catch { return JSON.stringify(String(text)); }
+}
+function formatObject(entries, depth) {
+  const pad = '  '.repeat(depth + 1);
+  return entries.length ? `{\n${entries.map(([key, text]) => `${pad}${JSON.stringify(key)}: ${text}`).join(',\n')}\n${'  '.repeat(depth)}}` : '{}';
+}
+export function comparisonText(record, options = {}) {
+  const fields = options.ignoreFields || [], section = options.section || 'response';
+  if (section === 'events') {
+    const events = (record.events || []).map((event, index) => {
+      const key = options.eventKey === 'id' ? event.id ?? `missing-${index}` : event.sequence ?? index, path = childPath('/events', key) + '/0', entries = [];
+      for (const field of ['sequence', 'event', 'id', 'retry']) if (event[field] !== undefined && !ignored(fields, field, childPath(path, field))) entries.push([field, JSON.stringify(event[field])]);
+      if (event.data !== undefined && !ignored(fields, 'data', `${path}/data`)) entries.push(['data', formatBody(event.data, `${path}/data`, fields, 2)]);
+      return `  ${formatObject(entries, 1)}`;
+    });
+    return events.length ? `[\n${events.join(',\n')}\n]` : '[]';
+  }
+  const message = record[section] || {}, entries = [];
+  for (const field of section === 'request' ? ['method', 'url'] : ['statusCode', 'reason']) {
+    const value = message[field] ?? (section === 'request' ? record[field] : undefined);
+    if (value !== undefined && !ignored(fields, field, `/${section}/${field}`)) entries.push([field, JSON.stringify(value)]);
+  }
+  const names = new Map(), lowerFields = fields.map(field => field.toLowerCase());
+  for (const [key, text] of Array.isArray(message.headers) ? message.headers : Object.entries(message.headers || {})) {
+    const lower = String(key).toLowerCase(), list = names.get(lower) || [];
+    if (!ignored(lowerFields, lower, `${childPath(`/${section}/headers`, lower)}/${list.length}`)) list.push(String(text));
+    names.set(lower, list);
+  }
+  const headers = [...names].filter(([, values]) => values.length).sort(([a], [b]) => a < b ? -1 : 1).map(([name, values]) => [name, values.length === 1 ? JSON.stringify(values[0]) : `[${values.map(value => JSON.stringify(value)).join(', ')}]`]);
+  if (!ignored(fields, 'headers', `/${section}/headers`)) entries.push(['headers', formatObject(headers, 1)]);
+  if (message.bodyUnavailable) entries.push(['body', JSON.stringify('(body not retained)')]);
+  else if (message.body !== undefined && message.body !== '' && !ignored(fields, 'body', `/${section}/body`)) entries.push(['body', formatBody(message.body, `/${section}/body`, fields, 1)]);
+  return formatObject(entries, 0);
+}
+
 export function compareCaptures(left, right, options = {}) {
   if (!withinComparisonBudget(left, right, options.section || 'response')) return {
     changes: [], totalChanges: 0, limited: true, incomplete: true,

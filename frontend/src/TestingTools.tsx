@@ -3,6 +3,8 @@ import JsonViewer from './JsonViewer';
 import CapturePicker from './CapturePicker';
 import { encodeReplayText, decodeReplayText, replayHeaders } from './replay-body.mjs';
 import { compareCaptures, redactCapture } from './capture-tools.mjs';
+import CaptureDiff from './CaptureDiff';
+import { requestTime } from './TrafficTable';
 
 type Api = (path: string, method?: string, body?: any) => Promise<any>;
 type Props = { api: Api; records: any[]; selectedId?: string; tab: string; active: boolean; onChanged: () => Promise<void>; onSelect: (id: string) => void; onOpenTab: (tab: string) => void };
@@ -97,7 +99,7 @@ export default function TestingTools({ api, records, selectedId, tab, active, on
     return <div className="testing-slot-wrap">
       <button type="button" className="testing-slot" aria-label={`Slot ${name}`} aria-expanded={picking === name} onClick={() => setPicking(picking === name ? null : name)}>
         <strong>{name}</strong>
-        {record ? <><span className="capture-picker-method" data-method={record.method}>{record.method}</span><span className="capture-picker-url" title={record.url}>{record.url}</span><span className="capture-picker-status">{statusOf(capture) ?? record.status ?? record.statusCode ?? '…'}</span></> : <span className="muted">Choose a capture</span>}
+        {record ? <><time className="capture-picker-time">{requestTime(record.startedAt)}</time><span className="capture-picker-method" data-method={record.method}>{record.method}</span><span className="capture-picker-url" title={record.url}>{record.url}</span><span className="capture-picker-status">{statusOf(capture) ?? record.status ?? record.statusCode ?? '…'}</span></> : <span className="muted">Choose a capture</span>}
       </button>
       {picking === name && <CapturePicker label={`Capture ${name}`} records={records} value={id ? [id] : []} mainSelectionId={selectedId} onChange={ids => { set(ids[0] ?? ''); setPicking(null); }} />}
     </div>;
@@ -154,7 +156,7 @@ export default function TestingTools({ api, records, selectedId, tab, active, on
       <div className="lab-actions"><button disabled={!slotA && !slotB} onClick={() => { setSlotA(slotB); setSlotB(slotA); }}>Swap A and B</button></div>
       <div className="lab-grid"><label>Content<select aria-label="Content" value={section} onChange={e => setSection(e.target.value as typeof section)}><option value="request">Request</option><option value="response">Response</option><option value="events">SSE events</option></select></label><label>Ignore fields or paths<input placeholder="timestamp,id" value={ignore} onChange={e => setIgnore(e.target.value)} /></label>{section === 'events' && <label>Match events by<select aria-label="Match events by" value={eventKey} onChange={e => setEventKey(e.target.value as typeof eventKey)}><option value="sequence">Sequence</option><option value="id">Event ID</option></select></label>}</div>
       {!comparison && <p className="muted">Choose a capture for both A and B to see differences.</p>}
-      {comparison && <>{comparison.warnings.map((warning: string, index: number) => <p className="muted" key={index}>{warning}</p>)}<p>{comparison.limited ? 'Comparison not evaluated' : `${comparison.totalChanges} differences${comparison.incomplete ? ' in retained content' : ''}`}</p><div className="lab-diffs">{comparison.changes.map((change: any, index: number) => <section key={index}><strong>{change.path}</strong><div className="lab-grid"><div><small>A</small><JsonViewer value={change.before ?? 'Missing'} /></div><div><small>B</small><JsonViewer value={change.after ?? 'Missing'} /></div></div></section>)}</div>{comparison.totalChanges > comparison.changes.length && <p>Showing the first {comparison.changes.length} differences.</p>}</>}
+      {comparison && <CaptureDiff left={captureA} right={captureB} comparison={comparison} options={{ section, ignoreFields: ignore.split(',').map(item => item.trim()).filter(Boolean), eventKey }} />}
     </>}
 
     {tab === 'Create mock' && <>

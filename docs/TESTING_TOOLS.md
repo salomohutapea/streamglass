@@ -31,9 +31,13 @@ Captures that a rule changed carry `appliedRules` (type, id, name and a short de
 
 ## Compare two captures
 
-Choose two captures and compare Request, Response, or SSE events. Differences show paths with before/after values; JSON numeric lexemes are preserved, including integers larger than JavaScript's safe integer range. Ignore comma-separated property names or paths, for example `timestamp,id`. Headers compare case-insensitively while keeping duplicate values. SSE can align by sequence or event ID; repeated IDs remain separate occurrences.
+Choose two captures and compare Request, Response, or SSE events. The picker lists captures newest first, with each request's start time to the millisecond and its duration, so a request sent several times in a row is easy to tell apart. You can also search by time.
 
-Only the first 500 differences are displayed. Incomplete capture warnings prevent an apparent match from being reported as full equality. Large comparisons have an explicit processing budget; an unavailable comparison is not a zero-difference result.
+Both captures appear as pretty JSON in a side-by-side diff (VS Code's diff editor). Changed text is red on A and green on B, and long identical stretches fold away. Object keys and header names are sorted so reordered fields line up; arrays keep their order. JSON numeric lexemes are preserved, including integers larger than JavaScript's safe integer range. **Changed paths** below the diff lists every differing path.
+
+Ignore comma-separated property names or paths, for example `timestamp,id` or `date,x-nonce` for volatile headers. Headers compare case-insensitively while keeping duplicate values. SSE can align by sequence or event ID; repeated IDs remain separate occurrences.
+
+The changed-path list shows the first 500 differences. Incomplete capture warnings prevent an apparent match from being reported as full equality. Large comparisons have an explicit processing budget; an unavailable comparison is not a zero-difference result.
 
 ## Capture to mock
 
