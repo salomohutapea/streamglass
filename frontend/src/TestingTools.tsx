@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import JsonViewer from './JsonViewer';
 import CapturePicker from './CapturePicker';
 import { encodeReplayText, decodeReplayText, replayHeaders } from './replay-body.mjs';
-import { redactCapture } from './capture-tools.mjs';
+import { formatJson, redactCapture } from './capture-tools.mjs';
 import { useCaptureComparison } from './capture-compare';
 import { Loader2 } from 'lucide-react';
 import CaptureDiff from './CaptureDiff';
@@ -92,8 +92,10 @@ export default function TestingTools({ api, connection, records, selectedId, tab
   const [modes, setModes] = useState<{ A: 'capture' | 'json'; B: 'capture' | 'json' }>({ A: 'capture', B: 'capture' }), [customJson, setCustomJson] = useState({ A: '', B: '' });
   const custom = (name: 'A' | 'B') => modes[name] === 'json' ? (customJson[name].trim() ? { custom: customJson[name] } : null) : undefined;
   const sourceA = useMemo(() => custom('A') ?? sourceOf(slotA, captureA), [connection, slotA, captureA, modes.A, customJson.A]), sourceB = useMemo(() => custom('B') ?? sourceOf(slotB, captureB), [connection, slotB, captureB, modes.B, customJson.B]);
-  const bodyOnly = modes.A === 'json' || modes.B === 'json';
-  const comparison = useCaptureComparison(sourceA, sourceB, { section, ignoreFields: ignore.split(',').map(s => s.trim()).filter(Boolean), eventKey, bodyOnly });
+  const [focusPath, setFocusPath] = useState('');
+  // Custom JSON or a chosen path compares bodies only; a path also narrows them, e.g. to the response's `data` field.
+  const bodyOnly = modes.A === 'json' || modes.B === 'json' || Boolean(focusPath.trim());
+  const comparison = useCaptureComparison(sourceA, sourceB, { section, ignoreFields: ignore.split(',').map(s => s.trim()).filter(Boolean), eventKey, bodyOnly, focusPath: focusPath.trim() });
   async function pasteClipboard(name: 'A' | 'B') {
     try { const text = window.streamglass?.readClipboardText ? await window.streamglass.readClipboardText() : await navigator.clipboard.readText(); setCustomJson(current => ({ ...current, [name]: text })); }
     catch (e: any) { setError(e.message ?? String(e)); }
@@ -125,7 +127,7 @@ export default function TestingTools({ api, connection, records, selectedId, tab
         {picking === name && <CapturePicker label={`Capture ${name}`} records={records} value={id ? [id] : []} mainSelectionId={selectedId} onChange={ids => { set(ids[0] ?? ''); setPicking(null); }} />}
       </> : <>
         <textarea className="testing-custom-json" aria-label={`Custom JSON ${name}`} placeholder="Paste or type JSON…" spellCheck={false} value={text} onChange={e => setCustomJson(current => ({ ...current, [name]: e.target.value }))} />
-        <div className="lab-actions"><button type="button" onClick={() => void pasteClipboard(name)}>Paste from clipboard</button><button type="button" disabled={!text} onClick={() => setCustomJson(current => ({ ...current, [name]: '' }))}>Clear</button>{!valid && <span className="muted">Not valid JSON; compared as text.</span>}</div>
+        <div className="lab-actions"><button type="button" onClick={() => void pasteClipboard(name)}>Paste from clipboard</button><button type="button" disabled={!text || !valid} title="Indent the JSON; key order and number text are kept" onClick={() => setCustomJson(current => ({ ...current, [name]: formatJson(text) }))}>Format</button><button type="button" disabled={!text} onClick={() => setCustomJson(current => ({ ...current, [name]: '' }))}>Clear</button>{!valid && <span className="muted">Not valid JSON; compared as text.</span>}</div>
       </>}
     </div>;
   };
@@ -179,8 +181,8 @@ export default function TestingTools({ api, connection, records, selectedId, tab
     {tab === 'Compare' && <>
       <div className="lab-grid">{slot('A', slotA, captureA, setSlotA)}{slot('B', slotB, captureB, setSlotB)}</div>
       <div className="lab-actions"><button disabled={!slotA && !slotB && !customJson.A && !customJson.B} onClick={() => { setSlotA(slotB); setSlotB(slotA); setModes(current => ({ A: current.B, B: current.A })); setCustomJson(current => ({ A: current.B, B: current.A })); }}>Swap A and B</button></div>
-      <div className="lab-grid"><label>Content<select aria-label="Content" value={section} onChange={e => setSection(e.target.value as typeof section)}><option value="request">Request</option><option value="response">Response</option><option value="events">SSE events</option></select></label><label>Ignore fields or paths<input placeholder="timestamp,id" value={ignore} onChange={e => setIgnore(e.target.value)} /></label>{section === 'events' && !bodyOnly && <label>Match events by<select aria-label="Match events by" value={eventKey} onChange={e => setEventKey(e.target.value as typeof eventKey)}><option value="sequence">Sequence</option><option value="id">Event ID</option></select></label>}</div>
-      {bodyOnly && <p className="muted">Custom JSON is compared with the capture's {section === 'events' ? 'SSE event data, as one JSON array' : `${section} body`}. Choose which with Content.</p>}
+      <div className="lab-grid"><label>Content<select aria-label="Content" value={section} onChange={e => setSection(e.target.value as typeof section)}><option value="request">Request</option><option value="response">Response</option><option value="events">SSE events</option></select></label><label>Ignore fields or paths<input placeholder="timestamp,id" value={ignore} onChange={e => setIgnore(e.target.value)} /></label><label>Compare only<input placeholder="Whole body, or a path such as data or $.data.items[0]" aria-label="Compare only path" value={focusPath} onChange={e => setFocusPath(e.target.value)} /></label>{section === 'events' && !bodyOnly && <label>Match events by<select aria-label="Match events by" value={eventKey} onChange={e => setEventKey(e.target.value as typeof eventKey)}><option value="sequence">Sequence</option><option value="id">Event ID</option></select></label>}</div>
+      {bodyOnly && <p className="muted">Comparing {focusPath.trim() ? <><code>{focusPath.trim()}</code> within </> : ''}{section === 'events' ? 'each SSE event\'s data' : `the ${section} body`}{modes.A === 'json' || modes.B === 'json' ? ' and the custom JSON' : ''}. Status and headers are left out.</p>}
       {!sourceA || !sourceB ? (slotA && slotB && !bodyOnly ? <p className="capture-diff-loading" role="status"><Loader2 className="spin" size={14} aria-hidden="true" />Loading captures…</p> : <p className="muted">Choose a capture or enter custom JSON for both A and B to see differences.</p>) : <CaptureDiff result={comparison.result} pending={comparison.pending} error={comparison.error} />}
     </>}
 

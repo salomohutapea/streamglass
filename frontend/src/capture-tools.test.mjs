@@ -83,3 +83,16 @@ test('custom JSON compares against a capture body, request body or event data', 
   assert.equal(bodyRecord(record, 'events').response.body, '[{"n":1},"plain"]');
   assert.equal(compareCaptures(bodyRecord({ custom: 'not json' }), bodyRecord({ custom: 'not json!' }), body).totalChanges, 1);
 });
+
+test('minified and formatted JSON compare equal, and a path narrows the comparison', async () => {
+  const { bodyRecord, formatJson } = await import('./capture-tools.mjs');
+  const body = { section: 'response', ignoreFields: [], eventKey: 'sequence', bodyOnly: true };
+  const capture = { state: 'complete', response: { body: '{\n  "meta": { "nonce": "a" },\n  "data": { "items": [1, 9007199254740993123] }\n}' } };
+  const pasted = '{"data":{"items":[1,9007199254740993123]},"meta":{"nonce":"b"}}';
+  assert.equal(compareCaptures(bodyRecord(capture), bodyRecord({ custom: pasted }), body).totalChanges, 1);
+  assert.equal(compareCaptures(bodyRecord(capture, 'response', 'data'), bodyRecord({ custom: pasted }, 'response', 'data'), body).totalChanges, 0);
+  assert.equal(compareCaptures(bodyRecord(capture, 'response', '$.data.items[1]'), bodyRecord({ custom: '9007199254740993124' }), body).changes[0].after, '9007199254740993124');
+  assert.equal(bodyRecord(capture, 'response', 'missing').response.body, '"(path not found)"');
+  assert.equal(formatJson('{"b":1,"a":[2]}'), '{\n  "b": 1,\n  "a": [\n    2\n  ]\n}');
+  assert.throws(() => formatJson('{'));
+});

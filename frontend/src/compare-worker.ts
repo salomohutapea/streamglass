@@ -17,7 +17,8 @@ self.onmessage = async (event: MessageEvent<Request>) => {
   try {
     let [left, right] = await Promise.all([load(event.data.left), load(event.data.right)]);
     // Custom JSON on either side compares bodies only; the chosen content selects which part of a capture that is.
-    if (options.bodyOnly) [left, right] = [bodyRecord(left, options.section), bodyRecord(right, options.section)];
+    // A chosen path ("data", "$.data.items[0]") narrows both bodies, or each event's data, to that part.
+    if (options.bodyOnly) [left, right] = [bodyRecord(left, options.section, options.focusPath), bodyRecord(right, options.section, options.focusPath)];
     const comparison = compareCaptures(left, right, options.bodyOnly ? { ...options, section: 'response' } : options);
     const texts = comparison.limited ? null : { original: comparisonText(left, options), modified: comparisonText(right, options) };
     self.postMessage({ id, comparison, texts });

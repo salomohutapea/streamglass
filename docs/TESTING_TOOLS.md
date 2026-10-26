@@ -33,7 +33,9 @@ Captures that a rule changed carry `appliedRules` (type, id, name and a short de
 
 Choose two captures and compare Request, Response, or SSE events. The picker lists captures newest first, with each request's start time to the millisecond and its duration, so a request sent several times in a row is easy to tell apart. You can also search by time.
 
-Either side can be **Custom JSON** instead of a capture. Type it, paste it, or use **Paste from clipboard**. Custom JSON has no status or headers, so the comparison then uses bodies only: the capture's response or request body, or its SSE event data as one JSON array, depending on **Content**. Text that isn't valid JSON is compared as a string.
+Either side can be **Custom JSON** instead of a capture. Type it, paste it, or use **Paste from clipboard**. Custom JSON has no status or headers, so the comparison then uses bodies only: the capture's response or request body, or its SSE event data as one JSON array, depending on **Content**. Text that isn't valid JSON is compared as a string. Formatting doesn't matter: minified or indented JSON with keys in any order compares equal. **Format** indents the text box without changing key order or number text.
+
+**Compare only** narrows the comparison to part of each body, for example `data`, `$.data.flights[0]` or the JSON Pointer `/data/flights/0`. For SSE events, it applies to each event's data. A side that lacks the path shows `"(path not found)"`. Setting a path compares bodies only, so status and headers are left out.
 
 Both captures appear as pretty JSON in a side-by-side diff (VS Code's diff editor). Changed text is red on A and green on B, and long identical stretches fold away. Object keys and header names are sorted so reordered fields line up; arrays keep their order. JSON numeric lexemes are preserved, including integers larger than JavaScript's safe integer range. **Changed paths** below the diff lists every differing path.
 

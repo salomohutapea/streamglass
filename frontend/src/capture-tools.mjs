@@ -95,17 +95,17 @@ function withinComparisonBudget(left, right, section) {
 }
 // Pretty JSON for a side-by-side diff: the same content, ignore rules and numeric lexemes as compareCaptures. Object
 // keys and header names are sorted so that reordered fields line up; arrays keep their order.
-function formatNode(node, path, fields, depth) {
+function formatNode(node, path, fields, depth, sortKeys = true) {
   const pad = '  '.repeat(depth + 1), close = '  '.repeat(depth);
   if (!node.children.length) return node.open === '{' ? '{}' : node.open === '[' ? '[]' : node.raw;
   const occurrences = new Map(), entries = [];
   for (const { key, node: child } of node.children) {
     const count = occurrences.get(key) || 0; occurrences.set(key, count + 1);
     const next = childPath(path, key) + (count ? `#${count + 1}` : '');
-    if (!ignored(fields, key, next)) entries.push({ key, text: formatNode(child, next, fields, depth + 1) });
+    if (!ignored(fields, key, next)) entries.push({ key, text: formatNode(child, next, fields, depth + 1, sortKeys) });
   }
   if (node.open === '[') return entries.length ? `[\n${entries.map(entry => pad + entry.text).join(',\n')}\n${close}]` : '[]';
-  entries.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+  if (sortKeys) entries.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
   return entries.length ? `{\n${entries.map(entry => `${pad}${JSON.stringify(entry.key)}: ${entry.text}`).join(',\n')}\n${close}}` : '{}';
 }
 function formatBody(text, path, fields, depth) {
@@ -115,6 +115,24 @@ function formatObject(entries, depth) {
   const pad = '  '.repeat(depth + 1);
   return entries.length ? `{\n${entries.map(([key, text]) => `${pad}${JSON.stringify(key)}: ${text}`).join(',\n')}\n${'  '.repeat(depth)}}` : '{}';
 }
+// Pretty-prints JSON text for editing, keeping key order and exact numeric lexemes; throws on invalid JSON.
+export function formatJson(text) { return formatNode(parse(String(text)), '', [], 0, false); }
+
+// "data", "$.data.flights[0]" or the JSON Pointer "/data/flights/0" select part of a body.
+export function pathSegments(path) {
+  const value = String(path || '').trim();
+  if (!value) return [];
+  if (value.startsWith('/')) return value.slice(1).split('/').map(part => part.replaceAll('~1', '/').replaceAll('~0', '~'));
+  return [...value.replace(/^\$\.?/, '').matchAll(/([^.[\]]+)|\[(\d+|"[^"]*"|'[^']*')\]/g)].map(match => match[1] ?? match[2].replace(/^["']|["']$/g, ''));
+}
+function selectText(text, segments) {
+  let tree;
+  try { tree = parse(String(text)); } catch { return undefined; }
+  let node = tree;
+  for (const segment of segments) { const child = node.children.find(item => item.key === segment); if (!child) return undefined; node = child.node; }
+  return String(text).slice(node.start, node.end);
+}
+
 export function comparisonText(record, options = {}) {
   const fields = options.ignoreFields || [], section = options.section || 'response';
   if (options.bodyOnly) return formatBody(record.response?.body ?? '', '/body', fields, 0);
@@ -147,11 +165,13 @@ export function comparisonText(record, options = {}) {
 
 // Custom JSON (pasted or from the clipboard) has no headers or status, so a comparison that includes it compares bodies:
 // the capture's request or response body, or its SSE event data as one JSON array. `record.custom` holds the pasted text.
-export function bodyRecord(record, section = 'response') {
-  if (typeof record?.custom === 'string') return { state: 'complete', response: { body: record.custom } };
+export function bodyRecord(record, section = 'response', focusPath = '') {
+  const segments = pathSegments(focusPath), missing = JSON.stringify('(path not found)');
+  const focus = text => segments.length ? selectText(text, segments) ?? missing : text;
+  if (typeof record?.custom === 'string') return { state: 'complete', response: { body: focus(record.custom) } };
   let text;
-  if (section === 'events') text = `[${(record.events || []).map(event => { const data = event.data; if (typeof data !== 'string') return JSON.stringify(data ?? null); try { parse(data); return data; } catch { return JSON.stringify(data); } }).join(',')}]`;
-  else text = record[section]?.body ?? '';
+  if (section === 'events') text = `[${(record.events || []).map(event => { const data = event.data; if (typeof data !== 'string') return JSON.stringify(data ?? null); try { parse(data); return focus(data); } catch { return segments.length ? missing : JSON.stringify(data); } }).join(',')}]`;
+  else text = focus(record[section]?.body ?? '');
   return { state: incomplete(record, section) ? 'partial' : 'complete', response: { body: text, bodyUnavailable: record[section]?.bodyUnavailable } };
 }
 
