@@ -40,7 +40,7 @@ Press ⌘F (or the magnifier in the toolbar) to open the filter bar. Choose URL,
 
 Click Method, Request, or Time to sort; click the same heading again to reverse direction. Time shows the request start time in your local timezone with milliseconds. SSE requests include `| SSE` beside their HTTP method. The table uses a lock for encrypted connections; response status remains available in the inspector.
 
-Right-click a row (or focus it and press Shift+F10) for exports, a breakpoint, or a JavaScript rule seeded from that row. Encrypted tunnels require inspection before content exports or rules can apply. JSON bodies and event data are formatted with syntax colors and line numbers. Large viewers use Previous/Next pages to keep rendered content bounded, while preserving exact numeric text.
+Right-click a row (or focus it and press Shift+F10) for exports, a breakpoint, or a JavaScript rule seeded from that row. Encrypted tunnels require inspection before content exports or rules can apply. JSON bodies and event data are formatted with syntax colors and line numbers. In the Events tab each event first shows a three-line preview. Click it, or its arrow, to open the formatted viewer. Long streams show the newest 500 events, and **Show earlier events** loads more. Large viewers use Previous/Next pages to keep rendered content bounded, while preserving exact numeric text.
 
 ## Rules and scripts
 

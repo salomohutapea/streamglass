@@ -15,16 +15,17 @@ export function recordApplicationId(record) {
   return record.application?.id || (record.clientIsLocal === true ? unknownApplicationId : null);
 }
 
-export function trafficApplications(records) {
+// `icons` maps application ids to icons; /api/state sends each icon once instead of in every row.
+export function trafficApplications(records, icons = {}) {
   const applications = new Map();
   for (const record of records) {
     const id = recordApplicationId(record);
     if (id === null) continue;
     const application = record.application;
-    if (!applications.has(id)) applications.set(id, { id, name: application?.name || 'Unknown app', kind: application?.kind || 'application', icon: applicationIcon(application?.icon), count: 0 });
+    if (!applications.has(id)) applications.set(id, { id, name: application?.name || 'Unknown app', kind: application?.kind || 'application', icon: applicationIcon(icons[id] ?? application?.icon), count: 0 });
     const entry = applications.get(id);
     entry.count++;
-    entry.icon ||= applicationIcon(application?.icon);
+    entry.icon ||= applicationIcon(icons[id] ?? application?.icon);
   }
   return [...applications.values()].sort((a, b) => a.id === unknownApplicationId ? 1 : b.id === unknownApplicationId ? -1 : a.name.localeCompare(b.name));
 }

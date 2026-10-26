@@ -44,7 +44,9 @@ export default function JsonViewer({ value, unavailable = false, preserveFormatt
     const editor = editorRef.current;
     const model = editor?.getModel();
     if (!editor || !model) return;
-    if (model.getValue() !== document.text) model.setValue(document.text);
+    // A refetch of the same body must not reset the reader's scroll position.
+    if (model.getValue() === document.text) return;
+    model.setValue(document.text);
     editor.updateOptions({ ...sharedEditorOptions(document.text.length), ariaLabel: document.isJson ? 'JSON body text' : 'Body text', readOnly: true, tabFocusMode: true, renderValidationDecorations: 'off' });
     ensureMonaco().editor.setModelLanguage(model, document.isJson ? 'json' : 'plaintext');
     editor.setScrollPosition({ scrollTop: 0, scrollLeft: 0 });

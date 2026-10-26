@@ -59,6 +59,22 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         self.service.changed()
         self.assertEqual((await search(self.service, 'event', 'new-event'))['ids'], ['one'])
 
+    async def test_polling_rechecks_only_changed_captures(self):
+        import backend.search as module
+        checked = []
+        original = module.evaluate_each
+        def counting(records, *args):
+            checked.append(sorted(record["id"] for record in records))
+            return original(records, *args)
+        with patch.object(module, "evaluate_each", counting):
+            first = await search(self.service, 'url', 'example')
+            self.service.changed()
+            self.assertEqual(await search(self.service, 'url', 'example'), first)
+            record = self.service.records['one']
+            self.service.save({**record, 'url': record['url'] + '?changed'})
+            await search(self.service, 'url', 'example')
+        self.assertEqual(checked[1:], [['one']])
+
     async def test_api_validates_search_inputs(self):
         client = TestClient(TestServer(create_app(self.service)))
         await client.start_server()

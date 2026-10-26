@@ -59,6 +59,23 @@ def evaluate(records, scope, query, mode):
             "warning": "Search covers retained text only; some contents were not captured." if incomplete else None}
 
 
+def evaluate_each(records, scope, query, mode):
+    """Per-record (matched, partial) results, so a later search only re-checks records that changed."""
+    rows, _ = snapshot(records, scope)
+    matched = set(match(rows, query, mode))
+    return {record_id: (record_id in matched, partial) for record_id, _, partial in rows}
+
+
+def signature(record, rev):
+    """What a cached result depends on. Messages are replaced rather than edited and events are appended, so object
+    identity plus the event count detects changes even when a caller bumps the revision without saving."""
+    return (rev, record.get("url"), record.get("request"), record.get("response"), len(record.get("events") or ()), record.get("captureWarning"))
+
+
+def unchanged(cached, current):
+    return cached is not None and len(cached) == len(current) and all(a is b or a == b for a, b in zip(cached, current))
+
+
 async def search(service, scope, query, mode="contains"):
     if scope not in ("url", "request", "response", "event"):
         raise ValueError("scope must be url, request, response, or event")
@@ -66,14 +83,25 @@ async def search(service, scope, query, mode="contains"):
         raise ValueError("Invalid search mode")
     if len(query) > 1024:
         raise ValueError("Search query exceeds 1024 characters")
-    # One worker and one cached result bound repeated polling during active streams.
+    # One worker and one cached result bound repeated polling during active streams. Results are kept per record and
+    # keyed by its save revision, so polling during traffic re-checks only the captures that changed.
     async with service.search_lock:
-        key = (service.revision, scope, query.casefold(), mode)
-        if service.search_cache and service.search_cache[0] == key:
-            return service.search_cache[1]
+        key = (scope, query.casefold(), mode)
+        cache = service.search_cache if service.search_cache and service.search_cache["key"] == key else {"key": key, "revision": None, "results": {}, "result": None}
+        if cache["revision"] == service.revision:
+            return cache["result"]
+        revision, revs = service.revision, service.record_revs
+        signatures = {record_id: signature(record, revs.get(record_id, 0)) for record_id, record in service.records.items()}
+        stale = [record for record_id, record in service.records.items() if not unchanged(cache["results"].get(record_id, (None,))[0], signatures[record_id])]
         # Messages/event objects are replaced, not edited, after retention; copy the growing event lists.
-        records = tuple({**record, "events": tuple(record.get("events", ())) if scope == "event" else ()}
-                        for record in service.records.values())
-        result = await asyncio.to_thread(evaluate, records, scope, key[2], mode)
-        service.search_cache = (key, result)
+        copies = tuple({**record, "events": tuple(record.get("events", ())) if scope == "event" else ()} for record in stale)
+        fresh = await asyncio.to_thread(evaluate_each, copies, scope, key[1], mode) if copies else {}
+        results = {record_id: cache["results"][record_id] for record_id in service.records if record_id in cache["results"]}
+        for record in stale:
+            results[record["id"]] = (signatures[record["id"]], *fresh[record["id"]])
+        ids = [record_id for record_id in service.records if record_id in results and results[record_id][1]]
+        incomplete = any(partial for _, _, partial in results.values())
+        result = {"ids": ids, "incomplete": incomplete,
+                  "warning": "Search covers retained text only; some contents were not captured." if incomplete else None}
+        service.search_cache = {"key": key, "revision": revision, "results": results, "result": result}
         return result

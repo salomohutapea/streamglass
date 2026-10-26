@@ -77,7 +77,7 @@ Run only the checks appropriate to the change and authorized for the task. These
 | `npm run test:shell` | JavaScript helpers, scripts, MCP, applications, exports, and viewer behavior |
 | `npm run test:engine` | Python engine and API tests |
 | `npm run build:ui` | Production renderer assets |
-| `npm run test:desktop` | Electron integration; requires built UI assets |
+| `npm run test:desktop` | Electron integration; requires built UI assets. Prefix `STREAMGLASS_BACKGROUND=1` to keep test windows invisible, so they don't take focus |
 | `npm run build:engine` | Frozen Python engine |
 
 For a desktop check against a packaged app, set `STREAMGLASS_TEST_APP` to that app's `Contents/MacOS/Streamglass` executable. Source checks and frozen-engine checks establish different things; report which target was used. Device certificate trust, proxy restoration, managed-device permissions, and application pinning need target-specific verification.
@@ -100,6 +100,14 @@ When changing compressed response handling, include cases whose decompressed siz
 ### Local release review
 
 Before labeling a 1.0.0 artifact, use the [release qualification checklist](RELEASE.md). It separates source checks, package checks, distribution signing, and target-device exercises, and records which were actually completed.
+
+### Performance baseline
+
+```sh
+npm run build:ui && node scripts/perf-baseline.mjs [--quick] [--skip-sse]
+```
+
+The script seeds 1,000 synthetic captures, sends synthetic HTTP and SSE traffic through the proxy, and prints renderer, Electron and engine metrics as JSON. It sets `STREAMGLASS_BACKGROUND=1`, which works only in unpackaged builds. In that mode windows are invisible and ignore the mouse, focus requests do nothing, and there's no Dock icon. Results and the findings they test are in the [performance audit](PERFORMANCE_AUDIT.md).
 
 ### Showcase captures
 

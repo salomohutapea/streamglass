@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSetupHandler, createSetupSite, buildPac, buildSetupPage, buildMobileConfig, parsePublicCertificate } from '../electron/setup-site.mjs';
+import { createSetupHandler, createSetupSite, buildPac, buildSetupPage, buildMobileConfig, parsePublicCertificate, defaultSetupPort } from '../electron/setup-site.mjs';
 
 const der = Buffer.from('synthetic-certificate-bytes-for-tests');
 const pem = `-----BEGIN CERTIFICATE-----\n${der.toString('base64')}\n-----END CERTIFICATE-----\n`;
@@ -84,4 +84,12 @@ test('setup page opens the Android tab for Android browsers and iPhone otherwise
   assert.match(buildSetupPage('192.168.1.20', 9090, 9091, 'android'), /id="os-android" checked/);
   assert.match(buildSetupPage('192.168.1.20', 9090, 9091), /id="os-ios" checked/);
   assert.match(buildSetupPage('192.168.1.20', 9090, 9091), /Certificate Trust Settings/);
+});
+
+test('the default setup port follows the proxy port but skips common dev-server ports', () => {
+  assert.equal(defaultSetupPort(9090), 9091);
+  assert.equal(defaultSetupPort(8080), 8082);
+  assert.equal(defaultSetupPort(7999), 8001);
+  assert.equal(defaultSetupPort(18999), 19003);
+  assert.equal(defaultSetupPort(65535), 65534);
 });

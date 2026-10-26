@@ -42,7 +42,7 @@ The current proxy capture identifies source devices by connection address; it do
 
 ## Phone setup page, PAC and QR code
 
-While LAN access is enabled, Streamglass runs a small read-only HTTP setup site on the proxy port plus one (for example `9091` for proxy `9090`). Set `STREAMGLASS_SETUP_PORT` to choose another port. It starts only while LAN access is on and stops when it is turned off or the app quits. If the port is in use, Connect device shows the error instead of the QR code.
+While LAN access is enabled, Streamglass runs a small read-only HTTP setup site on the proxy port plus one (for example `9091` for proxy `9090`). It skips ports that dev servers commonly use, such as Metro's 8081, so proxy `8080` gets setup port `8082`. Set `STREAMGLASS_SETUP_PORT` to choose another port. It starts only while LAN access is on and stops when it is turned off or the app quits. If the port is in use, Connect device shows the error instead of the QR code.
 
 **Connect device** shows a QR code for `http://<mac-lan-ip>:<setup-port>/` for iOS devices, Android devices and emulators. Scan it with the phone camera to open a mobile page with the proxy host and port, numbered iOS and Android steps, and certificate downloads. If LAN access is off, the dialog offers a button to turn it on. The page is reachable only from the local network and needs no proxy to be set first, unlike `http://mitm.it`.
 

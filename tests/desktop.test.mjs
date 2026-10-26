@@ -112,7 +112,9 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
       assert.equal(attributed.clientIsLocal, true);
       assert.equal(attributed.application.pid, expectedPid);
       assert.equal(attributed.application.kind, 'application');
-      assert.match(attributed.application.icon, /^data:image\/png;base64,/);
+      // Rows carry no icon data; /api/state sends each application's icon once.
+      assert.equal(attributed.application.icon, undefined);
+      assert.match((await api('/api/state')).applicationIcons[attributed.application.id], /^data:image\/png;base64,/);
     }
     await openSidebar(page);
     await page.getByRole('button', { name: '2 domains', exact: false }).waitFor();

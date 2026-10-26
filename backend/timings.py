@@ -1,5 +1,7 @@
 """Per-request timing breakdown and SSE gap statistics. Pure functions over flow-like objects; nothing here touches traffic."""
+import bisect
 import math
+from collections import deque
 
 
 def _ms(seconds):
@@ -42,6 +44,24 @@ def compute_timings(flow, forwarded_at, response_end):
     timings["downloadMs"] = max(0.0, download - pause_after) if download is not None else None
     timings["pausedMs"] = (paused.get("request", 0.0) + pause_after) or None
     return {key: value for key, value in timings.items() if value is not None}
+
+
+class GapStats:
+    """Running gap statistics over the newest `limit` gaps; same output as gap_stats without re-sorting per event."""
+    def __init__(self, limit=10000):
+        self.limit, self.order, self.sorted, self.total = limit, deque(), [], 0.0
+
+    def add(self, gap):
+        self.order.append(gap)
+        bisect.insort(self.sorted, gap)
+        self.total += gap
+        if len(self.order) > self.limit:
+            oldest = self.order.popleft()
+            del self.sorted[bisect.bisect_left(self.sorted, oldest)]
+            self.total -= oldest
+        values = self.sorted
+        return {"count": len(values), "minMs": values[0], "avgMs": self.total / len(values),
+                "p95Ms": values[max(0, math.ceil(0.95 * len(values)) - 1)], "maxMs": values[-1]}
 
 
 def gap_stats(gaps):

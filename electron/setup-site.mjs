@@ -11,6 +11,16 @@ const validHost = value => typeof value === 'string' && /^(\d{1,3}\.){3}\d{1,3}$
 const validPort = value => Number.isInteger(value) && value >= 1 && value <= 65535;
 const uuidFrom = (seed, label) => { const h = createHash('sha256').update(`${label}:${seed}`).digest('hex'); return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`.toUpperCase(); };
 
+// Ports that local dev servers commonly use (Metro, Expo, Vite, webpack, Rails, Flask, Jupyter). The setup page skips
+// them so a phone or `adb reverse` reaching the Mac on one of these ports still gets the developer's server.
+export const DEV_SERVER_PORTS = new Set([3000, 3001, 4200, 5000, 5173, 7000, 8000, 8080, 8081, 8888, 19000, 19001, 19002, 19006]);
+
+export function defaultSetupPort(proxyPort) {
+  for (let port = proxyPort + 1; port <= 65535; port++) if (!DEV_SERVER_PORTS.has(port)) return port;
+  for (let port = proxyPort - 1; port >= 1024; port--) if (!DEV_SERVER_PORTS.has(port)) return port;
+  return proxyPort + 1;
+}
+
 export function parsePublicCertificate(pem) {
   if (typeof pem !== 'string' || pem.includes('PRIVATE KEY')) throw new Error('A public PEM certificate is required');
   const match = PEM.exec(pem);

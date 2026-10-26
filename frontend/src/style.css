@@ -214,3 +214,4 @@ dialog[open]::backdrop{animation:backdrop-in .2s ease}
 .column-resizer:focus-visible{outline:none}
 body.column-resizing,body.column-resizing *{cursor:col-resize!important;user-select:none}
 .app>.traffic-footer{flex-shrink:0;border-top:1px solid var(--line)}
+.row-spacer td{padding:0;border:0}.row-spacer{cursor:default}

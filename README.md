@@ -114,6 +114,7 @@ Start with [workflows](docs/WORKFLOWS.md) for capture and breakpoints, [testing 
 | [Security review](docs/SECURITY_REVIEW.md) | Hardening evidence, dependency repairs and qualification limits |
 | [Dependency compatibility build](docs/DEPENDENCY_PATCH.md) | Reproducible mitmproxy patch, provenance and maintenance |
 | [Architecture review](docs/ARCHITECTURE_REVIEW.md) | SOLID assessment, extension seams, and remaining design limits |
+| [Performance audit](docs/PERFORMANCE_AUDIT.md) | Hot paths in the engine, renderer and main process, ranked fixes, and a measurement plan |
 
 ## Current limits
 

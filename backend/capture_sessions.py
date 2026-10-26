@@ -7,6 +7,8 @@ import uuid
 
 from aiohttp import web
 
+from .sse import exported
+
 MAX_SESSION = 256 * 1024 * 1024
 MAX_STORAGE = 1024 * 1024 * 1024
 MAX_RECORD = 32 * 1024 * 1024
@@ -117,14 +119,17 @@ def install(app, service):
             if not isinstance(value, dict) or set(value) != {"name"}:
                 raise ValueError("Expected session name")
             name = label(value["name"])
-            count, size = service.db.execute("SELECT COUNT(*),COALESCE(SUM(length(CAST(payload AS BLOB))),0) FROM records").fetchone()
+            # Serialize from memory: stored rows keep SSE events in their own table, and archives use the export shape.
+            records = sorted(service.records.values(), key=lambda record: (record["startedAt"], record["id"]))
+            payloads = [json.dumps(exported(record), ensure_ascii=False) for record in records]
+            count, size = len(payloads), sum(len(payload.encode()) for payload in payloads)
             if count == 0 or count > 1000:
                 raise ValueError("Save requires 1..1000 retained captures")
             capacity(service, size)
             session_id = str(uuid.uuid4())
             with service.db:
                 service.db.execute("INSERT INTO capture_sessions VALUES (?,?,?,?,?)", (session_id, name, time.time(), count, size))
-                service.db.execute("INSERT INTO session_records SELECT ?,id,ROW_NUMBER() OVER (ORDER BY started,id),payload FROM records", (session_id,))
+                service.db.executemany("INSERT INTO session_records VALUES (?,?,?,?)", ((session_id, record["id"], ordinal, payload) for ordinal, (record, payload) in enumerate(zip(records, payloads), 1)))
             return web.json_response(session(service, session_id), status=201)
         rows = service.db.execute("SELECT id,name,created,count,bytes FROM capture_sessions ORDER BY created DESC").fetchall()
         return web.json_response({"sessions": [dict(zip(("id", "name", "createdAt", "recordCount", "bytes"), row)) for row in rows]})

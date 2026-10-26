@@ -20,6 +20,11 @@ test('applications group by process attribution, never by device or user agent',
   assert.equal(recordApplicationId(records[4]), null);
   assert.equal(recordApplicationId(records[5]), null);
 });
+test('applications take icons from the state icon map', () => {
+  const records = [{ application: { id: 'bundle:safari', name: 'Safari', kind: 'application' } }];
+  assert.equal(trafficApplications(records, { 'bundle:safari': icon })[0].icon, icon);
+  assert.equal(trafficApplications(records, { 'bundle:safari': 'https://example.test/icon.png' })[0].icon, undefined);
+});
 test('application logos accept bounded PNG data only', () => {
   assert.equal(applicationIcon(icon), icon);
   for (const value of [undefined, 'https://example.test/icon.png', 'data:image/svg+xml;base64,PHN2Zz4=', 'data:image/png;base64,ZmFrZQ==', `${icon}${'A'.repeat(350000)}`]) assert.equal(applicationIcon(value), undefined);

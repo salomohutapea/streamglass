@@ -10,6 +10,7 @@ from pathlib import Path
 from aiohttp import web
 
 from .service import MAX_BODY, is_sse
+from .sse import exported
 from .sse_status import sse_status
 from .search import search as search_records
 
@@ -49,13 +50,30 @@ def create_app(service):
     app = web.Application(middlewares=[boundary], client_max_size=48 * 1024 * 1024)
 
     async def state(request):
-        return web.json_response(service.state())
+        # Pollers pass the etag they last saw; an unchanged snapshot answers with a few bytes instead of every row.
+        etag, body = service.state_json(request.query.get("since"))
+        if request.query.get("etag") == etag:
+            return web.json_response({"unchanged": True, "etag": etag})
+        return web.Response(text=body, content_type="application/json")
+
+    async def pending(request):
+        return web.json_response({"capturePaused": service.settings["capturePaused"], "pending": service.pending_summary()})
 
     async def record(request):
         value = service.records.get(request.match_info["id"])
         if not value:
             raise web.HTTPNotFound()
-        return web.json_response({**value, "isSSE": is_sse(value), **({"sseStatus": sse_status(value)} if is_sse(value) else {})})
+        result = {**value, "isSSE": is_sse(value), **({"sseStatus": sse_status(value)} if is_sse(value) else {})}
+        # The inspector asks for compact events (no raw wire copies) and only the events it has not seen yet.
+        events = value.get("events")
+        if isinstance(events, list) and ("afterEvent" in request.query or request.query.get("compact") == "1"):
+            start = int(request.query.get("afterEvent", "0"))
+            start = start if 0 <= start <= len(events) else 0
+            selected = events[start:]
+            if request.query.get("compact") == "1":
+                selected = [{key: item for key, item in event.items() if key not in ("raw", "rawBase64")} for event in selected]
+            result.update(events=selected, eventsFrom=start)
+        return web.json_response(result)
 
     async def traffic_tools(request):
         if request.method == "PUT":
@@ -316,10 +334,7 @@ def create_app(service):
         record_id, device = request.match_info.get("id"), request.query.get("device")
         ids = [key for key, value in service.records.items() if (not record_id or key == record_id) and (not device or value["device"] == device)]
         for key in ids:
-            service.records.pop(key, None)
-            service.record_sizes.pop(key, None)
-            service.analysis_cache.pop(key, None)
-            service.db.execute("DELETE FROM records WHERE id=?", (key,))
+            service.forget_record(key)
         service.db.commit()
         service.changed()
         return web.json_response({"deleted": len(ids)})
@@ -352,7 +367,8 @@ def create_app(service):
             return web.Response(text=prefix + " ".join(parts), content_type="text/plain", headers={"Content-Disposition": f'attachment; filename="{item["id"]}.sh"'})
         if fmt not in ("request", "response", "events"):
             raise ValueError("Unknown export format")
-        return web.Response(text=json.dumps(item.get(fmt), ensure_ascii=False, indent=2), content_type="application/json", headers={"Content-Disposition": f'attachment; filename="{item["id"]}-{fmt}.json"'})
+        value = exported(item).get("events") if fmt == "events" else item.get(fmt)
+        return web.Response(text=json.dumps(value, ensure_ascii=False, indent=2), content_type="application/json", headers={"Content-Disposition": f'attachment; filename="{item["id"]}-{fmt}.json"'})
 
     async def export_all(request):
         # Retain the starting set; stream one capture at a time instead of a second full-session copy.
@@ -368,7 +384,7 @@ def create_app(service):
         await response.prepare(request)
         await response.write((json.dumps(header)[:-1] + ', "records": [\n').encode())
         for index, record in enumerate(records):
-            value = ((",\n" if index else "") + json.dumps(record, ensure_ascii=False)).encode()
+            value = ((",\n" if index else "") + json.dumps(exported(record), ensure_ascii=False)).encode()
             for offset in range(0, len(value), 64 * 1024):
                 await response.write(value[offset:offset + 64 * 1024])
         await response.write(b"\n]}\n")
@@ -393,7 +409,7 @@ def create_app(service):
             service.sockets.discard(socket)
         return socket
 
-    app.add_routes([web.get("/api/state", state), web.get("/api/workspace-config", workspace_config), web.put("/api/workspace-config", workspace_config), web.get("/api/traffic-tools", traffic_tools), web.put("/api/traffic-tools", traffic_tools), web.post("/api/records/{id}/pin", pin), web.get("/api/search", search), web.get("/api/records/{id}", record),
+    app.add_routes([web.get("/api/state", state), web.get("/api/pending", pending), web.get("/api/workspace-config", workspace_config), web.put("/api/workspace-config", workspace_config), web.get("/api/traffic-tools", traffic_tools), web.put("/api/traffic-tools", traffic_tools), web.post("/api/records/{id}/pin", pin), web.get("/api/search", search), web.get("/api/records/{id}", record),
                     web.put("/api/settings", settings), web.put("/api/rules", rules),
                     web.post("/api/folders", folder), web.patch("/api/folders/{id}", folder), web.delete("/api/folders/{id}", folder),
                     web.post("/api/pending/{token}", resume), web.delete("/api/records", delete),

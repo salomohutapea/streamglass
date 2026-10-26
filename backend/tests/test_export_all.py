@@ -45,6 +45,8 @@ class ExportAllTests(unittest.IsolatedAsyncioTestCase):
         result = await response.json()
         self.assertEqual(result['format'], 'streamglass-session')
         self.assertEqual(result['recordCount'], 2)
+        # Retained events may omit rawBase64 when raw is exact UTF-8; exports always carry it.
+        records[0]['events'][0]['rawBase64'] = 'ZXZlbnQ6IGRhdGEKZGF0YTogdmFsdWUKCg=='
         self.assertEqual(result['records'], records)
 
     async def test_empty_session_and_authentication(self):

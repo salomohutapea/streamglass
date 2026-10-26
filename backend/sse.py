@@ -1,4 +1,5 @@
 """Incremental SSE framing. Byte framing preserves unchanged events exactly."""
+import base64
 import codecs
 
 MAX_EVENT = 8 * 1024 * 1024
@@ -94,3 +95,15 @@ def serialize(event):
     if len(result) > MAX_EVENT:
         raise ValueError("Edited SSE event exceeds 8 MiB")
     return result
+
+
+def wire_event(event):
+    """Retained events keep `rawBase64` only when `raw` cannot represent the bytes; exports always include it."""
+    if "rawBase64" in event or not isinstance(event.get("raw"), str):
+        return event
+    return {**event, "rawBase64": base64.b64encode(event["raw"].encode()).decode()}
+
+
+def exported(record):
+    events = record.get("events")
+    return {**record, "events": [wire_event(event) for event in events]} if isinstance(events, list) and events else record

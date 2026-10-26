@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startScriptService } from './script-service.mjs';
 import { createUpdateChecker, releasesPrefix } from './updater.mjs';
 import { createDeviceService } from './devices.mjs';
-import { createSetupHandler, createSetupSite } from './setup-site.mjs';
+import { createSetupHandler, createSetupSite, defaultSetupPort } from './setup-site.mjs';
 import { createApplicationMenu } from './menu.mjs';
 import { startMcpServer } from './mcp-server.mjs';
 import { loadMcpConfig, saveMcpConfig } from './mcp-config.mjs';
@@ -27,6 +27,8 @@ const windows = new Set();
 const editorWindows = new Map();
 const openedGates = new Set();
 const dev = !app.isPackaged && process.env.STREAMGLASS_BUILT_UI !== '1';
+// Benchmarks and tests: windows render unthrottled but invisible, never take focus and show no Dock icon.
+const background = !app.isPackaged && process.env.STREAMGLASS_BACKGROUND === '1';
 let engine, scriptService, devices, bootstrap, shuttingDown = false, checkingQuit = false;
 let startupError = '';
 let applicationMenu;
@@ -80,8 +82,10 @@ function createWindow(recordId, editor) {
     icon: path.join(root, 'electron/assets/streamglass.png'),
     // Traffic lights centre in the 52px main toolbar and in the 46px header of editor windows.
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: editor ? 16 : 20 } } : {}),
-    webPreferences: { preload: path.join(root, 'electron/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false },
+    ...(background ? { show: false } : {}),
+    webPreferences: { preload: path.join(root, 'electron/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, ...(background ? { backgroundThrottling: false } : {}) },
   });
+  if (background) { win.setOpacity(0); win.setIgnoreMouseEvents(true); win.once('ready-to-show', () => win.showInactive()); }
   if (auxiliary && process.platform === 'darwin') {
     win.setFullScreenable(false);
     win.setVisibleOnAllWorkspaces(false, { visibleOnFullScreen: true, skipTransformProcessType: true });
@@ -189,12 +193,13 @@ function openEditor(input, automatic = false) {
 
 async function pollPendingEditors() {
   try {
-    const response = await fetch(`${bootstrap.baseUrl}/api/state`, {
+    // /api/pending carries only the gates, not every table row.
+    const response = await fetch(`${bootstrap.baseUrl}/api/pending`, {
       headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(2000),
     });
     if (!response.ok) throw new Error('Cannot read breakpoints');
     const state = await response.json();
-    const pending = state.settings?.capturePaused ? [] : state.pending ?? [];
+    const pending = state.capturePaused ? [] : state.pending ?? [];
     if (shuttingDown) return;
     const active = new Set(pending.map(gate => gate.token));
     for (const gate of openedGates) if (!active.has(gate)) openedGates.delete(gate);
@@ -212,6 +217,13 @@ async function pollPendingEditors() {
 
 async function start() {
   await app.whenReady();
+  if (background) {
+    app.setActivationPolicy?.('accessory');
+    // Tests ask for focus to drive menus; in background mode windows appear without taking it from other apps.
+    app.focus = () => {};
+    BrowserWindow.prototype.focus = function focus() { if (!this.isVisible()) this.showInactive(); };
+    BrowserWindow.prototype.show = function show() { this.showInactive(); };
+  }
   app.dock?.setIcon(path.join(root, 'electron/assets/streamglass.png'));
   applicationMenu = createApplicationMenu({ app, Menu, BrowserWindow, windows, openAbout: openAboutWindow,
     getToolsOwner:() => toolsOwner && !toolsOwner.isDestroyed() ? toolsOwner : mainWindow && !mainWindow.isDestroyed() ? mainWindow : null });
@@ -351,7 +363,7 @@ async function start() {
       const settings = await engineSettings();
       const override = Number(process.env.STREAMGLASS_SETUP_PORT);
       setupProxyPort = settings.proxyPort;
-      setupPort = Number.isInteger(override) && override >= 1024 && override <= 65535 ? override : settings.proxyPort + 1;
+      setupPort = Number.isInteger(override) && override >= 1024 && override <= 65535 ? override : defaultSetupPort(settings.proxyPort);
       await setupSite.sync({ enabled: settings.listenHost === '0.0.0.0', port: setupPort });
       return { lanEnabled: settings.listenHost === '0.0.0.0', port: setupPort, ...setupSite.status() };
     } catch (error) { return { lanEnabled: false, port: setupPort || null, running: false, error: error.message }; }

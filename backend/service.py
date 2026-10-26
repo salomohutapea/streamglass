@@ -18,7 +18,7 @@ from aiohttp import web, ClientSession, ClientTimeout, ClientError
 
 from . import traffic_rules
 from .traffic_tools import DEFAULT_NETWORK, summary as traffic_summary, network_for, wait as traffic_wait, map_response
-from .timings import compute_timings, gap_stats, note_pause
+from .timings import compute_timings, GapStats, note_pause
 from .sse import SSEParser, EventTooLarge, serialize
 from .sse_status import finish as sse_finish, sse_status
 from .large_body import before_responseheaders, observe_responsechunk, complete_response
@@ -164,8 +164,13 @@ class Service:
         os.chmod(self.directory, 0o700)
         self.token, self.port = token, port
         self.db = sqlite3.connect(self.directory / "captures.sqlite3")
+        # Captures are deleted on every start and stop, so a crash may lose the last writes; WAL avoids an fsync per save.
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         self.db.execute("CREATE TABLE IF NOT EXISTS records (id TEXT PRIMARY KEY, started REAL, payload TEXT)")
+        # SSE events are appended one row each, so a growing stream never rewrites its earlier events.
+        self.db.execute("CREATE TABLE IF NOT EXISTS events (record TEXT NOT NULL, seq INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(record, seq))")
         config = dict(self.db.execute("SELECT key,value FROM config"))
         self.settings = {"capturePaused": False, "proxyEnabled": True, "proxyPort": default_proxy_port, "listenHost": "0.0.0.0", "tlsDomains": []}
         self.settings.update(json.loads(config.get("settings", "{}")))
@@ -185,6 +190,13 @@ class Service:
         self.traffic_tools_revision = int(config.get("trafficToolsRevision", "0"))
         self.records = {row[0]: json.loads(row[1]) for row in self.db.execute("SELECT id,payload FROM records ORDER BY started DESC LIMIT ?", (MAX_RECORDS,))}
         self.record_sizes = dict(self.db.execute("SELECT id,length(CAST(payload AS BLOB)) FROM records"))
+        # Persisted event count and bytes per record. Records saved before the events table keep their inline events.
+        self.event_rows = {}
+        for record_id, count, size in self.db.execute("SELECT record,COUNT(*),SUM(length(CAST(payload AS BLOB))) FROM events GROUP BY record"):
+            self.event_rows[record_id] = (count, size)
+            self.record_sizes[record_id] = self.record_sizes.get(record_id, 0) + size
+            if record_id in self.records:
+                self.records[record_id]["events"] = [json.loads(row[0]) for row in self.db.execute("SELECT payload FROM events WHERE record=? ORDER BY seq", (record_id,))]
         self.pending = {}
         self.capture_epoch = 0
         self.capture_pause = asyncio.Event()
@@ -203,6 +215,12 @@ class Service:
         self.dirty = False
         self.http = None
         self.revision = 0
+        self.instance = uuid.uuid4().hex[:8]
+        # Per-record revision for detail refetches, and the serialized table rows for the current revision.
+        self.record_revs = {}
+        # Records subject to the count/size limits, rebuilt when the TLS allowlist changes or a record is removed elsewhere.
+        self.retention = None
+        self.state_rows_cache = None
         self.search_lock = asyncio.Lock()
         self.search_cache = None
         for record in list(self.records.values()):
@@ -237,35 +255,72 @@ class Service:
             record["endedAt"] = time.time()
             record["durationMs"] = max(0, (record["endedAt"] - record["startedAt"]) * 1000)
         sse_finish(record)
-        payload = json.dumps(record, ensure_ascii=False)
-        payload_size = len(payload.encode())
+        record_id = record["id"]
+        # Events are append-only; only events not yet persisted are serialized. A shorter list rewrites them.
+        events = record.get("events") if isinstance(record.get("events"), list) else []
+        persisted, event_bytes = self.event_rows.get(record_id, (0, 0))
+        rewrite = len(events) < persisted
+        if rewrite:
+            persisted, event_bytes = 0, 0
+        new_events = [json.dumps(event, ensure_ascii=False) for event in events[persisted:]]
+        event_bytes += sum(len(item.encode()) for item in new_events)
+        payload = json.dumps({**record, "events": []} if "events" in record else record, ensure_ascii=False)
+        payload_size = len(payload.encode()) + event_bytes
         if payload_size > MAX_CAPTURE:
             raise ValueError("Capture exceeds 32 MiB storage limit")
-        retained = {**self.records, record["id"]: record}
-        pinned = [r for r in retained.values() if r.get("pinned")]
-        if len(pinned) > MAX_RECORDS or sum(payload_size if r["id"] == record["id"] else self.record_sizes[r["id"]] for r in pinned) > 256 * 1024 * 1024:
-            raise ValueError("Pinned capture storage limit reached; unpin or delete captures")
-        self.db.execute("INSERT OR REPLACE INTO records VALUES (?,?,?)", (record["id"], record["startedAt"], payload))
-        self.records[record["id"]] = record
-        self.record_sizes[record["id"]] = payload_size
+        if record.get("pinned"):
+            pinned = [r for r in {**self.records, record_id: record}.values() if r.get("pinned")]
+            if len(pinned) > MAX_RECORDS or sum(payload_size if r["id"] == record_id else self.record_sizes[r["id"]] for r in pinned) > 256 * 1024 * 1024:
+                raise ValueError("Pinned capture storage limit reached; unpin or delete captures")
+        retention = self.retention_index()
+        self.db.execute("INSERT OR REPLACE INTO records VALUES (?,?,?)", (record_id, record["startedAt"], payload))
+        if rewrite:
+            self.db.execute("DELETE FROM events WHERE record=?", (record_id,))
+        if new_events:
+            self.db.executemany("INSERT OR REPLACE INTO events VALUES (?,?,?)", ((record_id, persisted + index, item) for index, item in enumerate(new_events)))
+        self.event_rows[record_id] = (len(events), event_bytes)
+        self.records[record_id] = record
+        if record_id in retention["limited"]:
+            retention["size"] -= self.record_sizes.get(record_id, 0)
+        self.record_sizes[record_id] = payload_size
         # Captures for TLS-allowlisted domains are never evicted and do not count toward the limits. Pinned captures
         # are never evicted but still count, as before.
-        allowlist = [re.compile(pattern, re.IGNORECASE) for pattern in self.tls_patterns()]
-        limited = [r for r in self.records.values() if not self.tls_allowlisted(r, allowlist)]
-        evictable = sorted((r for r in limited if not r.get("pinned")), key=lambda r: r["startedAt"])
-        total = sum(self.record_sizes[r["id"]] for r in limited)
-        count = len(limited)
-        for oldest in evictable:
-            if count <= MAX_RECORDS and total <= 256 * 1024 * 1024:
-                break
-            size = self.record_sizes.pop(oldest["id"])
-            self.db.execute("DELETE FROM records WHERE id=?", (oldest["id"],))
-            self.records.pop(oldest["id"], None)
-            self.analysis_cache.pop(oldest["id"], None)
-            total -= size
-            count -= 1
+        if self.tls_allowlisted(record, retention["patterns"]):
+            retention["limited"].discard(record_id)
+        else:
+            retention["limited"].add(record_id)
+            retention["size"] += payload_size
+        if len(retention["limited"]) > MAX_RECORDS or retention["size"] > 256 * 1024 * 1024:
+            evictable = sorted((self.records[key] for key in retention["limited"] if not self.records[key].get("pinned")), key=lambda r: r["startedAt"])
+            for oldest in evictable:
+                if len(retention["limited"]) <= MAX_RECORDS and retention["size"] <= 256 * 1024 * 1024:
+                    break
+                retention["size"] -= self.record_sizes.get(oldest["id"], 0)
+                retention["limited"].discard(oldest["id"])
+                self.forget_record(oldest["id"])
         self.db.commit()
         self.changed()
+        self.record_revs[record_id] = self.revision
+
+    def retention_index(self):
+        key = tuple(self.settings["tlsDomains"])
+        if self.retention is None or self.retention["key"] != key:
+            patterns = [re.compile(pattern, re.IGNORECASE) for pattern in self.tls_patterns()]
+            limited = {record_id for record_id, record in self.records.items() if not self.tls_allowlisted(record, patterns)}
+            self.retention = {"key": key, "patterns": patterns, "limited": limited, "size": sum(self.record_sizes.get(record_id, 0) for record_id in limited)}
+        return self.retention
+
+    def forget_record(self, record_id):
+        """Drop one retained capture from memory and storage; the caller commits and calls changed()."""
+        self.records.pop(record_id, None)
+        self.record_sizes.pop(record_id, None)
+        self.event_rows.pop(record_id, None)
+        self.analysis_cache.pop(record_id, None)
+        self.record_revs.pop(record_id, None)
+        if self.retention is not None and record_id in self.retention["limited"]:
+            self.retention = None
+        self.db.execute("DELETE FROM records WHERE id=?", (record_id,))
+        self.db.execute("DELETE FROM events WHERE record=?", (record_id,))
 
     def tls_allowlisted(self, record, patterns):
         if record.get("sslInspected"):
@@ -276,21 +331,75 @@ class Service:
     def discard_captures(self):
         """Delete every retained capture; configuration, rules, and saved capture sessions are left alone."""
         self.db.execute("DELETE FROM records")
+        self.db.execute("DELETE FROM events")
         self.db.commit()
         self.db.execute("VACUUM")
         self.records.clear()
         self.record_sizes.clear()
+        self.event_rows.clear()
+        self.retention = None
         self.analysis_cache.clear()
         self.assertion_summaries.clear()
+        self.record_revs.clear()
         self.changed()
 
-    def state(self):
+    def state_rows(self):
+        """Table rows, newest first, plus each application's icon once; rows carry no icon data."""
         keys = ("id", "url", "method", "statusCode", "device", "startedAt", "endedAt", "durationMs", "state", "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "clientIsLocal", "pinned", "annotation", "tlsFailure")
-        records = [{**{key: r.get(key) for key in keys}, "pinned": bool(r.get("pinned")), "isSSE": is_sse(r), "serverMs": (r.get("timings") or {}).get("serverMs"), "devicePlatform": device_platform(r), **({"sseStatus": sse_status(r)} if is_sse(r) else {}), "assertionSummary": self.assertion_summaries.get(r["id"])} for r in sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True)]
-        pending = [{key: val for key, val in gate.items() if key not in ("future", "original")} for gate in self.pending.values()]
-        return {"settings": {**self.settings, "proxyRunning": bool(self.master), "proxyError": self.proxy_error}, "rules": self.rules, "rulesRevision": self.rules_revision, "folders": self.folders, "trafficTools": traffic_summary(self.traffic_tools), "trafficToolsRevision": self.traffic_tools_revision, "records": records, "pending": pending,
+        records, icons = [], {}
+        for r in sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True):
+            row = {**{key: r.get(key) for key in keys}, "pinned": bool(r.get("pinned")), "isSSE": is_sse(r), "serverMs": (r.get("timings") or {}).get("serverMs"), "devicePlatform": device_platform(r), **({"sseStatus": sse_status(r)} if is_sse(r) else {}), "assertionSummary": self.assertion_summaries.get(r["id"]), "rev": self.record_revs.get(r["id"], 0)}
+            app = row["application"]
+            if isinstance(app, dict) and "icon" in app:
+                if app["icon"] and app.get("id"):
+                    icons.setdefault(app["id"], app["icon"])
+                row["application"] = {key: value for key, value in app.items() if key != "icon"}
+            records.append(row)
+        return records, icons
+
+    def state_summary(self):
+        """Everything in the state snapshot except the rows: small enough to rebuild on every poll."""
+        return {"settings": {**self.settings, "proxyRunning": bool(self.master), "proxyError": self.proxy_error}, "rules": self.rules, "rulesRevision": self.rules_revision, "folders": self.folders, "trafficTools": traffic_summary(self.traffic_tools), "trafficToolsRevision": self.traffic_tools_revision, "pending": self.pending_summary(),
                 "productivity": {"revision": self.productivity_revision, "watches": len(self.productivity["watches"]), "assertions": sum(r["enabled"] for r in self.productivity["assertions"]),
                                  "replayRunning": any(job["state"] == "running" for job in getattr(self, "replay_jobs", {}).values())}}
+
+    def pending_summary(self):
+        return [{key: val for key, val in gate.items() if key not in ("future", "original")} for gate in self.pending.values()]
+
+    def state(self):
+        records, icons = self.state_rows()
+        return {**self.state_summary(), "records": records, "applicationIcons": icons}
+
+    def state_json(self, since=None):
+        """Serialized state and its etag. Rows are serialized once per revision, and each remembers the revision at
+        which its text last changed. With `since` ("instance:revision" from an earlier snapshot), only rows changed
+        after it are sent, with the full id order so the client can drop removed rows. The etag also covers the small
+        summary, which can change without a revision bump (proxy status, gates)."""
+        if not self.state_rows_cache or self.state_rows_cache["revision"] != self.revision:
+            records, icons = self.state_rows()
+            previous = self.state_rows_cache["rows"] if self.state_rows_cache else {}
+            rows = {}
+            for row in records:
+                text = json.dumps(row, separators=(",", ":"))
+                old = previous.get(row["id"])
+                rows[row["id"]] = (text, old[1] if old and old[0] == text else self.revision)
+            icons_json = json.dumps(icons, separators=(",", ":"))
+            old_icons = self.state_rows_cache["icons"] if self.state_rows_cache else None
+            self.state_rows_cache = {"revision": self.revision, "order": [row["id"] for row in records], "rows": rows,
+                                     "icons": (icons_json, old_icons[1] if old_icons and old_icons[0] == icons_json else self.revision)}
+        cache = self.state_rows_cache
+        summary = json.dumps(self.state_summary(), separators=(",", ":"))
+        etag = f"{self.instance}-{self.revision}-{zlib.crc32(summary.encode()):08x}"
+        head = f'{summary[:-1]},"etag":"{etag}","instance":"{self.instance}","revision":{self.revision}'
+        base = None
+        if isinstance(since, str) and since.startswith(self.instance + ":") and since[len(self.instance) + 1:].isdigit():
+            base = int(since[len(self.instance) + 1:])
+        if base is None or base > self.revision:
+            records_json = "[" + ",".join(text for text, _ in (cache["rows"][record_id] for record_id in cache["order"])) + "]"
+            return etag, f'{head},"records":{records_json},"applicationIcons":{cache["icons"][0]}}}'
+        changed = ",".join(text for text, at in (cache["rows"][record_id] for record_id in cache["order"]) if at > base)
+        icons = f',"applicationIcons":{cache["icons"][0]}' if cache["icons"][1] > base else ""
+        return etag, f'{head},"delta":true,"rows":[{changed}],"ids":{json.dumps(cache["order"], separators=(",", ":"))}{icons}}}'
 
     def changed(self):
         self.dirty = True
@@ -299,7 +408,8 @@ class Service:
     async def broadcast(self):
         while True:
             await asyncio.sleep(.15)
-            if self.dirty:
+            # Nothing subscribes to /api/ws unless a client opts in; skip the snapshot until one does.
+            if self.dirty and self.sockets:
                 self.dirty = False
                 payload = {"type": "state", "data": self.state()}
                 for socket in list(self.sockets):
@@ -669,9 +779,7 @@ class Service:
                 self.records[tunnel_id]["state"] = "complete"
                 self.save(self.records[tunnel_id])
             else:
-                self.records.pop(tunnel_id, None)
-                self.record_sizes.pop(tunnel_id, None)
-                self.db.execute("DELETE FROM records WHERE id=?", (tunnel_id,))
+                self.forget_record(tunnel_id)
             self.db.commit()
             self.changed()
         self.flows[flow.id] = flow
@@ -876,10 +984,7 @@ class Service:
                 previous_at = diagnostics.get("lastEventAt") or diagnostics.get("headersAt")
                 if previous_at is not None:
                     gap_ms = max(0.0, (received - previous_at) * 1000)
-                    gaps = flow.metadata.setdefault("streamglass_sse_gaps", [])
-                    gaps.append(gap_ms)
-                    del gaps[:-10000]
-                    diagnostics["gapStats"] = gap_stats(gaps)
+                    diagnostics["gapStats"] = flow.metadata.setdefault("streamglass_sse_gaps", GapStats()).add(gap_ms)
                 diagnostics.update(firstEventAt=diagnostics.get("firstEventAt") or received, lastEventAt=received, eventCount=event["sequence"], eventBytes=diagnostics.get("eventBytes", 0) + len(raw))
             from .lab import on_event
             forward = await on_event(self, flow, event)
@@ -895,7 +1000,8 @@ class Service:
                 output.append(raw)
                 return
             value["raw"] = raw.decode("utf-8", "replace")
-            value["rawBase64"] = base64.b64encode(raw).decode()
+            if value["raw"].encode() != raw:
+                value["rawBase64"] = base64.b64encode(raw).decode()
             stream = self.streams[flow.id]
             stream["bytes"] += len(raw)
             if flow.id in self.records:

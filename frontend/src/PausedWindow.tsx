@@ -172,8 +172,10 @@ export default function PausedWindow() {
     if (!connection) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
+    let etag = '';
     async function refresh() {
-      try { const state = await api('/api/state') as State; if (active) setData(state); }
+      // An unchanged snapshot comes back as a few bytes; keep the previous state then.
+      try { const state = await api(`/api/state${etag ? `?etag=${encodeURIComponent(etag)}` : ''}`) as State & { unchanged?: boolean; etag?: string }; if (active && !state.unchanged) { etag = state.etag ?? ''; setData(state); } }
       catch (error) { if (active) setError(errorMessage(error)); }
       finally { if (active) timer = setTimeout(refresh, 1000); }
     }

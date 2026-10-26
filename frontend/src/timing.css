@@ -32,3 +32,11 @@
 .sse-status li.current.sse-done{border-top-color:var(--text)}
 .sse-status li.current>small{font-weight:400}
 .sse-status p{margin:0;font-size:11px}
+/* Events tab: rows skip layout off-screen; collapsed events show a short preview instead of an editor. */
+.events .event{content-visibility:auto;contain-intrinsic-size:auto 64px;padding:10px 0}
+.events .event>div{margin-bottom:6px}
+.event-toggle{width:18px;height:18px;padding:0;border:0;background:transparent;color:var(--muted)}
+.event-toggle svg{transition:transform .12s}
+.event.open .event-toggle svg{transform:rotate(90deg)}
+.event-preview{margin:0;padding:6px 9px;border-radius:4px;background:var(--input);font:11px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
+.events-earlier{margin:10px 0 4px;width:100%;font-size:11px;color:var(--accent);background:transparent}
