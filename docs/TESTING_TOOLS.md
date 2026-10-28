@@ -1,6 +1,6 @@
 # Testing tools
 
-Open **Tools** in the toolbar. Capture context menus also open Compare, Edit and resend, Save as mock, and Redacted export with that capture selected. See [daily debugging tools](DAILY_TOOLS.md) for saved capture sessions, journeys, watches, assertions, repeated replay, saved views and notes. These tools operate on retained data; they cannot recover bodies or events that were never retained.
+Open **Tools** in the toolbar. Capture context menus also open Compare, Edit and resend, Save as mock, and Redacted export with that capture selected. See [daily debugging tools](DAILY_TOOLS.md) for saved capture sessions, journeys, custom fields, assertions, repeated replay, saved filters and notes. These tools operate on retained data; they cannot recover bodies or events that were never retained.
 
 ## SSE timeline
 

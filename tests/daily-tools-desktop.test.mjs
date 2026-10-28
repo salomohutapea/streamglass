@@ -10,7 +10,7 @@ import net from 'node:net';
 import {_electron as electron} from 'playwright';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-test('daily desktop tools preserve archives and notes, evaluate watches/assertions and own repeated replays', {timeout:120000}, async()=>{
+test('daily desktop tools preserve archives and notes, evaluate custom fields/assertions and own repeated replays', {timeout:120000}, async()=>{
   const directory=await mkdtemp(path.join(tmpdir(),'streamglass-daily-'));
   const reservation=net.createServer();
   await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));
@@ -58,19 +58,39 @@ c.commit()`,path.join(directory,'captures.sqlite3'),String(proxyPort)],{input:JS
     await page.locator('.traffic tbody tr').filter({hasText:'/initial'}).filter({hasNotText:'/sse'}).click();
     async function openTools(){const opened=app.waitForEvent('window');await page.getByRole('button',{name:'Tools',exact:true}).click();toolsPage=await opened;toolsPage.setDefaultTimeout(15000);panel=toolsPage.getByRole('region',{name:'Tools',exact:true});}
     await openTools();
-    await panel.getByRole('button',{name:'Watches',exact:true}).click();
-    await panel.getByRole('button',{name:'Add watch',exact:true}).click();
-    await panel.getByLabel(/^Watch name /).fill('Search ID');
-    await panel.getByRole('button',{name:'Save preferences',exact:true}).click();
-    await panel.getByText('Preferences saved.',{exact:true}).waitFor();
+    await panel.getByRole('button',{name:'Custom Fields',exact:true}).click();
+    await panel.getByRole('button',{name:'Add field',exact:true}).click();
+    await panel.getByLabel(/^Field name /).fill('Search ID');
+    await panel.getByLabel(/^Field path /).fill('$.context.searchId');
+    // Each card saves on its own; there is no shared Save preferences on this page.
+    assert.equal(await panel.getByRole('button',{name:'Save preferences',exact:true}).count(),0);
+    await panel.getByRole('button',{name:'Done',exact:true}).click();
+    await panel.getByText('Saved Search ID.',{exact:true}).waitFor();
+    assert.equal((await api('/api/productivity')).config.fields[0].name,'Search ID');
     await panel.getByLabel('Daily tools capture').selectOption('initial');
-    await panel.locator('.daily-tools').getByText('"synthetic-search"',{exact:true}).waitFor();
-    await panel.getByRole('button',{name:'Add watch',exact:true}).click();
-    await panel.getByLabel(/^Watch name /).last().fill('Draft watch');
+    await panel.getByRole('region',{name:'Custom fields'}).getByText('synthetic-search',{exact:true}).waitFor();
+    // The table gains a Fields column with the value, and the inspector shows it above the content.
+    await page.locator('.traffic tbody tr').filter({hasText:'/initial'}).locator('.field-chip').filter({hasText:'synthetic-search'}).first().waitFor();
+    await page.locator('.inspector').getByRole('region',{name:'Custom fields'}).getByText('synthetic-search',{exact:true}).waitFor();
+    await panel.getByRole('button',{name:'Add field',exact:true}).click();
+    await panel.getByLabel(/^Field name /).last().fill('Draft field');
+    // The grip reorders with the keyboard as well as by dragging.
+    await panel.getByRole('button',{name:'Move field Draft field',exact:true}).press('ArrowUp');
+    assert.equal(await panel.locator('.custom-field-item').first().getByLabel(/^Field name /).inputValue(),'Draft field');
     await panel.getByRole('button',{name:'Compare',exact:true}).click();
-    await panel.getByRole('button',{name:'Watches',exact:true}).click();
-    assert.equal(await panel.getByLabel(/^Watch name /).last().inputValue(),'Draft watch');
-    await panel.getByRole('button',{name:'Delete watch Draft watch',exact:true}).click();
+    await panel.getByRole('button',{name:'Custom Fields',exact:true}).click();
+    assert.equal(await panel.getByLabel(/^Field name /).last().inputValue(),'Draft field');
+    await panel.getByRole('button',{name:'Delete field Draft field',exact:true}).click();
+    // Right-clicking a request starts an unsaved field scoped to that API.
+    await page.locator('.traffic tbody tr').filter({hasText:'/initial'}).filter({hasNotText:'/sse'}).click({button:'right'});
+    await page.getByRole('menuitem',{name:'Add custom field…'}).click();
+    await toolsPage.waitForFunction(()=>[...document.querySelectorAll('input[aria-label^="Field URL wildcard "]')].some(input=>input.value.endsWith('/initial*')));
+    assert.equal(await panel.getByLabel(/^Field method /).last().inputValue(),'POST');
+    // Clicking a path in the open picker fills the active field; no separate target to choose.
+    await panel.getByRole('list',{name:'JSON paths'}).getByRole('button').filter({hasText:'$.context.searchId'}).click();
+    assert.equal(await panel.getByLabel(/^Field name /).inputValue(),'searchId');
+    assert.equal(await panel.getByLabel('Field path 1').inputValue(),'$.context.searchId');
+    await panel.getByRole('button',{name:'Delete field searchId',exact:true}).click();
     await panel.getByRole('button',{name:'Assertions',exact:true}).click();
     await panel.getByRole('button',{name:'Add assertion',exact:true}).click();
     await panel.getByLabel('Name',{exact:true}).fill('Missing field');
@@ -106,10 +126,11 @@ c.commit()`,path.join(directory,'captures.sqlite3'),String(proxyPort)],{input:JS
     await page.getByRole('button',{name:'Filter requests',exact:true}).click();
     await page.getByRole('textbox',{name:'Filter requests',exact:true}).fill('/initial');
     await openTools();
-    await panel.getByRole('button',{name:'Views & notes',exact:true}).click();
-    await panel.getByLabel('View name',{exact:true}).fill('Only initial');
+    await panel.getByRole('button',{name:'Saved filters',exact:true}).click();
+    await panel.getByLabel('Filter name',{exact:true}).fill('Only initial');
     await panel.getByRole('button',{name:'Save current filters',exact:true}).click();
-    await panel.getByRole('button',{name:'Only initial',exact:true}).waitFor();
+    await panel.getByRole('button',{name:'Apply saved filter Only initial',exact:true}).waitFor();
+    await panel.getByRole('button',{name:'Notes',exact:true}).click();
     await panel.getByLabel('Daily tools capture').selectOption('initial');
     await panel.getByLabel('Capture note',{exact:true}).fill('Investigate this synthetic response');
     await panel.getByLabel('Capture highlight',{exact:true}).selectOption('amber');
@@ -117,14 +138,22 @@ c.commit()`,path.join(directory,'captures.sqlite3'),String(proxyPort)],{input:JS
     await panel.getByText('Note and highlight saved on the capture.',{exact:true}).waitFor();
     assert.deepEqual((await api('/api/records/initial')).annotation,{note:'Investigate this synthetic response',color:'amber'});
     await page.getByRole('textbox',{name:'Filter requests',exact:true}).fill('');
-    await panel.getByRole('button',{name:'Only initial',exact:true}).click();
+    await panel.getByRole('button',{name:'Saved filters',exact:true}).click();
+    await panel.getByRole('button',{name:'Apply saved filter Only initial',exact:true}).click();
     await page.waitForFunction(()=>document.querySelector('.filter-input input')?.value==='/initial');
     assert.equal(toolsPage.isClosed(),false,'Applying a view must keep Tools open');
     await panel.getByRole('button',{name:'Close tools',exact:true}).click();
     await page.locator('.traffic tbody tr.row-highlight-amber').waitFor();
     await page.getByRole('textbox',{name:'Filter requests',exact:true}).fill('');
-    await page.getByLabel('Saved views',{exact:true}).selectOption({label:'Only initial'});
+    const chooser=page.getByLabel('Saved filters',{exact:true}),chosen=()=>chooser.evaluate(select=>select.selectedOptions[0]?.textContent);
+    assert.equal(await chosen(),'Saved filters…');
+    await chooser.selectOption({label:'Only initial'});
     assert.equal(await page.getByRole('textbox',{name:'Filter requests',exact:true}).inputValue(),'/initial');
+    // The chooser names the applied filter until the filters change.
+    assert.equal(await chosen(),'Only initial');
+    await page.getByRole('textbox',{name:'Filter requests',exact:true}).fill('/initia');
+    assert.equal(await chosen(),'Saved filters…');
+    await page.getByRole('textbox',{name:'Filter requests',exact:true}).fill('/initial');
     await openTools();
     await panel.getByRole('button',{name:'Repeat',exact:true}).click();
     await panel.getByRole('listbox',{name:'Repeat capture'}).getByRole('option').filter({hasText:'/initial'}).filter({hasNotText:'/sse'}).getByRole('button').click();

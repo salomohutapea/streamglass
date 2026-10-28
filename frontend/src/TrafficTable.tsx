@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
+import { fieldsColumnValue, type FieldResult } from './custom-fields.mjs';
 
-export type TrafficRecord = { id: string; method: string; url: string; startedAt?: string | number; kind?: 'request' | 'tunnel'; isSSE?: boolean; eventCount?: number; events?: unknown[]; state?: string; status?: number; statusCode?: number; duration?: number; durationMs?: number|null; serverMs?: number|null; device?:string; deviceId?:string; application?:{name:string}|null; response?: { headers?: unknown } };
-export type SortColumn = 'method' | 'request' | 'time' | 'status' | 'duration' | 'serverTime' | 'device' | 'application' | 'protocol' | 'host' | 'path' | 'events';
+export type TrafficRecord = { id: string; method: string; url: string; startedAt?: string | number; kind?: 'request' | 'tunnel'; isSSE?: boolean; eventCount?: number; events?: unknown[]; state?: string; status?: number; statusCode?: number; duration?: number; durationMs?: number|null; serverMs?: number|null; device?:string; deviceId?:string; application?:{name:string}|null; fields?: FieldResult[]; response?: { headers?: unknown } };
+export type SortColumn = 'method' | 'request' | 'time' | 'status' | 'duration' | 'serverTime' | 'device' | 'application' | 'protocol' | 'host' | 'path' | 'events' | 'fields';
 export {isSSE} from './traffic-preferences.mjs';
 export function startedAtMs(value: TrafficRecord['startedAt']): number | undefined {
   if (value == null || value === '') return undefined;
@@ -21,6 +22,7 @@ export {matchesQuickFilters} from './traffic-preferences.mjs';
 export function columnValue(record: TrafficRecord, column: SortColumn): string | number | undefined {
   if (column === 'host' || column === 'path') { try { const url = new URL(record.url); return column === 'host' ? url.host : url.pathname + url.search; } catch { return undefined; } }
   if (column === 'events') return record.eventCount ?? record.events?.length;
+  if (column === 'fields') return fieldsColumnValue(record.fields);
   if (column === 'time') return startedAtMs(record.startedAt);
   if (column === 'request') return record.url;
   if (column === 'status') return record.status ?? record.statusCode;

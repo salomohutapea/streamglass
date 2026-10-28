@@ -1,0 +1,62 @@
+.field-chips{display:flex;gap:4px;min-width:0;overflow-x:auto;overflow-y:hidden;white-space:nowrap;padding-bottom:3px;margin-bottom:-3px;overscroll-behavior-x:contain}
+/* Scroll sideways (trackpad or shift-wheel) to reach every chip; the 3px track is always reserved so rows never change height. */
+.field-chips::-webkit-scrollbar{height:3px}
+.field-chips::-webkit-scrollbar-thumb{background:transparent;border:0;border-radius:2px}
+.field-chips:hover::-webkit-scrollbar-thumb{background:var(--line)}
+/* The name always shows; long values end in an ellipsis and the full value is in the tooltip. */
+.field-chip{display:inline-flex;align-items:baseline;flex:0 0 auto;max-width:340px;min-width:0;padding:1px 6px;border:1px solid var(--line);border-radius:4px;background:var(--raised);font-size:11px;overflow:hidden}
+.field-chip-name{color:var(--accent);flex-shrink:0}
+.field-chip-name::after{content:"=";margin:0 2px 0 1px;color:var(--muted)}
+.field-chip-value{min-width:0;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.field-chip-more{margin-left:4px;color:var(--muted);flex-shrink:0}
+tr.selected .field-chip{background:transparent}
+
+.custom-fields{margin:16px 0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+.custom-fields-head{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.custom-fields-head h3{margin:0}
+.custom-fields-head .icon-button{position:static;transform:none;margin-left:auto;width:22px;height:22px;padding:3px;opacity:1;color:var(--muted)}
+.custom-fields dl{display:flex;flex-direction:column;gap:10px;margin:0}
+.custom-field{display:flex;flex-direction:column;gap:3px;min-width:0}
+.custom-field dt{display:flex;align-items:baseline;gap:8px;min-width:0;color:var(--text)}
+.custom-field dt strong{font-weight:500;flex-shrink:0}
+.custom-field dt small{color:var(--muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.custom-field dd{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-width:0;margin:0}
+.custom-field dd>small{flex-basis:100%}
+.custom-field-value{display:inline-flex;align-items:center;gap:2px;min-width:0;max-width:100%}
+.custom-field-value code{font-size:11px;padding:1px 5px;border-radius:4px;background:var(--raised);overflow-wrap:anywhere;user-select:text}
+.custom-field .icon-button{position:static;transform:none;width:20px;height:20px;padding:3px;opacity:.7;color:var(--muted);flex-shrink:0}
+.custom-field .icon-button:hover{opacity:1}
+.custom-field-json{flex-basis:100%;min-width:0;border:1px solid var(--line);border-radius:5px;background:var(--input)}
+.custom-field-json-head{display:flex;align-items:center;gap:8px;padding:2px 4px 2px 8px;border-bottom:1px solid var(--line);color:var(--muted);font-size:11px}
+.custom-field-json-head .icon-button{margin-left:auto}
+.custom-field-json pre{margin:0;padding:6px 8px;max-height:180px;overflow:auto;font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;user-select:text;white-space:pre}
+.custom-field.state-unknown dd .muted{font-style:italic}
+
+.custom-field-list{display:flex;flex-direction:column;gap:8px}
+.custom-field-card{display:grid;grid-template-columns:minmax(100px,max-content) minmax(0,1fr) max-content;align-items:baseline;gap:4px 14px;justify-content:stretch;width:100%;padding:10px 12px;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:6px}
+.custom-field-card:hover{background:var(--hover);border-color:var(--muted)}
+.custom-field-card-locations{display:flex;flex-direction:column;gap:2px;min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}
+.custom-field-card-locations>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.custom-field-card-locations .muted{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.custom-field-rule.active{margin:0;border-color:var(--accent)}
+.custom-field-name{max-width:320px}
+.custom-field-locations{display:flex;flex-direction:column;gap:4px;margin:12px 0 6px}
+.custom-field-location{display:grid;grid-template-columns:minmax(180px,2fr) 72px minmax(140px,1fr) minmax(150px,1.5fr) 24px;gap:8px;align-items:center;padding:4px 6px;border:1px solid transparent;border-radius:6px}
+.custom-field-location.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.custom-field-location-head{padding-bottom:0;color:var(--muted);font-size:11px}
+.custom-field-location input,.custom-field-location select{min-width:0;width:100%}
+.custom-field-location .icon-button{position:static;transform:none;opacity:.8;color:var(--muted)}
+.custom-field-add-location{align-self:flex-start;margin-bottom:8px}
+.custom-field-add{align-self:flex-start;margin:0}
+.pick-notice{margin:6px 0 0}
+@media (max-width:900px){.custom-field-location{grid-template-columns:1fr 72px;}.custom-field-location-head{display:none}}
+.traffic th[data-column=fields],th[data-column=fields]{width:280px}
+td.fields-cell{max-width:0}
+.custom-field-item{position:relative;display:flex;align-items:flex-start;gap:4px}
+.custom-field-item>:last-child{flex:1;min-width:0}
+.custom-field-item .custom-field-grip{position:static;transform:none;flex-shrink:0;margin-top:8px;opacity:.6;color:var(--muted);cursor:grab}
+.custom-field-item .custom-field-grip:hover,.custom-field-item .custom-field-grip:focus-visible{opacity:1}
+.custom-field-item.dragging{opacity:.45}
+.custom-field-item.drop-before::before,.custom-field-item.drop-after::after{content:"";position:absolute;left:26px;right:0;height:2px;border-radius:1px;background:var(--accent)}
+.custom-field-item.drop-before::before{top:-5px}
+.custom-field-item.drop-after::after{bottom:-5px}

@@ -25,3 +25,39 @@ test('daily MCP tools require confirmed bounded sends and preserve read-only arc
   assert.equal(jobs.nextOffset,2);
   assert.throws(()=>parse('annotate_capture',{recordId:'one',note:'Note',color:'arbitrary-css'}));
 });
+
+test('custom field MCP tools edit one field through the revision-checked preferences API',async t=>{
+  const previous=globalThis.fetch,requests=[];
+  let store={revision:3,config:{journey:{paths:[],headers:[],inventoryPath:''},fields:[{id:'keep',name:'searchId',locations:[{pattern:'*',method:'*',source:'response',path:'$.searchId'}]}],assertions:[],views:[]}};
+  globalThis.fetch=async(url,options)=>{const path=new URL(url).pathname,body=options.body&&JSON.parse(options.body);requests.push({path,method:options.method,body});
+    if(path==='/api/productivity'&&options.method==='PUT'){assert.equal(body.revision,store.revision);store={revision:store.revision+1,config:body.config};}
+    const value=path==='/api/productivity'?store:{id:'capture',rev:1,fields:[]};
+    return new Response(JSON.stringify(value),{headers:{'content-type':'application/json'}});};
+  t.after(()=>{globalThis.fetch=previous;});
+  const tools=new Map();registerTools({registerTool(name,config,handler){tools.set(name,{config,handler});}},{baseUrl:'http://127.0.0.1:47821',token:'fixture-secret'});
+  const parse=(name,value)=>z.object(tools.get(name).config.inputSchema).parse(value);
+  const call=async(name,value)=>JSON.parse((await tools.get(name).handler(parse(name,value),{})).content[0].text);
+  assert.equal(tools.get('list_custom_fields').config.annotations.readOnlyHint,true);
+  assert.equal(tools.get('get_capture_fields').config.annotations.readOnlyHint,true);
+  assert.equal(tools.get('delete_custom_field').config.annotations.destructiveHint,true);
+  const place={pattern:'*',source:'response',path:'$.a'};
+  assert.throws(()=>parse('upsert_custom_field',{field:{name:'x',locations:[{...place,source:'cookie'}]}}));
+  assert.throws(()=>parse('upsert_custom_field',{field:{name:'x',locations:[{...place,extra:1}]}}));
+  assert.throws(()=>parse('upsert_custom_field',{field:{name:'x',locations:[]}}));
+  assert.throws(()=>parse('upsert_custom_field',{field:{name:'x',locations:Array(11).fill(place)}}));
+  assert.throws(()=>parse('upsert_custom_field',{field:{name:'x',...place}}));
+  assert.equal(parse('upsert_custom_field',{field:{name:'x',locations:Array(10).fill(place)}}).field.locations.length,10);
+  const created=await call('upsert_custom_field',{field:{name:'journeyIndex',locations:[{pattern:'https://api.example.test/v2/search*',source:'event',path:'$.journeyIndex'}]}});
+  assert.equal(created.revision,4);assert.equal(created.field.locations[0].method,'*');assert.match(created.field.id,/^[0-9a-f-]{36}$/);
+  assert.deepEqual(store.config.fields.map(f=>f.id),['keep',created.field.id]);
+  await call('upsert_custom_field',{field:{id:'keep',name:'Search ID',locations:[{pattern:'https://api.example.test/v2/stream*',method:'POST',source:'event',path:'$.data.searchId'},{pattern:'https://api.example.test/v2/poll*',method:'GET',source:'response',path:'$.data.searchId'}]}});
+  assert.equal(store.config.fields[0].name,'Search ID');assert.equal(store.config.fields.length,2);
+  assert.deepEqual(store.config.fields[0].locations.map(l=>[l.source,l.method]),[['event','POST'],['response','GET']]);
+  const listed=await call('list_custom_fields',{limit:1});
+  assert.equal(listed.revision,5);assert.equal(listed.items.length,1);assert.equal(listed.total,2);
+  await call('delete_custom_field',{fieldId:'keep'});
+  assert.deepEqual(store.config.fields.map(f=>f.id),[created.field.id]);
+  await assert.rejects(()=>tools.get('delete_custom_field').handler(parse('delete_custom_field',{fieldId:'missing'}),{}).then(result=>{if(result.isError)throw Error(result.content[0].text);}));
+  await call('get_capture_fields',{recordId:'capture'});
+  assert.equal(requests.at(-1).path,'/api/records/capture/fields');
+});

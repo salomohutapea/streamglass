@@ -114,7 +114,9 @@ function openToolsWindow(source, input) {
   if (!focus && (!exists || toolsOwner !== source)) return false;
   if (!exists && windows.size >= 8) throw new Error('Close a window before opening Tools');
   const {focus:_focus, ...context} = value;
-  toolsContext = {...toolsContext, ...context};
+  // A field draft applies to the call that sent it; a later open must not add it again.
+  const {fieldDraft:_draft, ...kept} = toolsContext;
+  toolsContext = {...kept, ...context};
   if (focus) toolsOwner = source;
   if (!exists) {
     toolsWindow = createWindow(undefined, {type:'tools'});

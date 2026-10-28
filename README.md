@@ -38,7 +38,7 @@ Clients send traffic through the local proxy. HTTPS content is visible only when
 - Serve local response fixtures with Map Local and simulate request latency and per-flow upload/download rates. Active-tool pills open their settings.
 - Diagnose SSE timing, run repeatable scenarios, compare captures, create mocks, edit and resend requests, share redacted exports, and switch configuration workspaces.
 - Configure optional decoded views and response re-encoding at breakpoints; app-specific encryption protocols require a matching codec.
-- Save and reopen capture archives, correlate search journeys with a waterfall, watch JSONPath values, evaluate assertions, repeat requests with limits, and save filters with capture notes/highlights.
+- Save and reopen capture archives, correlate search journeys with a waterfall, highlight custom field values from specific APIs, evaluate assertions, repeat requests with limits, and save filters with capture notes/highlights.
 
 ## Install or update
 
@@ -99,7 +99,7 @@ Start with [workflows](docs/WORKFLOWS.md) for capture and breakpoints, [testing 
 | --- | --- |
 | [Workflows](docs/WORKFLOWS.md) | Search, breakpoints, JavaScript hooks, JSON editing, exports, and capture limits |
 | [Testing tools](docs/TESTING_TOOLS.md) | SSE timeline, scenarios, comparison, replay, mocks, redaction, workspaces, and codecs |
-| [Daily debugging](docs/DAILY_TOOLS.md) | Saved sessions, journey waterfall, JSONPath watches, assertions, repeated replay, saved views, and notes |
+| [Daily debugging](docs/DAILY_TOOLS.md) | Saved sessions, journey waterfall, custom fields, assertions, repeated replay, saved filters, and notes |
 | [Device setup](docs/DEVICES.md) | Mac networks, simulators, Android, physical iOS, trust, and restoration |
 | [MCP](docs/MCP.md) | Client configuration, tools, authentication, and streaming notifications |
 | [Architecture](docs/ARCHITECTURE.md) | Runtime components, data flow, storage, and isolation |

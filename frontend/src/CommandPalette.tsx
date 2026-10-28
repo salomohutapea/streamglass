@@ -16,7 +16,7 @@ export function buildPaletteCommands(o: {
   toggleSidebarPin: () => void; showTour: () => void; showShortcuts: () => void;
 }): PaletteCommand[] {
   const m = (id: string, title: string, group: string, keywords?: string, payload?: any): PaletteCommand => ({ id, title, group, keywords, shortcut: commandShortcuts[id], run: () => o.menu(id, payload) });
-  const tools: [string, string][] = [['map-local', 'Map Local'], ['map-remote', 'Map Remote'], ['rewrite-rules', 'Rewrite'], ['block-rules', 'Block'], ['network-profile', 'Network Conditioner'], ['daily-sessions', 'Sessions'], ['daily-journeys', 'Journeys'], ['daily-watches', 'Watches'], ['daily-assertions', 'Assertions'], ['daily-repeat', 'Repeat'], ['daily-views', 'Views & notes'], ['lab-compare', 'Compare'], ['lab-replay', 'Replay'], ['lab-scenarios', 'Scenarios'], ['lab-fixture', 'Create mock'], ['lab-share', 'Share'], ['lab-workspaces', 'Workspaces'], ['lab-codecs', 'Codecs'], ['lab-mcp', 'Agent (MCP)']];
+  const tools: [string, string][] = [['map-local', 'Map Local'], ['map-remote', 'Map Remote'], ['rewrite-rules', 'Rewrite'], ['block-rules', 'Block'], ['network-profile', 'Network Conditioner'], ['daily-sessions', 'Sessions'], ['daily-journeys', 'Journeys'], ['daily-fields', 'Custom Fields'], ['daily-assertions', 'Assertions'], ['daily-repeat', 'Repeat'], ['daily-views', 'Saved filters'], ['daily-notes', 'Notes'], ['lab-compare', 'Compare'], ['lab-replay', 'Replay'], ['lab-scenarios', 'Scenarios'], ['lab-fixture', 'Create mock'], ['lab-share', 'Share'], ['lab-workspaces', 'Workspaces'], ['lab-codecs', 'Codecs'], ['lab-mcp', 'Agent (MCP)']];
   const platforms: [string, string][] = [['macos', 'This Mac'], ['ios-simulator', 'iOS Simulator'], ['ios-device', 'iOS Device'], ['android-emulator', 'Android Emulator'], ['android-device', 'Android Device']];
   return [
     ...tools.map(([id, name]) => m(id, `Tools: ${name}`, 'Tools', 'open tab')),
@@ -35,7 +35,7 @@ export function buildPaletteCommands(o: {
     m('focus-search', 'Focus search', 'General', 'find filter'),
     { id: 'welcome-tour', title: 'Show welcome tour', group: 'Help', keywords: 'onboarding intro', run: o.showTour },
     { id: 'shortcut-sheet', title: 'Keyboard shortcuts', group: 'Help', keywords: 'keys help', shortcut: commandShortcuts['shortcut-sheet'], run: o.showShortcuts },
-    ...o.savedViews.map(v => ({ id: `view:${v.id}`, title: `Apply view: ${v.name}`, group: 'Saved views', keywords: 'filter', run: () => o.applyView(v.id) })),
+    ...o.savedViews.map(v => ({ id: `view:${v.id}`, title: `Apply saved filter: ${v.name}`, group: 'Saved filters', keywords: 'filter view', run: () => o.applyView(v.id) })),
     ...o.devices.map(d => ({ id: `device:${d.id}`, title: `Filter to device: ${d.id}`, group: 'Devices', keywords: 'only show', run: () => o.selectDevice(d.id) })),
   ];
 }

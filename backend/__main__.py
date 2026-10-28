@@ -31,6 +31,8 @@ async def run(args):
     icon_refresh = asyncio.create_task(service.refresh_application_icons())
     from .productivity import monitor
     assertion_monitor = asyncio.create_task(monitor(service))
+    from .custom_fields import worker as field_worker
+    field_task = asyncio.create_task(field_worker(service))
     stopped = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -52,7 +54,8 @@ async def run(args):
         broadcaster.cancel()
         icon_refresh.cancel()
         assertion_monitor.cancel()
-        await asyncio.gather(icon_refresh, assertion_monitor, return_exceptions=True)
+        field_task.cancel()
+        await asyncio.gather(icon_refresh, assertion_monitor, field_task, return_exceptions=True)
         await service.http.close()
         await runner.cleanup()
         if not keep_captures:

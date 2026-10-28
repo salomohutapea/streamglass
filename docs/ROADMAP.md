@@ -26,7 +26,7 @@ Automatic app-specific decryption is deferred: backend-selected crypto artifacts
 
 ## Daily tools now implemented
 
-The [daily debugging guide](DAILY_TOOLS.md) covers immutable named capture archives with streaming `.sgsession` import/export and archived/live comparison; configured search-journey correlation and waterfall timing; JSONPath watches; background assertions and MCP results; bounded sequential repeated replay with cancellation; and persisted saved views with capture notes and highlights. Map Remote and WebSocket inspection remain outside the current scope.
+The [daily debugging guide](DAILY_TOOLS.md) covers immutable named capture archives with streaming `.sgsession` import/export and archived/live comparison; configured search-journey correlation and waterfall timing; custom fields that highlight JSONPath or header values in the table and inspector; background assertions and MCP results; bounded sequential repeated replay with cancellation; and persisted saved filters with capture notes and highlights. Map Remote and WebSocket inspection remain outside the current scope.
 
 ## Follow-ups, not implemented
 

@@ -11,7 +11,9 @@ from aiohttp import web
 
 DEFAULT = {"journey": {"paths": ["$.context.searchId", "$.searchId", "$.data.searchId"],
                        "headers": ["x-request-id", "x-correlation-id"], "inventoryPath": ""},
-           "watches": [], "assertions": [], "views": []}
+           "fields": [], "assertions": [], "views": []}
+HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}")
+FIELD_SOURCES = ("request", "response", "event", "requestHeader", "responseHeader")
 COLORS = ("", "blue", "green", "amber", "red", "purple")
 MAX_ANALYSIS = 4 * 1024 * 1024
 
@@ -44,8 +46,12 @@ def path_tokens(path):
 
 
 def select(value, path):
+    return select_tokens(value, path_tokens(path))
+
+
+def select_tokens(value, tokens):
     values = [value]
-    for kind, key in path_tokens(path):
+    for kind, key in tokens:
         result = []
         for item in values:
             if kind == "wildcard":
@@ -66,9 +72,31 @@ def text(value, name, maximum=256, empty=False):
     return value
 
 
+LOCATION_KEYS = ("pattern", "method", "source", "path")
+
+
+def nest_field(field):
+    """A flat field (pattern, method, source, path beside id and name) becomes one with a single location."""
+    if isinstance(field, dict) and "locations" not in field and any(key in field for key in LOCATION_KEYS):
+        return {**{key: value for key, value in field.items() if key not in LOCATION_KEYS}, "locations": [{key: field[key] for key in LOCATION_KEYS if key in field}]}
+    return field
+
+
+def migrate(config):
+    """Custom fields replaced watches (a legacy watch reads every API), and a field holds a list of locations."""
+    if isinstance(config, dict) and "watches" in config and "fields" not in config:
+        watches = config["watches"]
+        config = {key: value for key, value in config.items() if key != "watches"}
+        config["fields"] = [{**watch, "pattern": "*", "method": "*"} if isinstance(watch, dict) else watch for watch in watches] if isinstance(watches, list) else watches
+    if isinstance(config, dict) and isinstance(config.get("fields"), list):
+        config = {**config, "fields": [nest_field(field) for field in config["fields"]]}
+    return config
+
+
 def validate(value):
+    value = migrate(value)
     if not isinstance(value, dict) or set(value) != set(DEFAULT):
-        raise ValueError("Expected journey, watches, assertions, and views")
+        raise ValueError("Expected journey, fields, assertions, and views")
     value = copy.deepcopy(value)
     journey = value["journey"]
     if not isinstance(journey, dict) or set(journey) != {"paths", "headers", "inventoryPath"}:
@@ -80,13 +108,13 @@ def validate(value):
     if not isinstance(journey["headers"], list) or len(journey["headers"]) > 10:
         raise ValueError("Use at most 10 correlation headers")
     for name in journey["headers"]:
-        if not isinstance(name, str) or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}", name):
+        if not isinstance(name, str) or not HEADER_NAME.fullmatch(name):
             raise ValueError("Invalid journey header")
     if journey["inventoryPath"]:
         path_tokens(journey["inventoryPath"])
     elif journey["inventoryPath"] != "":
         raise ValueError("Invalid inventory JSONPath")
-    for key in ("watches", "assertions", "views"):
+    for key in ("fields", "assertions", "views"):
         items = value[key]
         if not isinstance(items, list) or len(items) > 50:
             raise ValueError(f"Expected at most 50 {key}")
@@ -99,19 +127,35 @@ def validate(value):
             if item["id"] in ids:
                 raise ValueError("IDs must be unique")
             ids.add(item["id"])
-            allowed = {"id", "name", "path", "source"} if key == "watches" else {"id", "name", "enabled", "pattern", "method", "kind", "path", "source", "eventName", "timeoutMs"} if key == "assertions" else {"id", "name", "filter", "scope", "mode", "protocols", "statuses", "device", "application", "library"}
+            allowed = {"id", "name", "locations"} if key == "fields" else {"id", "name", "enabled", "pattern", "method", "kind", "path", "source", "eventName", "timeoutMs"} if key == "assertions" else {"id", "name", "filter", "scope", "mode", "protocols", "statuses", "device", "application", "library"}
             if key == "views" and "conditions" in item:
                 allowed = allowed | {"conditions"}
             if set(item) != allowed:
                 raise ValueError(f"Unexpected {key} fields")
-            if key in ("watches", "assertions"):
+            if key == "fields":
+                if not isinstance(item["locations"], list) or not 1 <= len(item["locations"]) <= 10:
+                    raise ValueError("Use 1 to 10 locations per field")
+                for location in item["locations"]:
+                    if not isinstance(location, dict) or set(location) != set(LOCATION_KEYS):
+                        raise ValueError("Unexpected location fields")
+                    text(location["pattern"], "URL wildcard", 4096)
+                    text(location["method"], "method", 64)
+                    if location["method"] != "*" and not HEADER_NAME.fullmatch(location["method"]):
+                        raise ValueError("Invalid method")
+                    if location["source"] not in FIELD_SOURCES:
+                        raise ValueError("Invalid field source")
+                    if location["source"].endswith("Header"):
+                        if not isinstance(location["path"], str) or not HEADER_NAME.fullmatch(location["path"]):
+                            raise ValueError("Invalid header name")
+                    else:
+                        path_tokens(location["path"])
+            if key == "assertions":
                 if item["source"] not in ("request", "response", "event"):
                     raise ValueError("Invalid content source")
-                if key == "watches" or item["kind"] == "required-field":
+                if item["kind"] == "required-field":
                     path_tokens(item["path"])
                 else:
                     text(item["path"], "path", 512, True)
-            if key == "assertions":
                 if type(item["enabled"]) is not bool or item["kind"] not in ("first-data", "required-field", "duplicate-event-id", "terminal-event"):
                     raise ValueError("Invalid assertion")
                 text(item["pattern"], "URL wildcard", 4096)
@@ -205,24 +249,6 @@ def facts(record, config):
         for name, value in (record.get(source) or {}).get("headers", []):
             if name.lower() in [h.lower() for h in config["journey"]["headers"]] and value and len(value) <= 256:
                 correlations.add(value)
-    watches = []
-    preview_budget = 32768
-    for watch in config["watches"]:
-        found = values(watch["source"], watch["path"])
-        previews, limited, preview_error = [], len(found) > 10, False
-        for item in found[:10]:
-            try:
-                encoded = json.dumps(item, ensure_ascii=False, allow_nan=False)
-            except (ValueError, RecursionError):
-                warnings.append("A watch value exceeds supported JSON nesting or numeric limits.")
-                preview_error, limited = True, True
-                break
-            size = min(1024, preview_budget)
-            limited |= len(encoded) > size
-            if size:
-                previews.append(encoded[:size])
-                preview_budget -= len(previews[-1])
-        watches.append({"id": watch["id"], "name": watch["name"], "values": previews, "count": len(found), "limited": limited, "unknown": preview_error or not found and bool(warnings)})
     first_inventory = None
     path = config["journey"]["inventoryPath"]
     if path:
@@ -238,7 +264,7 @@ def facts(record, config):
     for rule in config["assertions"]:
         if rule["kind"] == "required-field":
             required[rule["id"]] = bool(values(rule["source"], rule["path"]))
-    return {"correlations": sorted(correlations)[:50], "watches": watches, "firstInventoryAt": first_inventory,
+    return {"correlations": sorted(correlations)[:50], "firstInventoryAt": first_inventory,
             "firstDataAt": next((event.get("processedAt", event.get("receivedAt")) for event in record.get("events", [])[:1000] if event.get("event") == "data" and event.get("forwarded", True)), None),
             "required": required, "warnings": list(dict.fromkeys(warnings))}
 
@@ -299,7 +325,8 @@ def analyze(service, record, now=None):
     if cached is None:
         cached = facts(record, service.productivity)
         service.analysis_cache[record["id"]] = cached
-    return {"id": record["id"], **{key: value for key, value in cached.items() if key != "required"},
+    from .custom_fields import evaluate
+    return {"id": record["id"], **{key: value for key, value in cached.items() if key != "required"}, "fields": evaluate(service, record),
             "assertions": assertions(record, service.productivity, cached, time.time() if now is None else now)}
 
 
@@ -342,7 +369,9 @@ def install(app, service):
                 service.productivity = previous
                 raise
             service.analysis_cache.clear()
+            service.invalidate_fields()
             service.productivity_revision += 1
+            service.changed()
         return web.json_response({"revision": service.productivity_revision, "config": service.productivity})
 
     async def analyze_records(request):

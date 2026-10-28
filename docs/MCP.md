@@ -30,8 +30,10 @@ Use the panel's URL if the port differs. Close the client when finished.
 | `get_status`, `get_settings` | Proxy/capture status and counts; paginated complete settings including TLS patterns |
 | `list_capture_sessions`, `save_capture_session`, `delete_capture_session` | Manage immutable local capture archives, separately from configuration workspaces |
 | `list_session_captures`, `get_session_capture` | Browse archived metadata and paginated retained content without changing live traffic |
-| `get_capture_analysis` | Read correlation values, JSONPath watch previews and pass/fail/pending/unknown assertion results |
-| `get_productivity_preferences`, `set_productivity_preferences` | Read or replace journey/watch/assertion/view configuration with revision checks |
+| `get_capture_analysis` | Read correlation values, custom field values and pass/fail/pending/unknown assertion results |
+| `get_productivity_preferences`, `set_productivity_preferences` | Read or replace journey/custom-field/assertion/view configuration with revision checks (section `fields`; each field has `id`, `name` and `locations` of `pattern`, `method`, `source`, `path`; older flat fields are migrated). Clients must send `fields`; `watches` is no longer accepted |
+| `list_custom_fields`, `upsert_custom_field`, `delete_custom_field` | Add, replace or remove one custom field: `name` plus 1–10 `locations`, each a URL wildcard `pattern`, `method` (default `*`), `source` and a JSONPath or header-name `path`; values from all matching locations are merged. Omit `id` to create. Edits go through the revision-checked preferences API and engine validation; the Tools window picks them up like any other save |
+| `get_capture_fields` | One capture's custom field values in full (up to 64 KiB each); `list_captures` rows carry them cut at 256 characters |
 | `annotate_capture` | Set a capture note and subtle row highlight |
 | `list_replay_jobs`, `start_replay_job`, `cancel_replay_job` | Run explicit bounded sequential replay and page progress/cancel its own connection; starting requires `confirmSend:true` |
 | `list_captures`, `search_captures` | Page metadata or search retained URL/request/response/event text. `list_captures` items include `durationMs` and `serverMs`; filter with `minServerMs`/`minDurationMs` and sort with `sortBy` (`newest`, `serverMs`, `durationMs`) to find slow requests. SSE items include `sseStatus`; filter with `sseStatus` (for example `client-closed`) |

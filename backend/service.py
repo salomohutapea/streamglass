@@ -179,10 +179,15 @@ class Service:
         self.scenarios = json.loads(config.get("scenarios", "[]"))
         self.scenario_used = set()
         self.codecs = json.loads(config.get("codecs", "[]"))
-        from .productivity import DEFAULT
-        self.productivity = json.loads(config.get("productivity", json.dumps(DEFAULT)))
+        from .productivity import DEFAULT, migrate
+        self.productivity = migrate(json.loads(config.get("productivity", json.dumps(DEFAULT))))
         self.productivity_revision = 0
         self.analysis_cache = {}
+        self.field_cache = {}
+        self.field_full_cache = {}
+        # Captures whose custom fields still need evaluating (insertion-ordered ids); custom_fields.worker drains it.
+        self.field_dirty = {}
+        self.field_wake = asyncio.Event()
         self.assertion_summaries = {}
         self.codec_keys = {}
         self.folders = json.loads(config.get("folders", "[]"))
@@ -218,6 +223,7 @@ class Service:
         self.instance = uuid.uuid4().hex[:8]
         # Per-record revision for detail refetches, and the serialized table rows for the current revision.
         self.record_revs = {}
+        self.mark_fields()
         # Records subject to the count/size limits, rebuilt when the TLS allowlist changes or a record is removed elsewhere.
         self.retention = None
         self.state_rows_cache = None
@@ -301,6 +307,22 @@ class Service:
         self.db.commit()
         self.changed()
         self.record_revs[record_id] = self.revision
+        if record_id in self.records and record.get("kind") != "tunnel":
+            self.mark_fields(record_id)
+
+    def mark_fields(self, record_id=None):
+        """Queue one capture (or all) for custom field evaluation; nothing is queued while no field is configured."""
+        if self.productivity["fields"]:
+            for queued in (self.records if record_id is None else (record_id,)):
+                self.field_dirty[queued] = None
+            self.field_wake.set()
+
+    def invalidate_fields(self):
+        """The field configuration changed: drop every result and re-evaluate all captures in the background."""
+        self.field_cache.clear()
+        self.field_full_cache.clear()
+        self.field_dirty.clear()
+        self.mark_fields()
 
     def retention_index(self):
         key = tuple(self.settings["tlsDomains"])
@@ -316,6 +338,9 @@ class Service:
         self.record_sizes.pop(record_id, None)
         self.event_rows.pop(record_id, None)
         self.analysis_cache.pop(record_id, None)
+        self.field_cache.pop(record_id, None)
+        self.field_full_cache.pop(record_id, None)
+        self.field_dirty.pop(record_id, None)
         self.record_revs.pop(record_id, None)
         if self.retention is not None and record_id in self.retention["limited"]:
             self.retention = None
@@ -339,6 +364,9 @@ class Service:
         self.event_rows.clear()
         self.retention = None
         self.analysis_cache.clear()
+        self.field_cache.clear()
+        self.field_full_cache.clear()
+        self.field_dirty.clear()
         self.assertion_summaries.clear()
         self.record_revs.clear()
         self.changed()
@@ -347,8 +375,13 @@ class Service:
         """Table rows, newest first, plus each application's icon once; rows carry no icon data."""
         keys = ("id", "url", "method", "statusCode", "device", "startedAt", "endedAt", "durationMs", "state", "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "clientIsLocal", "pinned", "annotation", "tlsFailure")
         records, icons = [], {}
+        fields_cache, current = self.field_cache, self.productivity["fields"]
         for r in sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True):
             row = {**{key: r.get(key) for key in keys}, "pinned": bool(r.get("pinned")), "isSSE": is_sse(r), "serverMs": (r.get("timings") or {}).get("serverMs"), "devicePlatform": device_platform(r), **({"sseStatus": sse_status(r)} if is_sse(r) else {}), "assertionSummary": self.assertion_summaries.get(r["id"]), "rev": self.record_revs.get(r["id"], 0)}
+            # Never evaluates: the latest finished results (possibly from an older revision) until the worker refreshes them.
+            entry = fields_cache.get(r["id"])
+            if entry and entry["fields"] is current and entry["results"]:
+                row["fields"] = entry["results"]
             app = row["application"]
             if isinstance(app, dict) and "icon" in app:
                 if app["icon"] and app.get("id"):
@@ -360,7 +393,7 @@ class Service:
     def state_summary(self):
         """Everything in the state snapshot except the rows: small enough to rebuild on every poll."""
         return {"settings": {**self.settings, "proxyRunning": bool(self.master), "proxyError": self.proxy_error}, "rules": self.rules, "rulesRevision": self.rules_revision, "folders": self.folders, "trafficTools": traffic_summary(self.traffic_tools), "trafficToolsRevision": self.traffic_tools_revision, "pending": self.pending_summary(),
-                "productivity": {"revision": self.productivity_revision, "watches": len(self.productivity["watches"]), "assertions": sum(r["enabled"] for r in self.productivity["assertions"]),
+                "productivity": {"revision": self.productivity_revision, "fields": len(self.productivity["fields"]), "assertions": sum(r["enabled"] for r in self.productivity["assertions"]),
                                  "replayRunning": any(job["state"] == "running" for job in getattr(self, "replay_jobs", {}).values())}}
 
     def pending_summary(self):

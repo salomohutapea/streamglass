@@ -79,9 +79,9 @@ export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getTo
     ] },
     { label: 'Tools', submenu: [
       command('map-local', 'Map Local…'), command('map-remote', 'Map Remote…'), command('rewrite-rules', 'Rewrite…'), command('block-rules', 'Block…'), command('network-profile', 'Network Conditioner…'), separator,
-      command('daily-journeys', 'Search Journeys…'), command('daily-watches', 'JSONPath Watches…'),
+      command('daily-journeys', 'Search Journeys…'), command('daily-fields', 'Custom Fields…'),
       command('daily-assertions', 'Capture Assertions…'), command('daily-repeat', 'Repeated Replay…'),
-      command('daily-views', 'Saved Views and Notes…'), separator,
+      command('daily-views', 'Saved Filters…'), command('daily-notes', 'Notes and Highlights…'), separator,
       command('lab-compare', 'Compare Captures…'), command('lab-replay', 'Edit and Resend…'),
       command('lab-scenarios', 'Test Scenarios…'), command('lab-fixture', 'Save Capture as Mock…'),
       command('lab-share', 'Redacted Export…'), separator,
@@ -119,7 +119,7 @@ export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getTo
     set('clear-device', ready && library && state.hasDeviceRecords);
     set('clear-all', ready && state.hasRecords);
     set('export-all', ready && state.hasRecords);
-    for (const id of ['daily-sessions', 'daily-journeys', 'daily-watches', 'daily-assertions', 'daily-repeat', 'daily-views']) set(id, ready);
+    for (const id of ['daily-sessions', 'daily-journeys', 'daily-fields', 'daily-assertions', 'daily-repeat', 'daily-views', 'daily-notes']) set(id, ready);
     for (const id of ['lab-replay', 'lab-scenarios', 'lab-workspaces', 'lab-codecs', 'lab-mcp']) set(id, ready);
     set('lab-compare', ready && state.hasRecords);
     set('lab-fixture', inspectable && state.hasResponse);

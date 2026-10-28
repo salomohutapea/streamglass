@@ -13,6 +13,7 @@ from .service import MAX_BODY, is_sse
 from .sse import exported
 from .sse_status import sse_status
 from .search import search as search_records
+from .custom_fields import evaluate as evaluate_fields
 
 
 def create_app(service):
@@ -260,8 +261,16 @@ def create_app(service):
         if service.master:
             service.interrupt_newly_inspected_tunnels(previous["tlsDomains"])
         service.analysis_cache.clear()
+        service.invalidate_fields()
         service.productivity_revision += 1
         return web.json_response(snapshot())
+
+    async def record_fields(request):
+        record_id = request.match_info["id"]
+        value = service.records.get(record_id)
+        if not value:
+            raise web.HTTPNotFound()
+        return web.json_response({"id": record_id, "rev": service.record_revs.get(record_id, 0), "fields": evaluate_fields(service, value, full=True)})
 
     async def folder(request):
         folder_id = request.match_info.get("id")
@@ -409,7 +418,7 @@ def create_app(service):
             service.sockets.discard(socket)
         return socket
 
-    app.add_routes([web.get("/api/state", state), web.get("/api/pending", pending), web.get("/api/workspace-config", workspace_config), web.put("/api/workspace-config", workspace_config), web.get("/api/traffic-tools", traffic_tools), web.put("/api/traffic-tools", traffic_tools), web.post("/api/records/{id}/pin", pin), web.get("/api/search", search), web.get("/api/records/{id}", record),
+    app.add_routes([web.get("/api/state", state), web.get("/api/pending", pending), web.get("/api/workspace-config", workspace_config), web.put("/api/workspace-config", workspace_config), web.get("/api/traffic-tools", traffic_tools), web.put("/api/traffic-tools", traffic_tools), web.post("/api/records/{id}/pin", pin), web.get("/api/search", search), web.get("/api/records/{id}", record), web.get("/api/records/{id}/fields", record_fields),
                     web.put("/api/settings", settings), web.put("/api/rules", rules),
                     web.post("/api/folders", folder), web.patch("/api/folders/{id}", folder), web.delete("/api/folders/{id}", folder),
                     web.post("/api/pending/{token}", resume), web.delete("/api/records", delete),

@@ -101,18 +101,46 @@ export function registerTools(server, { baseUrl, token, workspaces }) {
     const value=await api(`/api/sessions/${encodeURIComponent(a.sessionId)}/records/${encodeURIComponent(a.recordId)}`);
     return {readOnly:true,...textPage(JSON.stringify(a.section==='metadata'?withoutApplicationIcon(metadata(value)):value[a.section]??null),a.offset,a.maxChars)};
   });
-  tool('get_capture_analysis', 'Evaluate read-only JSONPath watches, correlation fields and assertions. Unknown means content was unavailable or analysis limits were reached. SSE deadlines include proxy breakpoint delays.', {recordId:id.optional(),offset,limit}, true,
+  tool('get_capture_analysis', 'Evaluate read-only custom fields (values highlighted from matching APIs), correlation fields and assertions. Unknown means content was unavailable or analysis limits were reached. SSE deadlines include proxy breakpoint delays.', {recordId:id.optional(),offset,limit}, true,
     a=>api(`/api/analysis?${new URLSearchParams({offset:String(a.offset),limit:String(a.limit),...(a.recordId?{recordId:a.recordId}:{})})}`));
-  tool('get_productivity_preferences', 'Read correlation configuration or a bounded page of watches, assertions or saved views.', {section:z.enum(['journey','watches','assertions','views']),offset,limit}, true, async a=>{
+  tool('get_productivity_preferences', 'Read correlation configuration or a bounded page of custom fields, assertions or saved filters (section views). A custom field has an id, a name and 1-10 locations; each location highlights a value from the request or response body, SSE event data, or a header of APIs matching its URL wildcard and method, and values from all matching locations are merged.', {section:z.enum(['journey','fields','assertions','views']),offset,limit}, true, async a=>{
     const value=await api('/api/productivity');return {revision:value.revision,...(a.section==='journey'?{journey:value.config.journey}:page(value.config[a.section],a.offset,a.limit))};
   });
-  tool('set_productivity_preferences', 'Replace read-only analysis preferences and saved views using the expected revision. Existing engine validation rejects unsupported JSONPaths and stale writes.', {
+  tool('set_productivity_preferences', 'Replace read-only analysis preferences and saved filters (views) using the expected revision. A custom field has 1-10 locations and shows the merged values found in any matching location; in a location, pattern is a URL wildcard, method is * or an HTTP method, source is request/response/event (path is a JSONPath) or requestHeader/responseHeader (path is a header name). Existing engine validation rejects unsupported JSONPaths and stale writes.', {
     revision:z.number().int().nonnegative(),
     config:z.object({journey:z.object({paths:z.array(z.string().max(512)).max(10),headers:z.array(z.string().max(128)).max(10),inventoryPath:z.string().max(512)}).strict(),
-      watches:z.array(z.object({id:z.string().min(1).max(128),name:z.string().min(1).max(100),source:z.enum(['request','response','event']),path:z.string().min(1).max(512)}).strict()).max(50),
+      fields:z.array(z.object({id:z.string().min(1).max(128),name:z.string().min(1).max(100),locations:z.array(z.object({pattern:z.string().min(1).max(4096),method:z.string().min(1).max(64),source:z.enum(['request','response','event','requestHeader','responseHeader']),path:z.string().min(1).max(512)}).strict()).min(1).max(10)}).strict()).max(50),
       assertions:z.array(z.object({id:z.string().min(1).max(128),name:z.string().min(1).max(100),enabled:z.boolean(),pattern:z.string().min(1).max(4096),method:z.string().min(1).max(64),kind:z.enum(['first-data','required-field','duplicate-event-id','terminal-event']),path:z.string().max(512),source:z.enum(['request','response','event']),eventName:z.string().max(128),timeoutMs:z.number().int().min(1).max(3600000)}).strict()).max(50),
       views:z.array(z.object({id:z.string().min(1).max(128),name:z.string().min(1).max(100),filter:z.string().max(1024),scope:z.enum(['url','request','response','event']),mode:z.enum(['contains','not_contains','equals','starts_with','ends_with','wildcard']),conditions:z.array(z.object({joiner:z.enum(['and','or']),scope:z.enum(['url','request','response','event']),mode:z.enum(['contains','not_contains','equals','starts_with','ends_with','wildcard']),filter:z.string().max(1024)}).strict()).max(7).optional(),protocols:z.array(z.enum(['HTTP','HTTPS','SSE'])).max(3),statuses:z.array(z.number().int().min(1).max(5)).max(5),device:z.string().min(1).max(256),application:z.string().max(1024).nullable(),library:z.enum(['all','sse','pinned'])}).strict()).max(50)}).strict(),
   }, false, a=>serializeMutation(()=>api('/api/productivity','PUT',a)));
+  // Custom fields are stored in the productivity preferences; these edit one field and reuse its revision-checked PUT.
+  const fieldSource=z.enum(['request','response','event','requestHeader','responseHeader']);
+  const fieldLocation=z.object({pattern:z.string().min(1).max(4096).describe('URL wildcard matched against the full URL, e.g. https://api.example.com/v2/search*'),
+    method:z.string().min(1).max(64).default('*').describe('* or one HTTP method'),source:fieldSource.describe('request/response body or SSE event data (path is a JSONPath such as $.data.searchId), or requestHeader/responseHeader (path is a header name)'),path:z.string().min(1).max(512)}).strict();
+  const fieldShape=z.object({id:id.max(128).optional().describe('Omit to create a new field'),name:z.string().min(1).max(100),
+    locations:z.array(fieldLocation).min(1).max(10).describe('Where to read the value. One field can read the same value from several APIs or places, for example SSE event data on a stream API and the response body on a poll API; a capture matches a location by URL wildcard and method, and the distinct values from all matching locations are merged into one list')}).strict();
+  async function updateFields(edit){
+    const {revision,config}=await api('/api/productivity');
+    const result=await api('/api/productivity','PUT',{revision,config:{...config,fields:edit(config.fields)}});
+    return {revision:result.revision,fields:result.config.fields};
+  }
+  tool('list_custom_fields', 'List custom fields: values highlighted in the traffic table and inspector. Each field has 1-10 locations (URL wildcard, method, source, path) read from a request/response body, SSE event data or a header; values from every matching location are merged.', {offset,limit}, true, async a=>{
+    const value=await api('/api/productivity');return {revision:value.revision,...page(value.config.fields,a.offset,a.limit)};
+  });
+  tool('upsert_custom_field', 'Create a custom field, or fully replace the one with the same id. One field can be read from several APIs or places (locations), for example a searchId in SSE event data on the stream API and in the response body on the poll API; the distinct values found in all matching locations are merged. It shows in the table Fields column and at the top of the inspector for matching captures, after the engine evaluates them in the background. Engine validation rejects unsupported JSONPaths and header names; at most 50 fields.', {field:fieldShape}, false,
+    a=>serializeMutation(async()=>{
+      const field={...a.field,id:a.field.id??crypto.randomUUID()};
+      const result=await updateFields(fields=>fields.some(f=>f.id===field.id)?fields.map(f=>f.id===field.id?field:f):[...fields,field]);
+      return {revision:result.revision,field:result.fields.find(f=>f.id===field.id)};
+    }));
+  tool('delete_custom_field', 'Delete one custom field by id. Captures are unchanged.', {fieldId:id}, false, a=>serializeMutation(async()=>{
+    let found=false;
+    const result=await updateFields(fields=>fields.filter(f=>f.id===a.fieldId?(found=true,false):true));
+    if(!found)throw new Error(`No custom field ${a.fieldId}`);
+    return {revision:result.revision,deleted:a.fieldId};
+  }), true);
+  tool('get_capture_fields', 'Read the custom field values of one capture in full (up to 5 distinct values per field, merged across the matching locations of the field, each up to 64 KiB; arrays and objects as JSON text with a summary; locations lists which source/path pairs matched this capture). list_captures rows carry the same fields cut at 256 characters.', {recordId:id}, true,
+    a=>api(`/api/records/${encodeURIComponent(a.recordId)}/fields`));
   tool('annotate_capture', 'Set one live capture note and highlight. This changes local metadata only.', {recordId:id,note:z.string().max(8000),color:z.enum(['','blue','green','amber','red','purple'])}, false,
     a=>serializeMutation(()=>api(`/api/records/${encodeURIComponent(a.recordId)}/annotation`,'PATCH',{note:a.note,color:a.color})));
   tool('list_replay_jobs', 'Page repeated-replay progress and result metadata. Jobs never restart automatically.', { offset, limit }, true, async a => {

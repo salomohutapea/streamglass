@@ -9,7 +9,7 @@ from unittest.mock import patch
 from aiohttp.test_utils import TestClient, TestServer
 from backend.api import create_app
 from backend.service import Service
-from backend.productivity import DEFAULT, select, validate, facts, assertions
+from backend.productivity import DEFAULT, select, validate, facts, assertions, analyze
 from backend.repeat_replay import validate as validate_repeat, run_job
 
 
@@ -18,6 +18,10 @@ def capture(record_id="capture"):
             "endedAt": 101.0, "state": "complete", "eventCount": 0, "events": [],
             "request": {"url": "https://api.example.test/initial", "method": "POST", "headers": [], "body": '{"searchId":"search-1"}', "bodyBase64": ""},
             "response": {"statusCode": 200, "headers": [], "body": '{"context":{"searchId":"search-1"},"nullable":null}', "bodyBase64": ""}}
+
+
+def field(identifier, path, **changes):
+    return {"id": identifier, "name": identifier, "pattern": "*", "method": "*", "source": "response", "path": path, **changes}
 
 
 def rule(kind, **changes):
@@ -36,14 +40,16 @@ class AnalysisTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             select(list(range(10001)), "$[*]")
 
-    def test_watches_keep_large_integer_text_and_null(self):
+    def test_fields_keep_large_integer_text_and_null(self):
         config = copy.deepcopy(DEFAULT)
-        config["watches"] = [{"id": "id", "name": "ID", "source": "response", "path": "$.id"}, {"id": "null", "name": "Nullable", "source": "response", "path": "$.nullable"}]
+        config["fields"] = [field("id", "$.id"), field("null", "$.nullable")]
         item = capture()
         item["response"]["body"] = '{"id":9007199254740993,"nullable":null}'
-        value = facts(item, validate(config))
-        self.assertEqual(value["watches"][0]["values"], ["9007199254740993"])
-        self.assertEqual(value["watches"][1]["values"], ["null"])
+        service = SimpleNamespace(productivity=validate(config), field_cache={}, analysis_cache={}, record_revs={})
+        value = analyze(service, item, 100)
+        self.assertEqual(value["fields"][0]["values"], ["9007199254740993"])
+        self.assertEqual(value["fields"][1]["values"], ["null"])
+        self.assertNotIn("watches", value)
         self.assertIn("search-1", value["correlations"])
 
     def test_deadline_duplicate_and_terminal_events(self):
@@ -67,7 +73,7 @@ class AnalysisTests(unittest.TestCase):
 
     def test_configuration_rejects_invalid_paths_and_search_modes(self):
         config = copy.deepcopy(DEFAULT)
-        config["watches"] = [{"id": "one", "name": "One", "source": "event", "path": "$..a"}]
+        config["fields"] = [field("one", "$..a", source="event")]
         with self.assertRaises(ValueError):
             validate(config)
         config = copy.deepcopy(DEFAULT)
@@ -134,17 +140,17 @@ class SessionApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_preferences_use_revision_and_survive_restart(self):
         original = await (await self.client.get("/api/productivity")).json()
         config = original["config"]
-        config["watches"] = [{"id": "search", "name": "Search", "source": "request", "path": "$.searchId"}]
+        config["fields"] = [field("search", "$.searchId", source="request")]
         response = await self.client.put("/api/productivity", json={"revision": original["revision"], "config": config})
         self.assertEqual(response.status, 200)
         stale = await self.client.put("/api/productivity", json={"revision": original["revision"], "config": config})
         self.assertEqual(stale.status, 409)
         self.service.save(capture())
         analysis = await (await self.client.get("/api/analysis?recordId=capture")).json()
-        self.assertEqual(analysis["rows"][0]["watches"][0]["values"], ['"search-1"'])
+        self.assertEqual(analysis["rows"][0]["fields"][0]["values"], ["search-1"])
         restored = Service(self.directory.name, "test-token", 47821)
         try:
-            self.assertEqual(restored.productivity["watches"], config["watches"])
+            self.assertEqual(restored.productivity["fields"], validate(config)["fields"])
         finally:
             restored.db.close()
 

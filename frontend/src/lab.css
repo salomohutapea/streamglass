@@ -48,7 +48,7 @@
 .saved-view-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
 .saved-view-row>span{flex:1;overflow-wrap:anywhere}
 .capture-note{white-space:pre-wrap;overflow-wrap:anywhere}
-.traffic-filters .saved-view-chooser{max-width:145px;min-width:95px;margin-left:auto;font-size:11px}
+.traffic-filters .saved-view-chooser{max-width:240px;min-width:95px;field-sizing:content;margin-left:auto;font-size:11px}
 .traffic tbody tr.row-highlight-blue{--row-highlight:#337ac022}
 .traffic tbody tr.row-highlight-green{--row-highlight:#3caa7622}
 .traffic tbody tr.row-highlight-amber{--row-highlight:#bd922922}
@@ -117,3 +117,12 @@
 .views-search{width:100%}
 .views-list{display:flex;flex-direction:column}
 .saved-view-row .row-kind{font-size:10px;text-transform:uppercase;color:var(--muted);min-width:34px}
+
+/* Notes list: a solid swatch of each highlight color. */
+.note-swatch{width:10px;height:10px;border-radius:3px;flex-shrink:0;align-self:center}
+.note-swatch.row-highlight-blue{background:#337ac0}
+.note-swatch.row-highlight-green{background:#3caa76}
+.note-swatch.row-highlight-amber{background:#bd9229}
+.note-swatch.row-highlight-red{background:#c85959}
+.note-swatch.row-highlight-purple{background:#956bc5}
+.daily-section>button.primary{align-self:flex-start}
