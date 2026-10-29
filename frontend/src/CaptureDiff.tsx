@@ -55,7 +55,7 @@ export default function CaptureDiff({ result, pending, error, labels = ['A', 'B'
   useLayoutEffect(() => { fitEditor.current(); });
   return <div className="capture-diff" aria-busy={pending}>
     {error && <p role="alert" className="error-text">{error}</p>}
-    {pending && <p className="capture-diff-loading" role="status"><Loader2 className="spin" size={14} aria-hidden="true" />Comparing captures…</p>}
+    {pending && <p className="capture-diff-loading" role="status"><Loader2 className="spin" size={14} aria-hidden="true" />Comparing…</p>}
     {comparison && !pending && <>
       {comparison.warnings.map((warning, index) => <p className="muted" key={index}>{warning}</p>)}
       <p className="capture-diff-summary" role="status">{comparison.limited ? 'Comparison not evaluated' : `${comparison.totalChanges} differences${comparison.incomplete ? ' in retained content' : ''}`}</p>
@@ -65,7 +65,7 @@ export default function CaptureDiff({ result, pending, error, labels = ['A', 'B'
     {comparison && !pending && !comparison.limited && comparison.totalChanges > 0 && <details className="capture-diff-paths">
       <summary>Changed paths ({comparison.totalChanges})</summary>
       <ul>{comparison.changes.map((change, index) => <li key={index}><code>{change.path}</code>{change.before === undefined ? <span className="added"> only in {labels[1]}</span> : change.after === undefined ? <span className="removed"> only in {labels[0]}</span> : null}</li>)}</ul>
-      {comparison.totalChanges > comparison.changes.length && <p className="muted">Showing the first {comparison.changes.length} paths.</p>}
+      {comparison.totalChanges > comparison.changes.length && <p className="muted">First {comparison.changes.length}</p>}
     </details>}
   </div>;
 }

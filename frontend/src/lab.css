@@ -126,3 +126,71 @@
 .note-swatch.row-highlight-red{background:#c85959}
 .note-swatch.row-highlight-purple{background:#956bc5}
 .daily-section>button.primary{align-self:flex-start}
+
+/* Quiet status line: size never depends on poll state, so layout cannot shift. */
+.analysis-status{display:flex;align-items:center;gap:6px;font-size:11px;min-height:16px;font-variant-numeric:tabular-nums}
+.analysis-spin{flex:0 0 10px;width:10px;height:10px;border-radius:50%;border:1.5px solid var(--line);border-top-color:var(--accent);opacity:0}
+.analysis-spin[data-busy=true]{opacity:1}
+@media(prefers-reduced-motion:no-preference){.analysis-spin[data-busy=true]{animation:analysis-spin .8s linear infinite}}
+@keyframes analysis-spin{to{transform:rotate(360deg)}}
+.journey-meta{display:flex;align-items:center;gap:8px}
+.journey-warn{display:inline-flex;color:var(--muted)}
+.warn-line{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
+.assertion-counts{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.saved-filter-current{display:flex;align-items:center;gap:6px}
+
+/* Responsive: the Tools body is a size container, so sections adapt to the window and to zoom. */
+.lab-body{container:labbody/inline-size;min-width:0}
+.lab-body :is(input,select,textarea){max-width:100%}
+.lab-body :is(pre,code){overflow-wrap:anywhere}
+.path-list code{max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.saved-view-row,.workspace-row,.scenario-summary,.key-suggestions li{flex-wrap:wrap}
+.saved-view-row>button,.workspace-row .workspace-actions{min-width:0}
+@container labbody (max-width:560px){
+  .lab-grid,.traffic-tools .tt-pair{grid-template-columns:minmax(0,1fr)}
+  .daily-inline>label{flex-basis:100%;min-width:0}
+  .traffic-tools .tt-rule-summary,.traffic-tools .compact-rule-method{display:none}
+  .traffic-tools .tt-rule-name{max-width:45%}
+  .traffic-tools .tt-rule-editor{margin-left:0}
+  .scenario-gallery{grid-template-columns:minmax(0,1fr)}
+  .testing-fields{grid-template-columns:minmax(0,1fr)}
+  .path-list button{flex-wrap:wrap;gap:2px 10px}
+  .path-list code{max-width:100%}
+  .daily-scroll{max-height:60vh}
+}
+/* Narrow windows: the section list becomes a scrolling rail across the top. */
+@media(max-width:640px){
+  .lab-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  .lab-layout .lab-tabs{flex-direction:row;align-items:center;gap:2px;padding:6px 8px;border-right:0;border-bottom:1px solid var(--line);overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain}
+  .lab-layout .lab-tabs>span{display:none}
+  .lab-layout .lab-tabs button{flex:0 0 auto;white-space:nowrap}
+}
+.lab-tabs .lab-tab-icon{width:15px;height:15px;color:var(--muted);flex-shrink:0}
+.lab-tabs button{gap:9px}
+.lab-tabs button[aria-pressed=true] .lab-tab-icon{color:var(--accent)}
+.lab-layout{grid-template-columns:196px minmax(0,1fr)}
+.lab-layout .lab-tabs{overflow-x:hidden}
+.lab-tab-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:760px){.lab-layout{grid-template-columns:160px minmax(0,1fr)}}
+@media(max-width:640px){.lab-layout{grid-template-columns:minmax(0,1fr)}.lab-layout .lab-tabs{overflow-x:auto}}
+/* A captured request in a Tools table: one line of method, path and muted host; the full URL is in the tooltip. */
+.daily-table td{vertical-align:middle}
+.daily-table td button.request-link{display:flex;align-items:baseline;gap:8px;width:100%;min-width:0;padding:4px 6px;border:0;border-radius:5px;background:transparent;white-space:nowrap;overflow:hidden;text-align:left}
+.daily-table td button.request-link:hover{background:var(--raised)}
+.request-link-method{flex-shrink:0;font:600 10px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
+.request-link-method[data-method=GET]{color:var(--q-get,#3ecf8e)}.request-link-method[data-method=POST]{color:var(--q-post,#e8a23d)}.request-link-method[data-method=DELETE]{color:var(--q-delete,#f26d6a)}
+.request-link-path{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.request-link-host{flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:11px}
+.waterfall-table td{padding-top:5px;padding-bottom:5px}
+.waterfall-track{height:14px}.waterfall-track span{top:3px;height:8px}
+/* Pick from capture: left-aligned rows and even spacing between the capture list, the source controls and the paths. */
+.path-picker[open]{gap:14px;padding-bottom:12px}
+.path-picker[open]>summary{margin-bottom:0}
+.path-list button,.capture-picker-list button,.views-list button{justify-content:flex-start}
+.path-list button{align-items:baseline}
+.path-picker .daily-inline{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px}
+.path-picker .daily-inline>label{display:flex;flex-direction:column;gap:6px;flex:1 1 180px;min-width:0}
+.daily-table td button.request-link{justify-content:flex-start}
+/* Children of an open <details> live in its ::details-content box, so spacing between them is set there. */
+.path-picker::details-content{display:flex;flex-direction:column;gap:14px}
+.path-picker[open]{display:block}

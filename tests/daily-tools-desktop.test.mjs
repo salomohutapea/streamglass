@@ -103,8 +103,12 @@ c.commit()`,path.join(directory,'captures.sqlite3'),String(proxyPort)],{input:JS
     await panel.locator('.journey-group summary').filter({hasText:'synthetic-search'}).waitFor();
     assert.match(await panel.locator('.journey-group summary').innerText(),/2 requests/);
     assert.ok(await panel.locator('.waterfall-track span').first().evaluate(element=>element.getBoundingClientRect().width>0));
+    // A request opened from Tools gets its own inspector window; the main window keeps its selection.
+    const inspectorOpened=app.waitForEvent('window');
     await panel.locator('.waterfall-table tbody tr').filter({hasText:'/sse'}).getByRole('button').click();
-    await page.locator('.inspector .request-url').getByText(url+'/sse',{exact:true}).waitFor();
+    const inspectorPage=await inspectorOpened;
+    await inspectorPage.locator('.inspector .request-url').getByText(url+'/sse',{exact:true}).waitFor();
+    await inspectorPage.close();
     assert.equal(toolsPage.isClosed(),false,'Selecting a capture must keep Tools open');
     await toolsPage.screenshot({path:'/tmp/streamglass-daily-journeys.png'});
     await panel.getByRole('button',{name:'Sessions',exact:true}).click();

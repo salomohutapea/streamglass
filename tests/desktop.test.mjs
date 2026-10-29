@@ -259,8 +259,9 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     assert.equal(await editor.getByRole('region', { name: 'Request context', exact: true }).locator('textarea:not(.monaco-editor *)').count(), 0, 'Read-only JSON must not offer inputs');
     const eventBody = bodyEditor.getByRole('textbox', { name: 'Event data', exact: true });
     // Direct text editing: replace only the array, as a user would by selecting and typing.
-    await setMonacoText(app, eventBody, (await readMonacoText(app, eventBody)).replace(/\[[^\]]*\]/, '[{"id":9007199254740993999}]'));
-    const editedEvent = await readMonacoText(app, eventBody);
+    // The event editor can still be settling right after the gate appears, so retry the paste until it sticks.
+    const originalEvent = await readMonacoText(app, eventBody);
+    const editedEvent = await eventually(async () => { const text = await readMonacoText(app, eventBody); if (/\[\{"id":9007199254740993999\}\]/.test(text)) return text; await setMonacoText(app, eventBody, originalEvent.replace(/\[[^\]]*\]/, '[{"id":9007199254740993999}]')); return null; }, 'The event edit did not apply');
     assert.match(editedEvent, /\[\{"id":9007199254740993999\}\]/);
     assert.match(editedEvent, /"untouched": 9007199254740993123/);
     assert.match(editedEvent, /"exponent": 1\.00e\+40/);

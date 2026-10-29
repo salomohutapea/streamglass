@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { TriangleAlert } from 'lucide-react';
 import './McpSettings.css';
 
 type McpConnection = { running: boolean; url: string; token: string; error?: string; approvedRedirects?: string[] };
@@ -13,7 +14,7 @@ export default function McpSettings() {
   async function refresh() {
     try {
       const result = await window.streamglass?.getMcpConnection();
-      if (!result) throw new Error('MCP settings are available in the Streamglass desktop app.');
+      if (!result) throw new Error('Desktop app only.');
       setConnection(result);
       setError(result.error ?? '');
     } catch (e) {
@@ -29,7 +30,7 @@ export default function McpSettings() {
     setError('');
     try {
       const result = await window.streamglass?.setMcpEnabled(!connection.running);
-      if (!result) throw new Error('MCP settings are unavailable.');
+      if (!result) throw new Error('Unavailable.');
       setConnection(result);
       setError(result.error ?? '');
     } catch (e) {
@@ -53,30 +54,29 @@ export default function McpSettings() {
       const text = JSON.stringify(config, null, 2);
       if (window.streamglass?.copyText) await window.streamglass.copyText(text);
       else await navigator.clipboard.writeText(text);
-      setCopied(`${label} configuration copied.`);
+      setCopied(`${label} copied.`);
     } catch {
-      setCopied('Could not copy configuration. Check clipboard access and try again.');
+      setCopied('Could not copy.');
     }
   }
 
   const httpConfig = connection && { mcpServers: { streamglass: { type: 'http', url: connection.url, headers: { Authorization: `Bearer ${connection.token}` } } } };
 
   return <section className="mcp-settings" aria-labelledby="mcp-settings-title">
-    <div className="setting-summary"><span className={`mcp-indicator ${connection?.running ? 'running' : ''}`} aria-hidden="true"/><div><strong id="mcp-settings-title">AI agent MCP</strong><p>{connection ? connection.running ? 'Local MCP server is running.' : 'Local MCP server is stopped.' : 'Checking local MCP server…'}</p></div></div>
-    <p className="muted">Connect an AI agent to inspect Streamglass traffic. The server is off until you enable it, supports live <code>watch_sse_events</code> notifications and runs only while the app is open.</p>
-    <p className="muted">Captured requests, cookies and tokens become readable to the connected agent and may be sent to its provider. Before an agent sends a request, redirects traffic, unlocks more HTTPS sites, runs new JavaScript or loads a workspace, Streamglass asks you to allow it. Agents cannot unlock every site with a wildcard.</p>
+    <div className="setting-summary"><span className={`mcp-indicator ${connection?.running ? 'running' : ''}`} aria-hidden="true"/><div><strong id="mcp-settings-title">AI agent MCP</strong><p>{connection ? connection.running ? 'Running' : 'Stopped' : 'Checking…'}</p></div></div>
+    <p className="muted mcp-warn" title="Off until enabled; runs only while the app is open. Streamglass asks before an agent sends requests, redirects traffic, unlocks HTTPS sites, runs new JavaScript or loads a workspace."><TriangleAlert size={14} aria-hidden="true"/>Agents can read captured requests, cookies and tokens, and may send them to their provider.</p>
     <button type="button" disabled={!connection || busy} onClick={() => void toggle()}>{busy ? 'Updating…' : connection?.running ? 'Disable MCP server' : 'Enable MCP server'}</button>
     {connection && <div className="mcp-details">
-      <label>HTTP URL<input className="mono" readOnly value={connection.url} onFocus={e => e.currentTarget.select()}/></label>
+      <label>URL<input className="mono" readOnly value={connection.url} onFocus={e => e.currentTarget.select()}/></label>
       <label>Bearer token<input className="mono" type="password" readOnly value={connection.token} aria-label="Bearer token (masked)"/></label>
       <div className="mcp-copy-actions">
-        <button type="button" onClick={() => httpConfig && void copy('HTTP', httpConfig)}>Copy HTTP configuration</button>
+        <button type="button" onClick={() => httpConfig && void copy('HTTP', httpConfig)}>Copy config</button>
       </div>
     </div>}
     {connection && <div className="mcp-approved">
-      <strong>Approved redirect servers</strong>
+      <strong title="Servers you allowed an agent to redirect traffic to. Removing one makes the agent ask again.">Approved redirects</strong>
       {connection.approvedRedirects?.length ? <ul>{connection.approvedRedirects.map(target => <li key={target}><code>{target}</code><button type="button" onClick={() => void forget(target)}>Remove</button></li>)}</ul>
-        : <p className="muted">None. Servers you allow when an agent redirects traffic are listed here; removing one makes the agent ask again.</p>}
+        : <p className="muted">None</p>}
     </div>}
     {error && <p className="error-text" role="alert">{error}</p>}
     <p className="mcp-feedback" role="status" aria-live="polite">{copied}</p>

@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
     return () => ipcRenderer.removeListener('approvals-changed', listener);
   },
   detachInspector: (recordId) => ipcRenderer.invoke('detach-inspector', recordId),
+  deviceNames: (addresses) => ipcRenderer.invoke('device-names', addresses),
   openEditor: (input) => ipcRenderer.invoke('open-editor', input),
   openTools: (input) => ipcRenderer.invoke('open-tools', input),
   getToolsContext: () => ipcRenderer.invoke('tools-context'),

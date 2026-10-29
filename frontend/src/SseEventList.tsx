@@ -21,7 +21,7 @@ export default function SseEventList({ events, headersAt }: { events: SseEvent[]
   const first = Math.max(0, events.length - shown);
   const toggle = (index: number) => setExpanded(current => { const next = new Set(current); if (next.has(index)) next.delete(index); else next.add(index); return next; });
   return <>
-    {first > 0 && <button type="button" className="events-earlier" onClick={() => setShown(value => value + PAGE)}>Show {Math.min(PAGE, first)} earlier events ({first} hidden)</button>}
+    {first > 0 && <button type="button" className="events-earlier" onClick={() => setShown(value => value + PAGE)}>Earlier ({first})</button>}
     {events.slice(first).map((event, offset) => {
       const index = first + offset, open = expanded.has(index), gap = gaps[index];
       const text = typeof event.data === 'string' ? event.data : JSON.stringify(event.data) ?? '';
@@ -30,7 +30,7 @@ export default function SseEventList({ events, headersAt }: { events: SseEvent[]
           <button type="button" className="event-toggle" aria-expanded={open} aria-label={`${open ? 'Collapse' : 'Expand'} event ${index + 1}`} onClick={() => toggle(index)}><ChevronRight size={12} /></button>
           <span className="event-number">{String(index + 1).padStart(3, '0')}</span>
           <strong>{event.event ?? event.type ?? 'message'}</strong>
-          {gap !== undefined && Number.isFinite(gap) && <span className={(gap as number) > limit ? 'event-gap long' : 'event-gap'} title={(gap as number) > limit ? 'More than 3x the median gap' : 'Time since the previous event'}>+{formatMs(gap as number)}</span>}
+          {gap !== undefined && Number.isFinite(gap) && <span className={(gap as number) > limit ? 'event-gap long' : 'event-gap'} title={(gap as number) > limit ? 'Over 3x the median gap' : 'Time since the previous event'}>+{formatMs(gap as number)}</span>}
           <time>{event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : ''}</time>
         </div>
         {open ? <JsonViewer value={event.data} /> : <pre className="event-preview" onClick={() => toggle(index)}>{text.length > PREVIEW ? `${text.slice(0, PREVIEW)}…` : text}</pre>}

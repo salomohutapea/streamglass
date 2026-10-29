@@ -44,3 +44,6 @@ dialog[aria-label="Connect a device"]{width:min(780px,calc(100vw - 40px))}
 dialog[aria-label="Connect a device"] .proxy-address-values input,dialog[aria-label="Connect a device"] .proxy-address-values select{font-size:15px;padding:7px 9px}
 dialog[aria-label="Connect a device"] .proxy-address{padding:12px 14px}
 .connect-qr .ca-fingerprint code{display:block;font-size:10px;overflow-wrap:anywhere;margin-top:3px}
+
+.connect-qr .ca-fingerprint{margin:6px 0}
+.connect-qr .inline button svg{flex:none}

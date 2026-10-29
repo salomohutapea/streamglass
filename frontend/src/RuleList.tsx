@@ -32,6 +32,9 @@ export function PopupMenu({ x, y, label, opener, onClose, children }: { x: numbe
   return <div ref={ref} className="rule-menu" role="menu" aria-label={label} style={style} onKeyDown={onKeyDown}>{children}</div>;
 }
 
+// An untitled rule is headed by the last segment of its URL pattern, such as "dateflow" for *flight/dateflow.
+const patternName = (pattern: string) => pattern.split(/[?#]/)[0].split('/').map(part => part.replace(/\*/g, '')).filter(Boolean).pop() || pattern;
+
 export default function RuleList({ rules, emptyMessage, folders = [], onToggle, onEdit, onDelete, onMove, onCreateFolderAndMove }: {
   rules: Rule[];
   emptyMessage: string;
@@ -53,20 +56,20 @@ export default function RuleList({ rules, emptyMessage, folders = [], onToggle, 
     {rules.map(rule => {
       const ruleName = rule.name?.trim();
       const method = rule.method || '*';
-      const customName = ruleName && ruleName !== rule.pattern && ruleName !== `${method} ${rule.pattern}`;
+      const customName = ruleName && !/^Untitled (rule|script)$/.test(ruleName) && ruleName !== rule.pattern && ruleName !== `${method} ${rule.pattern}`;
       const label = customName ? ruleName : `${method} ${rule.pattern}`;
       return <div className="compact-rule-row" key={rule.id} draggable={canMove} onDragStart={canMove ? event => { event.dataTransfer.setData(ruleDragType, rule.id); event.dataTransfer.effectAllowed = 'move'; event.currentTarget.classList.add('dragging'); } : undefined} onDragEnd={canMove ? event => event.currentTarget.classList.remove('dragging') : undefined} onContextMenu={canMove ? event => { event.preventDefault(); open(rule, label, event.clientX, event.clientY, event.currentTarget.querySelector('.compact-rule-more')); } : undefined}>
         <input aria-label={`Enable ${label}`} type="checkbox" checked={rule.enabled} onChange={event => onToggle(rule, event.target.checked)} />
         <button className="compact-rule-detail" aria-label={`Edit ${label}`} onClick={() => onEdit(rule)}>
-          {customName && <strong className="compact-rule-name" title={ruleName}>{ruleName}</strong>}
-          <span className="compact-rule-target"><span className="compact-rule-method">{method === '*' ? 'ANY' : method}</span><code title={rule.pattern}>{rule.pattern}</code></span>
-          <span className="compact-rule-stages">{rule.stages.map(stage => <span key={stage}>{stage === 'request' ? 'Request' : stage === 'response' ? 'Response' : stage === 'event' ? 'Each SSE event' : stage}</span>)}</span>
+          {customName ? <strong className="compact-rule-name" title={ruleName}>{ruleName}</strong> : <span className="compact-rule-fallback">{patternName(rule.pattern)}</span>}
+          <span className="compact-rule-line"><span className="compact-rule-target"><span className="compact-rule-method">{method === '*' ? 'ANY' : method}</span><code title={rule.pattern}>{rule.pattern}</code></span>
+          <span className="compact-rule-stages">{rule.stages.map(stage => <span key={stage} title={stage === 'event' ? 'Each SSE event' : undefined}>{stage === 'request' ? 'Request' : stage === 'response' ? 'Response' : stage === 'event' ? 'SSE' : stage}</span>)}</span></span>
         </button>
         {canMove && <button className="icon-button compact-rule-more" title={`Rule actions for ${label}`} aria-label={`Rule actions for ${label}`} aria-haspopup="menu" aria-expanded={menu?.rule.id === rule.id} onClick={event => { const box = event.currentTarget.getBoundingClientRect(); open(rule, label, box.left - 190, box.bottom + 2, event.currentTarget); }}><MoreHorizontal /></button>}
         <button className="icon-button compact-rule-delete" title={`Delete ${label}`} aria-label={`Delete ${label}`} onClick={() => onDelete(rule)}><Trash2 /></button>
       </div>;
     })}
-    {!rules.length && <div className="small-empty"><ListFilter /><p>{emptyMessage}</p></div>}
+    {!rules.length && <div className="rule-empty"><ListFilter aria-hidden="true" /><p>{emptyMessage}</p></div>}
     {menu && canMove && <PopupMenu x={menu.x} y={menu.y} label={`Actions for ${menu.label}`} opener={menu.opener} onClose={close}>
       {!creating && <>
         <button role="menuitem" aria-haspopup="menu" aria-expanded={choosing} onClick={() => setChoosing(!choosing)}><Folder size={13} />Move to folder<span aria-hidden="true">{choosing ? '▾' : '▸'}</span></button>

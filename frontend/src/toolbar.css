@@ -3,12 +3,16 @@ header.toolbar{height:52px;gap:12px;justify-content:flex-start}
 .toolbar-group{display:flex;align-items:center;gap:8px;flex-shrink:0;-webkit-app-region:no-drag}
 .toolbar-group:last-child{margin-left:auto}
 .tool-capsule{display:flex;align-items:center;gap:2px;padding:3px;border-radius:999px;background:var(--raised);border:1px solid var(--line)}
-.tool-button{position:relative;width:30px;height:28px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--text)}
+.tool-button{position:relative;min-width:30px;height:28px;padding:0 7px;gap:0;border:0;border-radius:999px;background:transparent;color:var(--text)}
+/* Hovering or focusing an icon button slides its short label out to the right of the icon. */
+.tool-label{display:inline-block;max-width:0;opacity:0;overflow:hidden;white-space:nowrap;font-size:11.5px;font-weight:500;transition:max-width .22s cubic-bezier(.2,.7,.2,1),margin-left .22s cubic-bezier(.2,.7,.2,1),opacity .16s}
+:is(.tool-button,.capture-button):is(:hover,:focus-visible):not(:disabled) .tool-label{max-width:96px;margin-left:6px;opacity:1}
+@media(prefers-reduced-motion:reduce){.tool-label{transition:none}}
 .tool-button svg{width:16px;height:16px}
 .tool-button:hover:not(:disabled){background:var(--hover)}
 .tool-button.active{color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent)}
 .tool-dot{position:absolute;top:4px;right:5px;width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--raised)}
-.capture-button{width:36px;height:36px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--raised);color:var(--text)}
+.capture-button{min-width:36px;height:36px;padding:0 9px;gap:0;border-radius:999px;border:1px solid var(--line);background:var(--raised);color:var(--text)}
 .capture-button:hover:not(:disabled){background:var(--hover)}
 .capture-button.playing{color:var(--text)}
 .capture-button:not(.playing){color:var(--q-get,#3ecf8e)}
@@ -61,3 +65,16 @@ header.toolbar{height:52px;gap:12px;justify-content:flex-start}
 .filter-bar .filter-scope{width:104px}
 .filter-bar select[aria-label="Match mode"],.filter-condition select[aria-label$="match mode"]{width:140px}
 .filter-condition select[aria-label$="search content"]{width:104px}
+/* Narrow or zoomed-in windows: the status capsule shrinks first, then buttons that the menu bar also offers
+   (Help → Welcome tour, View → Appearance, File → Export, Capture → Clear) step aside. */
+.status-capsule{overflow:hidden}
+.status-state{min-width:0;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:760px){.tool-button:is([aria-label="Welcome tour"],[aria-label^="Use "]){display:none}}
+@media(max-width:680px){.toolbar-group:first-child .tool-capsule{display:none}}
+/* Three columns: the equal side columns absorb a button label sliding out, so the status capsule stays centred and
+   still while there is room. When a side outgrows its column, the capsule gives way. */
+header.toolbar{display:grid;grid-template-columns:minmax(max-content,1fr) minmax(0,auto) minmax(max-content,1fr);align-items:center}
+header.toolbar>.toolbar-group:first-child{justify-self:start}
+header.toolbar>.toolbar-group:last-child{justify-self:end;margin-left:0}
+header.toolbar>.status-capsule{margin:0;max-width:720px;min-width:0}
+.status-badge{display:inline-flex;align-items:center;gap:5px}

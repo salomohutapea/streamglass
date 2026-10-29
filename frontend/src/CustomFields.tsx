@@ -29,7 +29,7 @@ export function CustomFieldsSection({ fields, tab, onEdit }: { fields?: FieldRes
     <dl>{shown.map(field => <div key={field.id} className={`custom-field state-${field.state}`}>
       <dt><strong>{field.name}</strong><small title={(field.locations ?? []).map(locationText).join('\n')}>{(field.locations ?? []).map(locationText).join(' · ')}</small></dt>
       <dd>{field.values.length ? <>{field.values.map((value, index) => <FieldValue key={index} name={field.name} value={value} summary={field.summaries?.[index]} />)}
-        {(field.count > field.values.length || (field.limited && !field.summaries?.some(Boolean))) && <small className="muted">{field.count > field.values.length ? `First ${field.values.length} of ${field.count}${field.limited ? '+' : ''} distinct values` : 'Values are shortened'}</small>}</> : <span className="muted">{stateText(field)}</span>}</dd>
+        {(field.count > field.values.length || (field.limited && !field.summaries?.some(Boolean))) && <small className="muted">{field.count > field.values.length ? `First ${field.values.length} of ${field.count}${field.limited ? '+' : ''}` : 'Shortened'}</small>}</> : <span className="muted">{stateText(field)}</span>}</dd>
     </div>)}</dl>
   </section>;
 }
