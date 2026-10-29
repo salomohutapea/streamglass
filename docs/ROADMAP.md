@@ -28,12 +28,18 @@ Automatic app-specific decryption is deferred: backend-selected crypto artifacts
 
 The [daily debugging guide](DAILY_TOOLS.md) covers immutable named capture archives with streaming `.sgsession` import/export and archived/live comparison; configured search-journey correlation and waterfall timing; custom fields that highlight JSONPath or header values in the table and inspector; background assertions and MCP results; bounded sequential repeated replay with cancellation; and persisted saved filters with capture notes and highlights. Map Remote and WebSocket inspection remain outside the current scope.
 
+## Security hardening implemented on 2026-10-29
+
+Safer defaults (LAN access off, MCP off), LAN device approval and a LAN destination guard, a Host-checked phone setup site with a certificate fingerprint, in-app approval of risky MCP actions, proxy-stop restoration of Mac proxy settings, bounded decoding and a separate inspected-capture budget, `scripts/uninstall.sh`, and dependency updates are implemented. See the [security review](SECURITY_REVIEW.md#2026-10-29-hardening), [device setup](DEVICES.md#local-network-exposure) and [MCP approvals](MCP.md#actions-that-need-your-approval).
+
 ## Follow-ups, not implemented
 
 1. Broader interchange support for HAR and legacy session imports; `.sgsession` capture archives are implemented.
 2. Fixture directories and optional file watching with scoped path resolution.
 3. Revision checks for every concurrent desktop/MCP rule edit; workspace restoration is atomic, but individual editors still use fetch-latest conflict handling.
 4. Full SSE transport recording, including unretained heartbeat/comment frames, beyond retained event fixtures.
+5. Developer ID signing, notarization and the hardened runtime for local unsigned builds. Local builds use ad-hoc signing without the hardened runtime; the signed build path already enables the hardened runtime and notarization.
+6. Encryption at rest for retained captures, which are stored unencrypted in the local SQLite database.
 
 Mitmproxy offers [local mapping options](https://docs.mitmproxy.org/stable/concepts/options/) and [replay features](https://docs.mitmproxy.org/stable/overview/features/). Reuse must preserve Streamglass's pause, validation and incremental SSE contracts. Upstream availability does not mean a capability is integrated here.
 

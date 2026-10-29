@@ -7,6 +7,10 @@ const common = { id, name: z.string().min(1).max(256), enabled: z.boolean(), pat
 const headerOps = z.array(z.object({ op: z.enum(['set', 'remove']), name: z.string().min(1).max(256), value: z.string().max(8192).optional() })).max(50);
 const path = z.string().max(2048);
 
+// Appended to tools that wait for the user to click Allow in Streamglass (see confirm in mcp-tools.mjs).
+export const APPROVAL = 'Needs the user\'s approval: Streamglass shows an Allow/Deny dialog and this call waits until they answer, up to 2 minutes. Tell the user to approve it in the Streamglass window before or while calling; a denied or unanswered request returns an error and must not be retried without asking them.';
+const REDIRECT_APPROVAL = `Enabling a redirect to a server the user has not approved before ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`;
+
 export const trafficRuleTypes = {
   mapRemoteRules: { label: 'Map Remote', tool: 'map_remote', shape: { ...common, scheme: z.enum(['http', 'https']), host: z.string().min(1).max(253),
     port: z.number().int().min(0).max(65535), pathFrom: path, pathTo: path, keepHost: z.boolean(), headerOps },
@@ -36,7 +40,7 @@ export function registerTrafficRuleTools({ tool, serializeMutation, updateTraffi
       if (!rule) throw new Error(`${label} rule not found`);
       return { revision, ...textPage(JSON.stringify(rule), a.offset, a.maxChars) };
     });
-    tool(`upsert_${name}_rule`, `Create or replace a ${label} rule. ${description} Rules apply top to bottom and only while capture is not paused. HTTP validators are authoritative.`, { rule: z.object(shape) }, false, a => serializeMutation(async () => {
+    tool(`upsert_${name}_rule`, `Create or replace a ${label} rule. ${description} Rules apply top to bottom and only while capture is not paused. HTTP validators are authoritative.${key === 'mapRemoteRules' ? ` ${REDIRECT_APPROVAL}` : ''}`, { rule: z.object(shape) }, false, a => serializeMutation(async () => {
       const revision = await updateTrafficTools(value => {
         const rules = list(value), index = rules.findIndex(r => r.id === a.rule.id);
         if (index < 0) rules.push(a.rule); else rules[index] = a.rule;
@@ -44,7 +48,7 @@ export function registerTrafficRuleTools({ tool, serializeMutation, updateTraffi
       });
       return { saved: true, id: a.rule.id, revision };
     }), true);
-    tool(`set_${name}_rule_enabled`, `Enable or disable one ${label} rule.`, { ruleId: id, enabled: z.boolean() }, false, a => serializeMutation(async () => {
+    tool(`set_${name}_rule_enabled`, `Enable or disable one ${label} rule.${key === 'mapRemoteRules' ? ` ${REDIRECT_APPROVAL}` : ''}`, { ruleId: id, enabled: z.boolean() }, false, a => serializeMutation(async () => {
       const revision = await updateTrafficTools(value => {
         const rule = list(value).find(r => r.id === a.ruleId);
         if (!rule) throw new Error(`${label} rule not found`);
@@ -70,7 +74,7 @@ export function registerTrafficRuleTools({ tool, serializeMutation, updateTraffi
       return { saved: true, revision };
     }), true);
   }
-  tool('set_traffic_rule_group_enabled', 'Enable or disable every Map Remote, Rewrite and Block rule whose group label matches (an environment profile such as "Staging"). Use an empty group for unlabelled rules. Map Local rules are not affected.', {
+  tool('set_traffic_rule_group_enabled', `Enable or disable every Map Remote, Rewrite and Block rule whose group label matches (an environment profile such as "Staging"). Use an empty group for unlabelled rules. Map Local rules are not affected. ${REDIRECT_APPROVAL}`, {
     group: z.string().max(64), enabled: z.boolean(), types: z.array(z.enum(['map-remote', 'rewrite', 'block'])).min(1).max(3).default(['map-remote', 'rewrite', 'block']),
   }, false, a => serializeMutation(async () => {
     let changed = 0;

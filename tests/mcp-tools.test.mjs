@@ -44,16 +44,20 @@ async function fixture(t) {
   await new Promise(resolve => http.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => { http.closeAllConnections(); http.close(resolve); }));
   const bootstrap = { baseUrl: `http://127.0.0.1:${http.address().port}`, token: 'management-secret' };
-  function client() {
+  // Approvals are recorded; by default the user allows each one, as tests of the gated tools need.
+  const approvals = [];
+  function client({ allow = true, approved = [] } = {}) {
     const tools = new Map();
-    registerTools({ registerTool(name, config, handler) { tools.set(name, { config, handler }); } }, bootstrap);
+    registerTools({ registerTool(name, config, handler) { tools.set(name, { config, handler }); } }, { ...bootstrap,
+      confirm: async request => { approvals.push(request); return typeof allow === 'function' ? allow(request) : allow; },
+      isApproved: target => approved.includes(target) });
     return { tools, async call(name, args = {}, extra = {}) {
       const tool = tools.get(name);
       const result = await tool.handler(z.object(tool.config.inputSchema).parse(args), { signal: new AbortController().signal, ...extra });
       return { ...result, value: result.isError ? result.content[0].text : JSON.parse(result.content[0].text) };
     } };
   }
-  return { state, record, requests, client, bootstrap, controls };
+  return { state, record, requests, client, bootstrap, controls, approvals, traffic: () => traffic };
 }
 
 test('tools bind only to authenticated loopback and mark mutations', async t => {
@@ -290,4 +294,93 @@ test('SSE connection status is exposed and filterable', async t => {
   assert.equal(timing.sse.endDetail, 'Client disconnected.');
   assert.deepEqual(timing.sse.phases, { startedAt: 10, headersAt: 10.2, firstEventAt: 10.5, endedAt: 14 });
   assert.equal((await c.call('get_sse_diagnostics', { recordId: 'capture' })).value.status, 'client-closed');
+});
+
+test('gated actions are refused without an in-app confirmation handler', async t => {
+  const f = await fixture(t);
+  const tools = new Map();
+  registerTools({ registerTool(name, config, handler) { tools.set(name, { config, handler }); } }, f.bootstrap);
+  const result = await tools.get('update_settings').handler({ tlsDomains: ['api.example.test'] }, {});
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Declined in Streamglass/);
+  assert.equal(f.requests.some(r => r.url === '/api/settings'), false);
+});
+
+test('unlocking HTTPS sites needs approval and refuses broad patterns', async t => {
+  const f = await fixture(t);
+  f.state.settings.tlsDomains = ['old.example.test'];
+  const denied = f.client({ allow: false });
+  const before = f.requests.length;
+  const refused = await denied.call('update_settings', { tlsDomains: ['old.example.test', 'api.example.test'] });
+  assert.equal(refused.isError, true);
+  assert.match(refused.value, /Declined/);
+  assert.equal(f.requests.slice(before).some(r => r.url === '/api/settings'), false);
+  assert.deepEqual(f.approvals.at(-1).detail.slice(1), ['api.example.test']);
+  assert.equal(f.approvals.at(-1).kind, 'unlock');
+  const c = f.client();
+  for (const pattern of ['*', '*.com', '*.*', 'api.*', '*:443', 'localhost']) {
+    const result = await c.call('update_settings', { tlsDomains: ['old.example.test', pattern] });
+    assert.equal(result.isError, true, pattern);
+    assert.match(result.value, /broad TLS pattern/, pattern);
+  }
+  const count = f.approvals.length;
+  // Removing domains, pausing, and keeping existing ones need no approval.
+  await c.call('update_settings', { tlsDomains: [], capturePaused: true });
+  assert.equal(f.approvals.length, count);
+  await c.call('update_settings', { tlsDomains: ['*.example.test'] });
+  assert.equal(f.approvals.length, count + 1);
+  assert.deepEqual(f.requests.at(-1).body, { tlsDomains: ['*.example.test'] });
+});
+
+test('sending a request needs approval each time', async t => {
+  const f = await fixture(t);
+  const request = { url: 'https://api.example.test/orders', method: 'POST', headers: [['Content-Type', 'application/json']], bodyBase64: 'e30=', confirmSend: true };
+  const before = f.requests.length;
+  const refused = await f.client({ allow: false }).call('replay_request', request);
+  assert.equal(refused.isError, true);
+  assert.equal(f.requests.length, before);
+  assert.equal(f.approvals.at(-1).kind, 'send');
+  assert.match(f.approvals.at(-1).detail[0], /POST https:\/\/api\.example\.test\/orders/);
+  const job = await f.client({ allow: false }).call('start_replay_job', { request: { url: request.url, method: 'GET', headers: [], bodyBase64: '' }, count: 3, intervalMs: 0, timeoutMs: 1000, stopOnError: true, confirmSend: true });
+  assert.equal(job.isError, true);
+  assert.equal(f.requests.length, before);
+});
+
+test('redirecting traffic to an unapproved server needs approval; approved servers do not', async t => {
+  const f = await fixture(t);
+  const rule = (id, host, enabled = true) => ({ id, name: id, enabled, pattern: 'https://api.example.com/*', method: '*', scheme: 'https', host, port: 0, pathFrom: '', pathTo: '', keepHost: false, headerOps: [] });
+  const denied = f.client({ allow: false });
+  const refused = await denied.call('upsert_map_remote_rule', { rule: rule('r', 'collector.example.net') });
+  assert.equal(refused.isError, true);
+  assert.equal(f.traffic().mapRemoteRules, undefined);
+  assert.deepEqual(f.approvals.at(-1).targets, ['https://collector.example.net:443']);
+  // A disabled rule redirects nothing; enabling it later asks.
+  assert.equal((await denied.call('upsert_map_remote_rule', { rule: rule('r', 'collector.example.net', false) })).value.saved, true);
+  assert.equal((await denied.call('set_map_remote_rule_enabled', { ruleId: 'r', enabled: true })).isError, true);
+  assert.equal((await denied.call('set_traffic_rule_group_enabled', { group: '', enabled: true })).isError, true);
+  assert.equal(f.traffic().mapRemoteRules[0].enabled, false);
+  const approved = f.client({ allow: false, approved: ['https://collector.example.net:443'] });
+  assert.equal((await approved.call('set_map_remote_rule_enabled', { ruleId: 'r', enabled: true })).value.enabled, true);
+  const count = f.approvals.length;
+  // Unrelated edits while a redirect is already enabled do not ask again.
+  assert.equal((await denied.call('set_network_profile', { enabled: true, delayMs: 10, downloadKbps: 0, uploadKbps: 0, hostPattern: '*', deviceId: '' })).value.saved, true);
+  assert.equal(f.approvals.length, count);
+});
+
+test('new JavaScript and redirected breakpoint edits need approval', async t => {
+  const f = await fixture(t);
+  const denied = f.client({ allow: false });
+  const script = { id: 's', pattern: '*', stages: ['request'], breakpoint: false, script: 'export function onRequest(r) { return r; }' };
+  assert.equal((await denied.call('upsert_rule', { rule: script })).isError, true);
+  assert.deepEqual(f.state.rules, []);
+  assert.equal(f.approvals.at(-1).kind, 'script');
+  assert.equal((await f.client().call('upsert_rule', { rule: script })).value.saved, true);
+  const count = f.approvals.length;
+  assert.equal((await denied.call('upsert_rule', { rule: { ...script, enabled: false } })).value.saved, true);
+  assert.equal(f.approvals.length, count);
+  f.state.pending = [{ token: 'gate', recordId: 'capture', stage: 'request', method: 'GET', url: 'https://api.example.test/a', value: { url: 'https://api.example.test/a' } }];
+  const before = f.requests.length;
+  assert.equal((await denied.call('resolve_pending', { gateToken: 'gate', action: 'continue', value: { url: 'https://collector.example.net/a' } })).isError, true);
+  assert.equal(f.requests.slice(before).some(r => r.url.startsWith('/api/pending/')), false);
+  assert.equal((await denied.call('resolve_pending', { gateToken: 'gate', action: 'continue', value: { url: 'https://api.example.test/b?x=1' } })).value.ok, true);
 });

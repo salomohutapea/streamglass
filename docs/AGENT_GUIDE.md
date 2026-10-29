@@ -1,6 +1,6 @@
 # Agent development guide
 
-Read this before implementing a feature. Source code is authoritative; verify the named files against the checkout rather than assuming this guide is current forever. Last source review: 2026-10-18.
+Read this before implementing a feature. Source code is authoritative; verify the named files against the checkout rather than assuming this guide is current forever. Last source review: 2026-10-29.
 
 ## Reading order
 
@@ -42,6 +42,8 @@ Paths below are relative to the repository root. Read the relevant caller and it
 | Native menu and renderer bridge | `electron/menu.mjs`, `electron/preload.cjs`, `electron/main.mjs`, `frontend/src/vite-env.d.ts` | Desktop integration and affected helper tests |
 | Independent Tools window | `electron/tools-window.mjs`, `electron/main.mjs`, `frontend/src/App.tsx`, `frontend/src/LabPanel.tsx` | `tests/tools-window.test.mjs`, workbench and daily desktop checks for window reuse, live traffic interaction and source-window routing |
 | MCP tools and notifications | `electron/mcp-tools.mjs`, `electron/mcp-server.mjs`, `electron/mcp-config.mjs`, `frontend/src/McpSettings.tsx` | `tests/mcp-tools.test.mjs`, `mcp-server.test.mjs`, `mcp-config.test.mjs` under `tests/` |
+| LAN device approval, destination guard, MCP approval prompts | `backend/lan_guard.py`, `backend/service.py`, `backend/api.py` (`/api/lan-devices`), `electron/setup-site.mjs`, `electron/main.mjs` (`requestApproval`), `frontend/src/SecurityPrompts.tsx` | `backend/tests/test_lan_guard.py`, `tests/setup-site.test.mjs`, `tests/mcp-tools.test.mjs` |
+| Removing the app and its data | `scripts/uninstall.sh` | `tests/uninstall.test.mjs` |
 | Export selected/all retained data | `backend/api.py`, `electron/export-session.mjs`, `electron/main.mjs` | `backend/tests/test_export_all.py`, `tests/export-session.test.mjs` |
 | Dev/release launchers | `scripts/dev.mjs`, `scripts/setup.mjs`, `scripts/release.mjs`, `scripts/developer-tools.mjs`, `scripts/package_engine.py`, `package.json` | `tests/developer-tools.test.mjs`; authorized packaging checks |
 

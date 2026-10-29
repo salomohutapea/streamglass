@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import './McpSettings.css';
 
-type McpConnection = { running: boolean; url: string; token: string; error?: string };
+type McpConnection = { running: boolean; url: string; token: string; error?: string; approvedRedirects?: string[] };
+type McpBridge = { forgetMcpRedirect?(target: string): Promise<McpConnection> };
 
 export default function McpSettings() {
   const [connection, setConnection] = useState<McpConnection | null>(null);
@@ -38,6 +39,15 @@ export default function McpSettings() {
     }
   }
 
+  async function forget(target: string) {
+    try {
+      const result = await (window.streamglass as McpBridge | undefined)?.forgetMcpRedirect?.(target);
+      if (result) setConnection(result);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   async function copy(label: string, config: object) {
     try {
       const text = JSON.stringify(config, null, 2);
@@ -53,7 +63,8 @@ export default function McpSettings() {
 
   return <section className="mcp-settings" aria-labelledby="mcp-settings-title">
     <div className="setting-summary"><span className={`mcp-indicator ${connection?.running ? 'running' : ''}`} aria-hidden="true"/><div><strong id="mcp-settings-title">AI agent MCP</strong><p>{connection ? connection.running ? 'Local MCP server is running.' : 'Local MCP server is stopped.' : 'Checking local MCP server…'}</p></div></div>
-    <p className="muted">Connect an AI agent to inspect Streamglass traffic. The server supports live <code>watch_sse_events</code> notifications and runs only while the app is open.</p>
+    <p className="muted">Connect an AI agent to inspect Streamglass traffic. The server is off until you enable it, supports live <code>watch_sse_events</code> notifications and runs only while the app is open.</p>
+    <p className="muted">Captured requests, cookies and tokens become readable to the connected agent and may be sent to its provider. Before an agent sends a request, redirects traffic, unlocks more HTTPS sites, runs new JavaScript or loads a workspace, Streamglass asks you to allow it. Agents cannot unlock every site with a wildcard.</p>
     <button type="button" disabled={!connection || busy} onClick={() => void toggle()}>{busy ? 'Updating…' : connection?.running ? 'Disable MCP server' : 'Enable MCP server'}</button>
     {connection && <div className="mcp-details">
       <label>HTTP URL<input className="mono" readOnly value={connection.url} onFocus={e => e.currentTarget.select()}/></label>
@@ -61,6 +72,11 @@ export default function McpSettings() {
       <div className="mcp-copy-actions">
         <button type="button" onClick={() => httpConfig && void copy('HTTP', httpConfig)}>Copy HTTP configuration</button>
       </div>
+    </div>}
+    {connection && <div className="mcp-approved">
+      <strong>Approved redirect servers</strong>
+      {connection.approvedRedirects?.length ? <ul>{connection.approvedRedirects.map(target => <li key={target}><code>{target}</code><button type="button" onClick={() => void forget(target)}>Remove</button></li>)}</ul>
+        : <p className="muted">None. Servers you allow when an agent redirects traffic are listed here; removing one makes the agent ask again.</p>}
     </div>}
     {error && <p className="error-text" role="alert">{error}</p>}
     <p className="mcp-feedback" role="status" aria-live="polite">{copied}</p>

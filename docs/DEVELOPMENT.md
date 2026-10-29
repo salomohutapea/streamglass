@@ -32,7 +32,7 @@ Profiles hold captures, credentials, certificate material, and saved network set
 - `scripts/`: Development setup, engine freezing, icons, and release packaging.
 - `docs/`: User workflows, device configuration, MCP, architecture, and this guide.
 
-Read [architecture](ARCHITECTURE.md) before changing contracts across these layers. The current engine dependencies are `mitmproxy==12.2.3+streamglass.1` and `aiohttp==3.14.5` in `pyproject.toml`. Setup first prepares the checksum-verified [compatibility wheel](DEPENDENCY_PATCH.md), applies `constraints-macos.txt`, and invalidates its Python dependency stamp when the recipe or pins change. The async SSE extension checks the pinned mitmproxy implementation at startup; dependency changes require compatibility review and integration testing. Run `npm run audit:js` and `npm run audit:python` separately to assess both ecosystems; see [security findings and resolution](SECURITY_REVIEW.md).
+Read [architecture](ARCHITECTURE.md) before changing contracts across these layers. The current engine dependencies are `mitmproxy==12.2.3+streamglass.2` and `aiohttp==3.14.5` in `pyproject.toml`. Setup first prepares the checksum-verified [compatibility wheel](DEPENDENCY_PATCH.md), applies `constraints-macos.txt`, and invalidates its Python dependency stamp when the recipe or pins change. The async SSE extension checks the pinned mitmproxy implementation at startup; dependency changes require compatibility review and integration testing. Run `npm run audit:js` and `npm run audit:python` separately to assess both ecosystems; see [security findings and resolution](SECURITY_REVIEW.md).
 
 ## Continuous integration and releases
 

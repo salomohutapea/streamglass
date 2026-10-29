@@ -80,7 +80,9 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     await brandLogo.waitFor();
     await eventually(() => brandLogo.evaluate(image => image.complete && image.naturalWidth > 0), 'Brand logo did not render');
     const bootstrap = await page.evaluate(() => window.streamglass.getBootstrap());
-    const mcp = await page.evaluate(() => window.streamglass.getMcpConnection());
+    // MCP is off by default; the user enables it in Tools → Agent (MCP).
+    assert.equal((await page.evaluate(() => window.streamglass.getMcpConnection())).running, false);
+    const mcp = await page.evaluate(() => window.streamglass.setMcpEnabled(true));
     assert.equal(mcp.running, true, mcp.error);
     assert.notEqual(mcp.token, bootstrap.token);
     const agent = new Client({ name: 'desktop-smoke', version: '1.0.0' });

@@ -154,6 +154,30 @@ class TrafficRulesTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(flow.response.content, content, name)
             self.assertIn('not rewritten', flow.metadata['streamglass_applied_rules'][0]['detail'], name)
 
+    async def test_body_rewrite_decodes_compressed_bodies_with_a_bound(self):
+        import gzip
+        self.use(rewriteRules=[base(phase='response', headerOps=[], statusCode=0, bodyFind='a', bodyReplace='b')])
+        flow = make_flow()
+        flow.response = tresp(content=b'')
+        flow.response.headers['Content-Type'] = 'text/plain'
+        flow.response.headers['Content-Encoding'] = 'gzip'
+        flow.response.raw_content = gzip.compress(b'aaa')
+        flow.response.stream = False
+        traffic_rules.rewrite_response_body(self.service, flow)
+        self.assertEqual(flow.response.content, b'bbb')
+        # A small wire body that expands past the bound is forwarded unchanged instead of being decoded in full.
+        bomb = gzip.compress(b'a' * (traffic_rules.MAX_REWRITE_BODY + 1024))
+        self.assertLess(len(bomb), traffic_rules.MAX_REWRITE_BODY)
+        flow = make_flow()
+        flow.response = tresp(content=b'')
+        flow.response.headers['Content-Type'] = 'text/plain'
+        flow.response.headers['Content-Encoding'] = 'gzip'
+        flow.response.raw_content = bomb
+        flow.response.stream = False
+        traffic_rules.rewrite_response_body(self.service, flow)
+        self.assertEqual(flow.response.raw_content, bomb)
+        self.assertEqual(flow.metadata['streamglass_applied_rules'][0]['detail'], 'decoded body over 8 MiB not rewritten')
+
     async def test_block_responds_without_upstream_and_has_precedence_over_map_local(self):
         local = {'id': 'local', 'name': 'Local', 'enabled': True, 'method': '*', 'pattern': '*', 'statusCode': 200, 'headers': [],
                  'bodyBase64': base64.b64encode(b'local').decode()}

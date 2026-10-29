@@ -306,7 +306,8 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
       return {remainingProxyTargets:Object.keys(state), errors};
     });
   }
-  return { list, monitorStatus, restoreMonitor, prepareQuit, reconcileMonitor: () => enqueue(() => reconcileMonitor()), dispose: async () => { suspended = true; clearInterval(timer); await pending; }, perform: input => enqueue(async () => {
+  // releaseSystemProxy restores system proxies that still point here and pauses monitoring until restoreMonitor.
+  return { list, monitorStatus, restoreMonitor, prepareQuit, releaseSystemProxy: prepareQuit, reconcileMonitor: () => enqueue(() => reconcileMonitor()), dispose: async () => { suspended = true; clearInterval(timer); await pending; }, perform: input => enqueue(async () => {
     try { return await performAction(input); } catch (error) { monitorError = error.message; throw error; }
   }) };
 }

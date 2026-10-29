@@ -26,6 +26,11 @@ from .large_body import before_responseheaders, observe_responsechunk, complete_
 MAX_BODY = 8 * 1024 * 1024
 MAX_CAPTURE = 32 * 1024 * 1024
 MAX_RECORDS = 1000
+# Captures of TLS-allowlisted (inspected) domains have their own, larger budget instead of none. Its size is the
+# inspectedStorageMiB setting; retained captures are held in memory, so the range is bounded.
+MAX_INSPECTED_RECORDS = 5000
+DEFAULT_INSPECTED_MIB = 1024
+INSPECTED_MIB_RANGE = (256, 4096)
 SSL_INTERRUPTION_REASON = "Encrypted tunnel interrupted to enable SSL inspection; reconnecting requests will be inspected."
 
 
@@ -172,8 +177,12 @@ class Service:
         # SSE events are appended one row each, so a growing stream never rewrites its earlier events.
         self.db.execute("CREATE TABLE IF NOT EXISTS events (record TEXT NOT NULL, seq INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(record, seq))")
         config = dict(self.db.execute("SELECT key,value FROM config"))
-        self.settings = {"capturePaused": False, "proxyEnabled": True, "proxyPort": default_proxy_port, "listenHost": "0.0.0.0", "tlsDomains": []}
+        # LAN access is off until the user enables it; approved devices and destinations apply only while it is on.
+        self.settings = {"capturePaused": False, "proxyEnabled": True, "proxyPort": default_proxy_port, "listenHost": "127.0.0.1", "tlsDomains": [],
+                         "lanDevices": [], "lanAllowedDestinations": [], "inspectedStorageMiB": DEFAULT_INSPECTED_MIB}
         self.settings.update(json.loads(config.get("settings", "{}")))
+        from .lan_guard import LanGuard
+        self.lan_guard = LanGuard(self)
         self.rules = json.loads(config.get("rules", "[]"))
         self.rules_revision = int(config.get("rulesRevision", "0"))
         self.scenarios = json.loads(config.get("scenarios", "[]"))
@@ -286,24 +295,18 @@ class Service:
             self.db.executemany("INSERT OR REPLACE INTO events VALUES (?,?,?)", ((record_id, persisted + index, item) for index, item in enumerate(new_events)))
         self.event_rows[record_id] = (len(events), event_bytes)
         self.records[record_id] = record
-        if record_id in retention["limited"]:
-            retention["size"] -= self.record_sizes.get(record_id, 0)
+        for group in retention["groups"].values():
+            if record_id in group["ids"]:
+                group["ids"].discard(record_id)
+                group["size"] -= self.record_sizes.get(record_id, 0)
         self.record_sizes[record_id] = payload_size
-        # Captures for TLS-allowlisted domains are never evicted and do not count toward the limits. Pinned captures
-        # are never evicted but still count, as before.
-        if self.tls_allowlisted(record, retention["patterns"]):
-            retention["limited"].discard(record_id)
-        else:
-            retention["limited"].add(record_id)
-            retention["size"] += payload_size
-        if len(retention["limited"]) > MAX_RECORDS or retention["size"] > 256 * 1024 * 1024:
-            evictable = sorted((self.records[key] for key in retention["limited"] if not self.records[key].get("pinned")), key=lambda r: r["startedAt"])
-            for oldest in evictable:
-                if len(retention["limited"]) <= MAX_RECORDS and retention["size"] <= 256 * 1024 * 1024:
-                    break
-                retention["size"] -= self.record_sizes.get(oldest["id"], 0)
-                retention["limited"].discard(oldest["id"])
-                self.forget_record(oldest["id"])
+        # Captures for TLS-allowlisted domains have their own larger budget, so ordinary traffic never evicts them.
+        # Pinned captures are never evicted but still count.
+        name = "inspected" if self.tls_allowlisted(record, retention["patterns"]) else "limited"
+        group = retention["groups"][name]
+        group["ids"].add(record_id)
+        group["size"] += payload_size
+        self.evict(name)
         self.db.commit()
         self.changed()
         self.record_revs[record_id] = self.revision
@@ -324,12 +327,34 @@ class Service:
         self.field_dirty.clear()
         self.mark_fields()
 
+    def retention_limits(self):
+        return {"limited": (MAX_RECORDS, 256 * 1024 * 1024), "inspected": (MAX_INSPECTED_RECORDS, self.settings["inspectedStorageMiB"] * 1024 * 1024)}
+
+    def evict(self, name):
+        """Forget the oldest unpinned captures of one retention group until it fits; the caller commits."""
+        group = self.retention_index()["groups"][name]
+        max_records, max_bytes = self.retention_limits()[name]
+        if len(group["ids"]) <= max_records and group["size"] <= max_bytes:
+            return False
+        evictable = sorted((self.records[key] for key in group["ids"] if not self.records[key].get("pinned")), key=lambda r: r["startedAt"])
+        for oldest in evictable:
+            if len(group["ids"]) <= max_records and group["size"] <= max_bytes:
+                break
+            group["size"] -= self.record_sizes.get(oldest["id"], 0)
+            group["ids"].discard(oldest["id"])
+            self.forget_record(oldest["id"])
+        return True
+
     def retention_index(self):
         key = tuple(self.settings["tlsDomains"])
         if self.retention is None or self.retention["key"] != key:
             patterns = [re.compile(pattern, re.IGNORECASE) for pattern in self.tls_patterns()]
-            limited = {record_id for record_id, record in self.records.items() if not self.tls_allowlisted(record, patterns)}
-            self.retention = {"key": key, "patterns": patterns, "limited": limited, "size": sum(self.record_sizes.get(record_id, 0) for record_id in limited)}
+            groups = {"limited": {"ids": set(), "size": 0}, "inspected": {"ids": set(), "size": 0}}
+            for record_id, record in self.records.items():
+                group = groups["inspected" if self.tls_allowlisted(record, patterns) else "limited"]
+                group["ids"].add(record_id)
+                group["size"] += self.record_sizes.get(record_id, 0)
+            self.retention = {"key": key, "patterns": patterns, "groups": groups}
         return self.retention
 
     def forget_record(self, record_id):
@@ -342,7 +367,7 @@ class Service:
         self.field_full_cache.pop(record_id, None)
         self.field_dirty.pop(record_id, None)
         self.record_revs.pop(record_id, None)
-        if self.retention is not None and record_id in self.retention["limited"]:
+        if self.retention is not None and any(record_id in group["ids"] for group in self.retention["groups"].values()):
             self.retention = None
         self.db.execute("DELETE FROM records WHERE id=?", (record_id,))
         self.db.execute("DELETE FROM events WHERE record=?", (record_id,))
@@ -392,7 +417,7 @@ class Service:
 
     def state_summary(self):
         """Everything in the state snapshot except the rows: small enough to rebuild on every poll."""
-        return {"settings": {**self.settings, "proxyRunning": bool(self.master), "proxyError": self.proxy_error}, "rules": self.rules, "rulesRevision": self.rules_revision, "folders": self.folders, "trafficTools": traffic_summary(self.traffic_tools), "trafficToolsRevision": self.traffic_tools_revision, "pending": self.pending_summary(),
+        return {"settings": {**self.settings, "proxyRunning": bool(self.master), "proxyError": self.proxy_error}, "lanRequests": self.lan_guard.summary(), "rules": self.rules, "rulesRevision": self.rules_revision, "folders": self.folders, "trafficTools": traffic_summary(self.traffic_tools), "trafficToolsRevision": self.traffic_tools_revision, "pending": self.pending_summary(),
                 "productivity": {"revision": self.productivity_revision, "fields": len(self.productivity["fields"]), "assertions": sum(r["enabled"] for r in self.productivity["assertions"]),
                                  "replayRunning": any(job["state"] == "running" for job in getattr(self, "replay_jobs", {}).values())}}
 
@@ -557,6 +582,8 @@ class Service:
         return value
 
     def client_connected(self, client):
+        if not self.lan_guard.client_connected(client):
+            return
         url = os.environ.get("STREAMGLASS_SCRIPT_URL")
         if (self.settings["capturePaused"] or not url or client.id in self.applications
                 or sum(entry["task"] is not None for entry in self.applications.values()) >= 16):
@@ -714,6 +741,12 @@ class Service:
                     record["tlsFailure"] = {"side": "client", "reason": "Client closed the connection after the TLS handshake without sending a request",
                                             "at": time.time(), "likelyCause": "closed-after-handshake"}
                 self.save(record)
+
+    async def server_connect(self, data):
+        await self.lan_guard.server_connect(data)
+
+    def server_connected(self, data):
+        self.lan_guard.server_connected(data)
 
     def server_connect_error(self, data):
         if record_id := self.tunnels.get(data.client.id):
@@ -965,9 +998,14 @@ class Service:
                 if decoder is None:
                     yield data
                 elif hasattr(decoder, "process"):
-                    # Bound Brotli output allocations by feeding small wire fragments.
+                    # Bound Brotli output allocations: small wire fragments, and at most 64 KiB of output per call.
                     for offset in range(0, len(data), 1024):
-                        yield decoder.process(data[offset:offset + 1024])
+                        pending = data[offset:offset + 1024]
+                        while True:
+                            yield decoder.process(pending, output_buffer_limit=64 * 1024)
+                            pending = b""
+                            if decoder.is_finished() or decoder.can_accept_more_data():
+                                break
                     if end and not decoder.is_finished():
                         raise ValueError("Truncated compressed SSE stream")
                 else:

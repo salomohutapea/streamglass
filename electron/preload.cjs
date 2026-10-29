@@ -11,6 +11,14 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   readClipboardText: () => ipcRenderer.invoke('read-clipboard-text'),
   getMcpConnection: () => ipcRenderer.invoke('mcp-connection'),
   setMcpEnabled: (enabled) => ipcRenderer.invoke('mcp-enabled', enabled),
+  forgetMcpRedirect: (target) => ipcRenderer.invoke('mcp-forget-redirect', target),
+  getApprovals: () => ipcRenderer.invoke('approvals'),
+  resolveApproval: (input) => ipcRenderer.invoke('resolve-approval', input),
+  onApprovals: (callback) => {
+    const listener = (_event, list) => callback(list);
+    ipcRenderer.on('approvals-changed', listener);
+    return () => ipcRenderer.removeListener('approvals-changed', listener);
+  },
   detachInspector: (recordId) => ipcRenderer.invoke('detach-inspector', recordId),
   openEditor: (input) => ipcRenderer.invoke('open-editor', input),
   openTools: (input) => ipcRenderer.invoke('open-tools', input),

@@ -254,10 +254,19 @@ def rewrite_response_body(service, flow):
         elif len(response.raw_content) > MAX_REWRITE_BODY:
             skipped = 'body over 8 MiB not rewritten'
         else:
+            from .body_preview import decode_preview
             try:
-                text = response.content.decode('utf-8')
-            except (ValueError, UnicodeDecodeError):
-                skipped = 'non-UTF-8 body not rewritten'
+                # A small compressed body can expand far beyond the bound; never decode more than it.
+                decoded = decode_preview(response.raw_content, response.headers.get('content-encoding', ''), MAX_REWRITE_BODY)
+            except Exception:  # malformed or unsupported content encodings stay untouched
+                decoded, skipped = b'', 'undecodable body not rewritten'
+            if skipped is None and len(decoded) > MAX_REWRITE_BODY:
+                skipped = 'decoded body over 8 MiB not rewritten'
+            elif skipped is None:
+                try:
+                    text = decoded.decode('utf-8')
+                except UnicodeDecodeError:
+                    skipped = 'non-UTF-8 body not rewritten'
         if skipped is None:
             count = text.count(find)
             if count:

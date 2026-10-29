@@ -32,6 +32,11 @@ export function parsePublicCertificate(pem) {
   return { der, pem: `-----BEGIN CERTIFICATE-----\n${lines}\n-----END CERTIFICATE-----\n` };
 }
 
+// SHA-256 of the certificate DER, as colon-separated hex; the app and the setup page both show it for comparison.
+export function certificateFingerprint(certificate) {
+  return createHash('sha256').update(certificate.der).digest('hex').toUpperCase().match(/../g).join(':');
+}
+
 export function buildPac(host, port) {
   if (!validHost(host) || !validPort(port)) throw new Error('Invalid proxy address');
   return `function FindProxyForURL(url, host) {\n  return "PROXY ${host}:${port}; DIRECT";\n}\n`;
@@ -87,7 +92,7 @@ export function buildMobileConfig(certificate) {
 `;
 }
 
-export function buildSetupPage(host, port, setupPort, platform = 'ios') {
+export function buildSetupPage(host, port, setupPort, platform = 'ios', fingerprint = '') {
   const h = escapeXml(host), p = Number(port), pac = `http://${h}:${Number(setupPort)}/proxy.pac`;
   const android = platform === 'android';
   const step = (n, body, extra = '') => `<li class="step${extra}"><span class="n">${n}</span><div>${body}</div></li>`;
@@ -112,6 +117,7 @@ input[name=os]{position:absolute;opacity:0;pointer-events:none}
 ol{list-style:none;margin:0;padding:0}
 .step{display:flex;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}.step:last-child{border-bottom:0}
 .n{flex:none;width:24px;height:24px;border-radius:50%;background:var(--raised);border:1px solid var(--line);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--muted)}
+.kv code.fp{white-space:normal;word-break:break-all;font-size:11px}
 .step>div{flex:1;min-width:0}.step p{margin:0}.step code{white-space:nowrap;word-break:normal}.step small{display:block;color:var(--muted);font-size:13px;margin-top:4px}
 .btn{display:block;margin-top:10px;padding:12px 14px;background:var(--accent);color:var(--on-accent);text-decoration:none;border-radius:10px;text-align:center;font-weight:600}
 .must{margin:4px -10px;padding:12px 10px;border:1px solid color-mix(in srgb,var(--warn) 55%,transparent);background:color-mix(in srgb,var(--warn) 12%,transparent);border-radius:10px}
@@ -120,7 +126,7 @@ ol{list-style:none;margin:0;padding:0}
 .note{color:var(--muted);font-size:12px;margin-top:18px}
 </style></head><body><main>
 <header><div class="mark">S</div><div><h1>Streamglass setup</h1><p>Route this device through your Mac and trust its certificate.</p></div></header>
-<section class="card"><dl class="kv"><dt>Proxy server</dt><dd><code>${h}</code></dd><dt>Port</dt><dd><code>${p}</code></dd><dt>Auto proxy (PAC)</dt><dd><code>${pac}</code></dd></dl></section>
+<section class="card"><dl class="kv"><dt>Proxy server</dt><dd><code>${h}</code></dd><dt>Port</dt><dd><code>${p}</code></dd><dt>Auto proxy (PAC)</dt><dd><code>${pac}</code></dd>${fingerprint ? `<dt>Certificate SHA-256</dt><dd><code class="fp">${escapeXml(fingerprint)}</code></dd>` : ''}</dl></section>
 <input type="radio" name="os" id="os-ios"${android ? '' : ' checked'}><input type="radio" name="os" id="os-android"${android ? ' checked' : ''}>
 <div class="tabs" role="tablist"><label for="os-ios">iPhone / iPad</label><label for="os-android">Android</label></div>
 <section class="panel p-ios card"><ol>
@@ -136,7 +142,7 @@ ${step(3, `<p>Install it as a CA certificate</p><small>Settings → Security →
 ${step(4, `<span class="tag">Required for apps</span><p>Let your app trust user certificates</p><small>Android 7+ apps ignore user CAs unless a debug build adds a Network Security Configuration with <code>&lt;certificates src="user"/&gt;</code>. Pinned apps cannot be inspected.</small>`, ' must')}
 </ol></section>
 <div class="files"><a href="/cert.pem">cert.pem</a><a href="/cert.crt">cert.crt</a><a href="/proxy.pac">proxy.pac</a></div>
-<p class="note">This page only serves the public Streamglass certificate. Remove the proxy setting and the certificate when you finish.</p>
+<p class="note">This page only serves the public Streamglass certificate. Before trusting it, check that the SHA-256 fingerprint above matches the one shown in Streamglass on your Mac. Remove the proxy setting and the certificate when you finish.</p>
 </main></body></html>
 `;
 }
@@ -157,16 +163,18 @@ export function createSetupHandler({ readCertificate, getAddresses, getProxyPort
     let pathname;
     try { pathname = new URL(url, 'http://setup.invalid').pathname; } catch { return respond(404, 'text/plain; charset=utf-8', 'Not found\n'); }
     const addresses = (getAddresses() ?? []).filter(validHost);
-    const requested = typeof hostHeader === 'string' ? hostHeader.replace(/:\d+$/, '') : '';
-    const host = addresses.includes(requested) ? requested : addresses[0];
+    // Answer only requests addressed to this Mac's own LAN address, so another name (DNS rebinding) cannot reach it.
+    const match = typeof hostHeader === 'string' ? /^([\d.]+)(?::(\d{1,5}))?$/.exec(hostHeader) : null;
+    if (!match || !addresses.includes(match[1]) || (match[2] !== undefined && Number(match[2]) !== getSetupPort())) return respond(421, 'text/plain; charset=utf-8', 'Open this page using the Mac address shown in Streamglass\n');
+    const host = match[1];
     const proxyPort = getProxyPort();
     let result;
     try {
       if (pathname === '/') {
-        if (!host) return respond(503, 'text/plain; charset=utf-8', 'No LAN address available\n');
-        result = respond(200, 'text/html; charset=utf-8', buildSetupPage(host, proxyPort, getSetupPort(), /android/i.test(String(userAgent ?? '')) ? 'android' : 'ios'));
+        let fingerprint = '';
+        try { fingerprint = certificateFingerprint(parsePublicCertificate(await readCertificate())); } catch { /* The page still explains setup before the CA exists. */ }
+        result = respond(200, 'text/html; charset=utf-8', buildSetupPage(host, proxyPort, getSetupPort(), /android/i.test(String(userAgent ?? '')) ? 'android' : 'ios', fingerprint));
       } else if (pathname === '/proxy.pac') {
-        if (!host) return respond(503, 'text/plain; charset=utf-8', 'No LAN address available\n');
         result = respond(200, 'application/x-ns-proxy-autoconfig', buildPac(host, proxyPort));
       } else if (pathname === '/cert.pem' || pathname === '/cert.crt' || pathname === '/streamglass.mobileconfig') {
         const certificate = parsePublicCertificate(await readCertificate());

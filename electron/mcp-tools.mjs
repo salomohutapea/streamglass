@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { setTimeout as delay } from 'node:timers/promises';
-import { registerTrafficRuleTools } from './mcp-traffic-rules.mjs';
+import { APPROVAL, registerTrafficRuleTools } from './mcp-traffic-rules.mjs';
 
 // All MCP sessions share this queue because the HTTP rule API replaces the list.
 const mutations = new Map();
@@ -35,7 +35,25 @@ const ruleSchema = z.object({ id, name: z.string().max(256).optional(), pattern:
 
 // Mirrors backend/sse_status.py; the engine adds sseStatus to SSE capture rows and records.
 const SSE_STATUSES = ['connecting', 'open', 'streaming', 'server-closed', 'client-closed', 'server-dropped', 'stream-reset', 'proxy-closed', 'error'];
-export function registerTools(server, { baseUrl, token, workspaces }) {
+
+// An AI client may unlock (TLS-inspect) named sites only: the last two labels of the host must be literal, so "*",
+// "*.com" and "*.*" are refused. The desktop settings still accept any pattern the user types.
+export function broadTlsPattern(pattern) {
+  const labels = pattern.replace(/:[^.]*$/, '').split('.');
+  return labels.length < 2 || labels.slice(-2).some(label => !label || label.includes('*'));
+}
+// Where a Map Remote rule or edited request sends traffic, as scheme://host:port.
+export function redirectTarget({ scheme, host, port }) {
+  const name = String(host).replace(/^\[|\]$/g, '').toLowerCase();
+  return `${scheme}://${name.includes(':') ? `[${name}]` : name}:${port || (scheme === 'https' ? 443 : 80)}`;
+}
+const urlTarget = value => { const url = new URL(value); return redirectTarget({ scheme: url.protocol.slice(0, -1), host: url.hostname, port: Number(url.port) }); };
+const enabledRedirects = config => new Set((config.mapRemoteRules ?? []).filter(rule => rule.enabled).map(redirectTarget));
+const denied = () => new Error('Declined in Streamglass. The user did not approve this action; do not retry it without asking them.');
+
+/** confirm({kind, title, detail, targets?}) asks the user in the app and resolves true only when they approve.
+ * isApproved(target) reports redirect servers the user approved earlier. Without confirm, gated actions are refused. */
+export function registerTools(server, { baseUrl, token, workspaces, confirm = async () => false, isApproved = () => false }) {
   const base = new URL(baseUrl);
   if (base.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(base.hostname) || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !token) {
     throw new Error('MCP requires an authenticated loopback management endpoint');
@@ -64,10 +82,21 @@ export function registerTools(server, { baseUrl, token, workspaces }) {
   }
   const state = () => api('/api/state');
   const record = recordId => api(`/api/records/${encodeURIComponent(recordId)}`);
+  async function approve(request) {
+    if (!await confirm(request)) throw denied();
+  }
+  async function approveRedirects(targets, detail) {
+    const pending = [...new Set(targets)].filter(target => !isApproved(target));
+    if (pending.length) await approve({ kind: 'redirect', title: 'Redirect traffic to another server', detail: [...detail, ...pending.map(target => `Server: ${target}`)], targets: pending });
+  }
   async function updateTrafficTools(edit) {
     const { config, revision } = await api('/api/traffic-tools');
-    const updated = await edit(config);
-    const result = await api('/api/traffic-tools', 'PUT', { revision, config: updated ?? config });
+    const before = enabledRedirects(config);
+    const updated = (await edit(structuredClone(config))) ?? config;
+    // Matching requests, with their cookies and authorization headers, would go to these servers.
+    const added = [...enabledRedirects(updated)].filter(target => !before.has(target));
+    if (added.length) await approveRedirects(added, ['Matching requests, including their cookies and authorization headers, will be sent to:']);
+    const result = await api('/api/traffic-tools', 'PUT', { revision, config: updated });
     return result.revision;
   }
   function tool(name, description, shape, readOnly, handler, destructive = false, openWorld = false) {
@@ -86,7 +115,12 @@ export function registerTools(server, { baseUrl, token, workspaces }) {
   if (workspaces) {
     tool('list_workspaces', 'List saved configuration workspaces. Captures remain in the current session.', {}, true, () => workspaces.list());
     tool('save_workspace', 'Save current domains, rules, scripts, mocks and network configuration as a named workspace.', { id: id.optional(), name: z.string().trim().min(1).max(100) }, false, value => workspaces.save(value));
-    tool('load_workspace', 'Switch configuration workspace. Current configuration is saved automatically; captures remain in the current session.', { id }, false, value => workspaces.load(value), true);
+    tool('load_workspace', `Switch configuration workspace. Current configuration is saved automatically; captures remain in the current session. ${APPROVAL}`, { id }, false, async value => {
+      const workspace = (await workspaces.list()).workspaces?.find(item => item.id === value.id);
+      if (!workspace) throw new Error('Workspace not found');
+      await approve({ kind: 'workspace', title: 'Load a configuration workspace', detail: [`Workspace: ${workspace.name}`, 'Replaces the current TLS domains, rules, scripts, Map Local, Map Remote, Rewrite, Block and network settings.'] });
+      return workspaces.load(value);
+    }, true);
   }
   tool('list_capture_sessions', 'List immutable saved capture archives. These are separate from configuration workspaces.', {offset,limit}, true,
     async a => page((await api('/api/sessions')).sessions,a.offset,a.limit));
@@ -148,10 +182,13 @@ export function registerTools(server, { baseUrl, token, workspaces }) {
     const result = page(jobs, a.offset, a.limit);
     return { jobs: result.items, offset: result.offset, total: result.total, nextOffset: result.nextOffset };
   });
-  tool('start_replay_job', 'Explicitly send an HTTP request sequentially up to 100 times. Contacts the server and can change data. Cancel stops the owned current connection and future iterations; it cannot undo requests already sent.', {
+  tool('start_replay_job', `Explicitly send an HTTP request sequentially up to 100 times. Contacts the server and can change data. Cancel stops the owned current connection and future iterations; it cannot undo requests already sent. ${APPROVAL}`, {
     request:z.object({url:z.string().url().max(16384),method:z.string().min(1).max(64),headers:z.array(z.tuple([z.string().max(256),z.string().max(16384)])).max(200),bodyBase64:z.string().max(131072)}).strict(),
     count:z.number().int().min(1).max(100),intervalMs:z.number().int().min(0).max(60000),timeoutMs:z.number().int().min(1000).max(60000),stopOnError:z.boolean(),confirmSend:z.literal(true),
-  },false,a=>serializeMutation(()=>api('/api/replay-jobs','POST',a)),true,true);
+  },false,a=>serializeMutation(async()=>{
+    await approve({kind:'send',title:'Send requests',detail:[`${a.request.method} ${a.request.url}`,`Repeat ${a.count} time${a.count===1?'':'s'}, ${a.intervalMs} ms apart`,`${a.request.headers.length} header${a.request.headers.length===1?'':'s'}, ${Math.floor(a.request.bodyBase64.length*3/4)} body bytes`]});
+    return api('/api/replay-jobs','POST',a);
+  }),true,true);
   tool('cancel_replay_job', 'Cancel one repeated-replay job and its owned connection. Other traffic is untouched. Already-sent server operations cannot be undone.', {jobId:id},false,
     a=>serializeMutation(()=>api(`/api/replay-jobs/${encodeURIComponent(a.jobId)}/cancel`,'POST',{})),true);
   const scenarioRule = z.object({ id: z.string().min(1).max(4096), name: z.string().min(1).max(4096),
@@ -170,12 +207,16 @@ export function registerTools(server, { baseUrl, token, workspaces }) {
     const fixture = await api(`/api/records/${encodeURIComponent(a.recordId)}/fixture`, 'POST', { name: a.name, timedSse: a.timedSse });
     return { id: fixture.id, name: fixture.name, enabled: fixture.enabled, statusCode: fixture.statusCode };
   }));
-  tool('replay_request', 'Send one explicitly confirmed HTTP request through the proxy. This contacts the destination and may change remote data; request headers and body are sent as supplied.', {
+  tool('replay_request', `Send one explicitly confirmed HTTP request through the proxy. This contacts the destination and may change remote data; request headers and body are sent as supplied. ${APPROVAL}`, {
     url: z.string().max(8192).url().refine(value => { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password; }, 'Expected HTTP URL without userinfo'),
     method: z.string().min(1).max(64).regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/),
     headers: z.array(z.tuple([z.string().min(1).max(256).regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/), z.string().max(16384).refine(value => !/[\r\n\0]/.test(value), 'Invalid header value')])).max(200),
     bodyBase64: z.string().max(131072).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/), confirmSend: z.literal(true),
-  }, false, a => serializeMutation(() => { const { confirmSend, ...request } = a; return api('/api/replay', 'POST', request); }), true, true);
+  }, false, a => serializeMutation(async () => {
+    const { confirmSend, ...request } = a;
+    await approve({ kind: 'send', title: 'Send a request', detail: [`${request.method} ${request.url}`, `${request.headers.length} header${request.headers.length === 1 ? '' : 's'}, ${Math.floor(request.bodyBase64.length * 3 / 4)} body bytes`] });
+    return api('/api/replay', 'POST', request);
+  }), true, true);
   tool('get_sse_diagnostics', 'Read retained SSE timing diagnostics and a bounded page of event timing metadata. No event bodies are included.', { recordId: id, offset, limit }, true, async a => {
     const value = await record(a.recordId); const retained = value.events || [];
     return { recordId: a.recordId, state: value.state, status: value.sseStatus ?? null, diagnostics: value.sseDiagnostics || {}, captureWarning: value.captureWarning || '',
@@ -258,8 +299,11 @@ export function registerTools(server, { baseUrl, token, workspaces }) {
     if (!r) throw new Error('Rule not found');
     return textPage(JSON.stringify(r), a.offset, a.maxChars);
   });
-  tool('upsert_rule', 'Create or fully replace one rule. JavaScript runs in the existing script sandbox on matching traffic. breakpoint=false selects automatic scripts; true pauses traffic.', { rule: ruleSchema }, false,
-    a => serializeMutation(async () => { const current = await state(); const rules = current.rules; const index = rules.findIndex(r => r.id === a.rule.id); if (index < 0) rules.push(a.rule); else rules[index] = a.rule;
+  tool('upsert_rule', `Create or fully replace one rule. JavaScript runs in the existing script sandbox on matching traffic. breakpoint=false selects automatic scripts; true pauses traffic. New or changed JavaScript ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`, { rule: ruleSchema }, false,
+    a => serializeMutation(async () => { const current = await state(); const rules = current.rules; const index = rules.findIndex(r => r.id === a.rule.id);
+      // A script can rewrite a request's URL and headers, so new code runs only after the user approves it.
+      if (a.rule.script && a.rule.script !== rules[index]?.script) await approve({ kind: 'script', title: 'Run JavaScript on matching traffic', detail: [`Rule: ${a.rule.name || a.rule.id}`, `Matches: ${a.rule.method || '*'} ${a.rule.pattern}`, `Stages: ${a.rule.stages.join(', ')}`, `Script (${a.rule.script.length} characters):`, a.rule.script.slice(0, 1200)] });
+      if (index < 0) rules.push(a.rule); else rules[index] = a.rule;
       const result = await api('/api/rules', 'PUT', { revision: current.rulesRevision, rules }); return { id: a.rule.id, saved: true, revision: result.revision }; }), true);
   tool('delete_rule', 'Delete one rule by id.', { ruleId: id }, false, a => serializeMutation(async () => {
     const current = await state(); if (!current.rules.some(r => r.id === a.ruleId)) throw new Error('Rule not found');
@@ -275,14 +319,29 @@ export function registerTools(server, { baseUrl, token, workspaces }) {
     const gate = (await state()).pending.find(g => g.token === a.gateToken); if (!gate) throw new Error('Breakpoint is no longer pending');
     return textPage(JSON.stringify(gate), a.offset, a.maxChars);
   });
-  tool('resolve_pending', 'Continue a paused breakpoint with its existing value or an edited value, or drop the connection. Existing HTTP validators enforce message restrictions.', {
-    gateToken: id, action: z.enum(['continue', 'drop']), value: z.record(z.string(), z.unknown()).optional() }, false, a => {
+  tool('resolve_pending', `Continue a paused breakpoint with its existing value or an edited value, or drop the connection. Existing HTTP validators enforce message restrictions. An edited url that points to another scheme, host or port than the paused request, and to a server the user has not approved before, ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`, {
+    gateToken: id, action: z.enum(['continue', 'drop']), value: z.record(z.string(), z.unknown()).optional() }, false, async a => {
     if (a.value && Buffer.byteLength(JSON.stringify(a.value), 'utf8') > 192 * 1024) throw new Error('Edited value exceeds 192 KiB; use the local editor for larger edits');
     if (a.action === 'drop' && a.value) throw new Error('drop does not accept an edited value');
+    if (typeof a.value?.url === 'string') {
+      const gate = (await state()).pending.find(g => g.token === a.gateToken);
+      let target;
+      try { target = urlTarget(a.value.url); } catch { throw new Error('Edited url must be an absolute HTTP(S) URL'); }
+      if (gate && target !== urlTarget(gate.value?.url ?? gate.url)) await approveRedirects([target], [`Paused request: ${gate.method} ${gate.value?.url ?? gate.url}`, 'The edited request, including its cookies and authorization headers, will be sent to:']);
+    }
     return api(`/api/pending/${encodeURIComponent(a.gateToken)}`, 'POST', { action: a.action, ...(a.value === undefined ? {} : { value: a.value }) });
   }, true);
-  tool('update_settings', 'Pause capture and bypass breakpoints/scripts (release waiting messages unchanged), enable/disable the proxy listener, or change TLS inspection domain patterns. Disabling proxy interrupts active connections; changing TLS patterns can reconnect tunnels. Does not change OS proxy or install a CA.', {
-    capturePaused: z.boolean().optional(), proxyEnabled: z.boolean().optional(), tlsDomains: z.array(z.string().min(1).max(255).regex(/^[a-zA-Z0-9.*_:\-]+$/)).max(1000).optional() }, false, a => serializeMutation(() => api('/api/settings', 'PUT', a)), true);
+  tool('update_settings', `Pause capture and bypass breakpoints/scripts (release waiting messages unchanged), enable/disable the proxy listener, or change TLS inspection domain patterns. Disabling proxy interrupts active connections; changing TLS patterns can reconnect tunnels. Broad TLS patterns such as * or *.com are refused. Does not change OS proxy or install a CA. Adding TLS patterns ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`, {
+    capturePaused: z.boolean().optional(), proxyEnabled: z.boolean().optional(), tlsDomains: z.array(z.string().min(1).max(255).regex(/^[a-zA-Z0-9.*_:\-]+$/)).max(1000).optional() }, false, a => serializeMutation(async () => {
+    if (a.tlsDomains) {
+      const current = new Set((await state()).settings.tlsDomains ?? []);
+      const added = [...new Set(a.tlsDomains)].filter(domain => !current.has(domain));
+      const broad = added.filter(broadTlsPattern);
+      if (broad.length) throw new Error(`Refused broad TLS pattern ${broad.join(', ')}: AI clients may only unlock named sites such as api.example.com or *.example.com. The user can add other patterns in Settings.`);
+      if (added.length) await approve({ kind: 'unlock', title: 'Decrypt HTTPS traffic for more sites', detail: ['Requests, responses, cookies and tokens for these sites become readable to Streamglass and connected AI clients:', ...added] });
+    }
+    return api('/api/settings', 'PUT', a);
+  }), true);
 
   tool('get_traffic_tools', 'Read a bounded page of Map Local summary metadata (body and headers omitted) and the network profile. Use get_map_local_rule for complete headers.', { offset, limit }, true, async a => {
     const { config, revision } = await api('/api/traffic-tools');
