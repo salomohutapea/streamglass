@@ -4,31 +4,30 @@ import { AlertTriangle } from 'lucide-react';
 export type TlsFailure = {side: 'client' | 'server'; reason: string; at: number; likelyCause: 'untrusted-ca' | 'pinning' | 'protocol' | 'unknown' | 'closed-after-handshake'};
 
 const CAUSES: Record<TlsFailure['likelyCause'], string> = {
-  'untrusted-ca': 'The device most likely does not fully trust the Streamglass certificate yet. No inspected connection from this device has succeeded so far.',
-  pinning: 'Other inspected connections from this device succeed, so the certificate is trusted. This app or SDK most likely pins the server certificate or uses its own trust store.',
-  'closed-after-handshake': 'The client accepted the Streamglass certificate during the handshake, then closed the connection without sending a request. This usually means certificate pinning checked after the handshake (for example OkHttp CertificatePinner), or occasionally an unused pre-connection.',
-  protocol: 'The two sides could not agree on a TLS protocol version or cipher.',
-  unknown: 'The cause could not be determined from the handshake error.',
+  'untrusted-ca': 'Certificate not trusted yet.',
+  pinning: 'Likely certificate pinning.',
+  'closed-after-handshake': 'Closed after handshake. Likely pinning.',
+  protocol: 'No shared TLS version or cipher.',
+  unknown: 'Cause unknown.',
 };
 
 /** Explains a failed TLS handshake and offers to stop inspecting the host. Read-only apart from the allowlist action. */
 export function TlsFailureCallout({failure, host, busy, onRemove}: {failure: TlsFailure; host: string; busy?: boolean; onRemove: (host: string) => void}) {
   const server = failure.side === 'server';
   return <div className="tls-failure-callout" role="alert">
-    <h3><AlertTriangle size={16} /> TLS handshake failed ({server ? 'upstream server' : 'client'})</h3>
-    <p>{server ? 'Streamglass could not complete TLS with the origin server.' : CAUSES[failure.likelyCause]} <code>{failure.reason}</code></p>
+    <h3><AlertTriangle size={16} /> TLS failed ({server ? 'server' : 'client'})</h3>
+    <p>{server ? 'Origin TLS failed.' : CAUSES[failure.likelyCause]} <code>{failure.reason}</code></p>
     {!server && <ul>
       {(failure.likelyCause === 'untrusted-ca' || failure.likelyCause === 'unknown') && <>
-        <li><strong>iOS:</strong> installing the profile is not enough. Also turn on full trust in Settings → General → About → Certificate Trust Settings, then reopen the app.</li>
-        <li><strong>Android 7+:</strong> user CAs are ignored by apps unless debug builds add a network_security_config with <code>{'<certificates src="user"/>'}</code>.</li>
-        <li><strong>React Native:</strong> same as native. Disable OkHttp CertificatePinner, TrustKit or react-native-ssl-pinning in debug builds.</li>
+        <li><strong>iOS:</strong> enable full trust in Settings → General → About → Certificate Trust Settings.</li>
+        <li><strong>Android 7+:</strong> apps need <code>{'<certificates src="user"/>'}</code> in debug builds.</li>
       </>}
       {(failure.likelyCause === 'pinning' || failure.likelyCause === 'closed-after-handshake') && <>
-        <li>Disable certificate pinning in debug builds (OkHttp CertificatePinner, TrustKit, react-native-ssl-pinning, NSPinnedDomains).</li>
-        <li>Or remove this host from the TLS allowlist so its traffic passes through uncaptured.</li>
+        <li>Disable pinning in debug builds.</li>
+        <li>Or remove the host from the TLS allowlist.</li>
       </>}
-      {failure.likelyCause === 'protocol' && <li>Check that the client supports TLS 1.2 or newer and that the host really speaks TLS on this port.</li>}
+      {failure.likelyCause === 'protocol' && <li>Client needs TLS 1.2+.</li>}
     </ul>}
-    {host && <button disabled={busy} onClick={() => onRemove(host)}>Remove {host} from TLS allowlist</button>}
+    {host && <button disabled={busy} onClick={() => onRemove(host)}>Stop inspecting {host}</button>}
   </div>;
 }

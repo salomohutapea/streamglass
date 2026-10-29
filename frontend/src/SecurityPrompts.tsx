@@ -45,11 +45,11 @@ export function AiApprovalPrompt() {
   return <dialog ref={dialog} className="approval-dialog" aria-label="AI assistant request" onCancel={event => { event.preventDefault(); void decide(false); }}>
     <div className="approval-head"><Bot aria-hidden="true"/><div><span className="approval-kind">{kindLabels[current.kind] ?? 'Needs approval'}</span><h2>{current.title}</h2></div></div>
     <div className="approval-body">
-      <p>A connected AI assistant (MCP client) asked Streamglass to do this. Allow it only if you asked the assistant for it.</p>
+      <p className="approval-warn"><Bot size={12} aria-hidden="true"/>Your AI assistant (MCP client) asked for this. Allow only if you did.</p>
       <ul className="approval-detail">{current.detail.map((line, index) => <li key={index} className={line.includes('\n') ? 'code' : ''}>{line}</li>)}</ul>
-      {queue.length > 1 && <p className="muted">{queue.length - 1} more request{queue.length > 2 ? 's' : ''} waiting.</p>}
+      {queue.length > 1 && <p className="muted">+{queue.length - 1} waiting</p>}
     </div>
-    <div className="approval-foot"><span className="muted" role="timer">Refused automatically in {seconds}s</span><button ref={deny} disabled={busy} onClick={() => void decide(false)}>Deny</button><button className="primary" disabled={busy} onClick={() => void decide(true)}>Allow</button></div>
+    <div className="approval-foot"><span className="muted" role="timer">Auto-deny in {seconds}s</span><button ref={deny} disabled={busy} onClick={() => void decide(false)}>Deny</button><button className="primary" disabled={busy} onClick={() => void decide(true)}>Allow</button></div>
   </dialog>;
 }
 
@@ -58,7 +58,7 @@ export function LanDeviceRequests({ requests, busy, onDecide }: { requests: LanR
   const waiting = requests.filter(item => !item.denied);
   if (!waiting.length) return null;
   return <div className="lan-requests" role="region" aria-label="Device approval requests">{waiting.slice(-3).map(item => <div className="lan-request" key={item.address} role="alert">
-    <Smartphone size={14} aria-hidden="true"/><span>Device <strong className="mono">{item.address}</strong> on your network wants to use this proxy ({item.attempts} connection{item.attempts === 1 ? '' : 's'} refused). Allow it only if it is your test device.</span>
+    <Smartphone size={14} aria-hidden="true"/><span title={`${item.attempts} connection${item.attempts === 1 ? '' : 's'} refused. Allow only your own test device.`}><strong className="mono">{item.address}</strong> wants to use this proxy</span>
     <button disabled={busy} onClick={() => onDecide(item.address, false)}>Deny</button><button className="primary" disabled={busy} onClick={() => onDecide(item.address, true)}>Allow device</button>
   </div>)}</div>;
 }
@@ -70,11 +70,11 @@ export function LanAccessSettings({ devices, requests, destinations, busy, onDes
 }) {
   const refused = requests.filter(item => item.denied);
   return <div className="lan-access">
-    <div className="setting-summary"><ShieldAlert/><div><strong>Approved devices</strong><p>Only these devices can use the proxy over the local network. A new device is refused until you allow it in the banner that appears.</p></div></div>
-    {devices.length ? <ul className="lan-list">{devices.map(address => <li key={address}><span className="mono">{address}</span><button className="icon-button" aria-label={`Remove device ${address}`} title="Remove device" disabled={busy} onClick={() => onRemoveDevice(address)}><X size={13}/></button></li>)}</ul> : <p className="muted">No devices approved yet.</p>}
-    {!!refused.length && <><p className="muted">Refused since launch:</p><ul className="lan-list">{refused.map(item => <li key={item.address}><span className="mono">{item.address}</span><button disabled={busy} onClick={() => onDecide(item.address, true)}>Allow</button></li>)}</ul></>}
-    <label>LAN destinations<textarea className="mono" rows={3} value={destinations} placeholder={'staging.example.internal\n10.20.0.0/16'} onChange={event => onDestinations(event.target.value)}/>
-      <small>LAN devices cannot reach this Mac’s own services or private, link-local and VPN addresses. List host names, IP addresses or CIDR ranges they may reach anyway, one per line. Devices using this Mac’s loopback (simulators, adb reverse) are not restricted.</small></label>
+    <div className="setting-summary"><ShieldAlert/><div><strong title="Only these devices can use the proxy over the network. New ones are refused until you allow them.">Approved devices</strong></div></div>
+    {devices.length ? <ul className="lan-list">{devices.map(address => <li key={address}><span className="mono">{address}</span><button className="icon-button" aria-label={`Remove device ${address}`} title="Remove device" disabled={busy} onClick={() => onRemoveDevice(address)}><X size={13}/></button></li>)}</ul> : <p className="muted">None yet.</p>}
+    {!!refused.length && <><p className="muted">Refused</p><ul className="lan-list">{refused.map(item => <li key={item.address}><span className="mono">{item.address}</span><button disabled={busy} onClick={() => onDecide(item.address, true)}>Allow</button></li>)}</ul></>}
+    <label title="Hosts, IPs or CIDR ranges LAN devices may reach. Loopback devices (simulators, adb reverse) are not restricted.">LAN destinations<textarea className="mono" rows={3} value={destinations} placeholder={'staging.example.internal\n10.20.0.0/16'} onChange={event => onDestinations(event.target.value)}/>
+      <small>Blocked by default: this Mac, private and VPN ranges. One per line.</small></label>
   </div>;
 }
 
@@ -85,8 +85,8 @@ export function StorageSettings({ inspectedMiB, onInspectedMiB }: { inspectedMiB
   // A 5 MB uncompressed JSON response takes about 12.4 MiB once stored (decoded text plus the original bytes).
   const large = Math.floor(inspectedMiB / 12.4);
   return <div className="form"><h3>Storage</h3>
-    <div className="setting-summary"><HardDrive/><div><strong>Inspected HTTPS captures</strong><p>Captures of sites in the HTTPS allowlist keep up to this much data (and at most 5000 captures). When it is full, the oldest unpinned captures are removed from the list. Other traffic has its own 256 MiB budget, so it never pushes these out.</p></div></div>
+    <div className="setting-summary"><HardDrive/><div><strong>Inspected HTTPS captures</strong><p>Up to 5000 captures. Oldest unpinned are dropped when full.</p></div></div>
     <label>Keep up to<select value={inspectedMiB} onChange={event => onInspectedMiB(Number(event.target.value))}>{storageChoices.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-      <small>About {large} large (5 MB) responses, or many more small ones. Captures are kept in memory while Streamglass runs and contain secrets; a smaller limit uses less memory. Lowering it removes the oldest captures when you save.</small></label>
+      <small title="Captures live in memory and contain secrets. Lowering the limit drops the oldest on save. Other traffic has its own 256 MiB budget.">About {large} large (5 MB) responses</small></label>
   </div>;
 }

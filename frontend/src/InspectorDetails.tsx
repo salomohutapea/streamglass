@@ -29,7 +29,7 @@ export function RequestStructured({request, raw}: {request?:Message; raw:ReactNo
     {mode==='raw' ? raw : <>
       <PairTable title="Query" rows={pairRows(s.query)}/>
       <PairTable title="Form" rows={pairRows(s.form)}/>
-      {s.parts.length>0 && <section className="structured-section"><h3>Multipart parts ({s.parts.length})</h3><div className="structured-scroll"><table className="structured-table" aria-label="Multipart parts"><thead><tr><th>Name</th><th>Filename</th><th>Type</th><th>Size</th></tr></thead><tbody>{s.parts.map((p,i)=><tr key={i}><td><code>{p.name}</code></td><td><code>{p.filename||'—'}</code></td><td><code>{p.contentType||'—'}</code></td><td>{formatSize(p.size)}</td></tr>)}</tbody></table></div>{s.parts.map((p,i)=>p.text!==undefined&&p.text!==''&&<details key={i} className="part-preview"><summary>{p.name||`Part ${i+1}`} preview{p.truncated?' (truncated)':''}</summary><pre className="body-code">{p.text}</pre></details>)}</section>}
+      {s.parts.length>0 && <section className="structured-section"><h3>Multipart parts ({s.parts.length})</h3><div className="structured-scroll"><table className="structured-table" aria-label="Multipart parts"><thead><tr><th>Name</th><th>Filename</th><th>Type</th><th>Size</th></tr></thead><tbody>{s.parts.map((p,i)=><tr key={i}><td><code>{p.name}</code></td><td><code>{p.filename||'—'}</code></td><td><code>{p.contentType||'—'}</code></td><td>{formatSize(p.size)}</td></tr>)}</tbody></table></div>{s.parts.map((p,i)=>p.text!==undefined&&p.text!==''&&<details key={i} className="part-preview"><summary>{p.name||`Part ${i+1}`}{p.truncated?' (truncated)':''}</summary><pre className="body-code">{p.text}</pre></details>)}</section>}
       {!s.form.length && !s.parts.length && raw}
     </>}
     {cookies}
@@ -65,7 +65,7 @@ export function OverviewDetails({record}: {record:{request?:Message; response?:M
     {!!record.appliedRules?.length && <><h3>Applied rules</h3>
       <dl className="size-list" aria-label="Applied rules">{record.appliedRules.map((rule,i)=><Fragment key={i}><dt>{ruleLabel[rule.type]??rule.type}</dt><dd>{rule.name}{rule.detail?` — ${rule.detail}`:''}</dd></Fragment>)}</dl></>}
     <h3>Sizes</h3>
-    <dl className="size-list"><dt>Request body</dt><dd>{req?formatSize(sized(req)):'—'}</dd><dt>Response body</dt><dd>{res?formatSize(sized(res)):'—'}{encoding&&encoding!=='identity'?` (decoded, ${encoding})`:''}</dd>{res&&transfer!==undefined&&<><dt>Transfer</dt><dd>{formatSize(transfer)}</dd></>}</dl>
+    <dl className="size-list"><dt>Request body</dt><dd>{req?formatSize(sized(req)):'—'}</dd><dt>Response body</dt><dd>{res?formatSize(sized(res)):'—'}{encoding&&encoding!=='identity'?` (${encoding})`:''}</dd>{res&&transfer!==undefined&&<><dt>Transfer</dt><dd>{formatSize(transfer)}</dd></>}</dl>
     {!!req?.headers?.length && <details className="headers-disclosure"><summary>Request headers ({req.headers.length})</summary><div className="header-list">{req.headers.map(([k,v],i)=><div key={i}><span>{k}</span><code>{v}</code></div>)}</div></details>}
   </>;
 }

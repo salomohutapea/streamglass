@@ -13,21 +13,21 @@ export const shortcutGroups: { name: string; rows: ShortcutRow[] }[] = [
     { keys: `${mod} /`, label: 'Keyboard shortcuts' },
     { keys: `${mod} ,`, label: 'Settings' },
     { keys: `${mod} ${shift} D`, label: 'Connect device' },
-    { keys: `${mod} F`, label: 'Find in captured traffic' },
-    { keys: `${mod} ${shift} S`, label: 'Saved capture sessions' },
+    { keys: `${mod} F`, label: 'Find in traffic' },
+    { keys: `${mod} ${shift} S`, label: 'Sessions' },
   ] },
   { name: 'Capture', rows: [
-    { keys: `${mod} ${shift} P`, label: 'Pause or resume capture and rules' },
-    { keys: `${mod} ${shift} K`, label: 'Start or stop proxy' },
+    { keys: `${mod} ${shift} P`, label: 'Pause / resume capture' },
+    { keys: `${mod} ${shift} K`, label: 'Start / stop proxy' },
   ] },
   { name: 'Table', rows: [
     { keys: '↑ ↓', label: 'Move selection', planned: true },
     { keys: `${mod}-click / ${shift}-click`, label: 'Multi-select', planned: true },
     { keys: `${mod} A`, label: 'Select all', planned: true },
-    { keys: '⌫', label: 'Delete selected (undo available)', planned: true },
+    { keys: '⌫', label: 'Delete selected', planned: true },
     { keys: `${mod} C`, label: 'Copy as cURL', planned: true },
     { keys: 'Esc', label: 'Clear search', planned: true },
-    { keys: 'Enter / Space', label: 'Select the focused row' },
+    { keys: 'Enter / Space', label: 'Select row' },
     { keys: `${shift} F10`, label: 'Row context menu' },
   ] },
   { name: 'Inspector', rows: [
@@ -39,12 +39,12 @@ export const shortcutGroups: { name: string; rows: ShortcutRow[] }[] = [
     { keys: `${mod} ${shift} I`, label: 'Detach inspector' },
   ] },
   { name: 'Rules', rows: [
-    { keys: 'Palette: Breakpoint rules', label: 'Open breakpoint rules' },
-    { keys: 'Palette: JavaScript rules', label: 'Open JavaScript rules' },
+    { keys: `${mod} K`, label: 'Breakpoint rules' },
+    { keys: `${mod} K`, label: 'JavaScript rules' },
   ] },
   { name: 'Tools', rows: [
-    { keys: 'Palette: Open a Tools tab', label: 'Map Local, Network Conditioner, Sessions, Compare, Replay and more' },
-    { keys: '← →', label: 'Resize a focused splitter' },
+    { keys: `${mod} K`, label: 'Tools tabs' },
+    { keys: '← →', label: 'Resize splitter' },
   ] },
 ];
 

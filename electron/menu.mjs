@@ -10,7 +10,7 @@ export function validateMenuState(input) {
   return Object.fromEntries([...flags, ...Object.keys(enums)].map(key => [key, input[key]]));
 }
 
-export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getToolsOwner, openAbout }) {
+export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getToolsOwner, openAbout, zoom }) {
   const states = new WeakMap(), detachedWindows = new WeakSet(), editorWindows = new WeakSet(), toolsWindows = new WeakSet();
   const isToolCommand = id => id === 'map-local' || id === 'map-remote' || id === 'rewrite-rules' || id === 'block-rules' || id === 'network-profile' || id.startsWith('lab-') || id.startsWith('daily-');
   const focused = () => {
@@ -94,6 +94,11 @@ export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getTo
       command('focus-search', 'Find in Captured Traffic…', 'CmdOrCtrl+F'),
       command('command-palette', 'Command Palette…', 'CmdOrCtrl+K'), separator,
       command('theme-light', 'Light Appearance', undefined, 'checkbox'), command('theme-dark', 'Dark Appearance', undefined, 'checkbox'), separator,
+      // ⌘= is the unshifted key for ⌘+ on most layouts, so both accelerators zoom in; the second item stays hidden.
+      { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: () => zoom?.('in') },
+      { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', visible: false, acceleratorWorksWhenHidden: true, click: () => zoom?.('in') },
+      { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => zoom?.('out') },
+      { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => zoom?.('reset') }, separator,
       { role: 'togglefullscreen' },
     ] },
     { role: 'help', submenu: [command('shortcut-sheet', 'Keyboard Shortcuts', 'CmdOrCtrl+/')] },

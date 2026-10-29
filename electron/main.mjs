@@ -2,8 +2,9 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, protocol, se
 import { spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
-import { networkInterfaces } from 'node:os';
+import { createServer, isIP } from 'node:net';
+import { hostname, networkInterfaces } from 'node:os';
+import { lookupService } from 'node:dns/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startScriptService } from './script-service.mjs';
@@ -25,7 +26,23 @@ if (process.env.STREAMGLASS_DATA_DIR) app.setPath('userData', path.resolve(proce
 const token = randomBytes(32).toString('hex');
 const windows = new Set();
 const editorWindows = new Map();
-const openedGates = new Set();
+const inspectorWindows = new Map();
+// Interface zoom (⌘+ / ⌘- / ⌘0), shared by every window and kept across launches.
+// Chromium levels: each 0.5 step is about 10%; the range keeps the main window at least ~620 CSS px wide.
+const ZOOM_LEVELS = { min: -2, max: 2, step: 0.5 };
+let uiZoom = 0;
+const zoomFile = () => path.join(app.getPath('userData'), 'ui-zoom.json');
+async function loadZoom() {
+  try { const value = JSON.parse(await readFile(zoomFile(), 'utf8')).level; if (Number.isFinite(value)) uiZoom = Math.max(ZOOM_LEVELS.min, Math.min(ZOOM_LEVELS.max, value)); } catch { /* Default size. */ }
+}
+function setZoom(change) {
+  const next = change === 'reset' ? 0 : Math.max(ZOOM_LEVELS.min, Math.min(ZOOM_LEVELS.max, uiZoom + (change === 'in' ? 1 : -1) * ZOOM_LEVELS.step));
+  uiZoom = next;
+  for (const win of [...windows, aboutWindow]) if (win && !win.isDestroyed()) win.webContents.setZoomLevel(next);
+  void writeFile(zoomFile(), JSON.stringify({ level: next }), { mode: 0o600 }).catch(() => {});
+}
+// Gates already shown, with when they were handed to the window; a gate stays dismissed after the user closes it.
+const openedGates = new Map();
 const dev = !app.isPackaged && process.env.STREAMGLASS_BUILT_UI !== '1';
 // Benchmarks and tests: windows render unthrottled but invisible, never take focus and show no Dock icon.
 const background = !app.isPackaged && process.env.STREAMGLASS_BACKGROUND === '1';
@@ -74,14 +91,14 @@ function windowURL(recordId, editor) {
 function createWindow(recordId, editor) {
   const auxiliary = Boolean(editor || recordId);
   const win = new BrowserWindow({
-    width: editor ? editor.type === 'breakpoints' ? 760 : editor.type === 'paused' ? 1180 : 980 : recordId ? 1100 : 1480,
-    height: editor ? editor.type === 'breakpoints' ? 560 : 820 : 940,
+    width: editor ? editor.type === 'paused' ? 1180 : 1040 : recordId ? 1100 : 1480,
+    height: editor ? editor.type === 'breakpoints' ? 760 : 820 : 940,
     minWidth: editor ? 600 : 900, minHeight: editor ? 400 : 600,
     title: 'Streamglass', backgroundColor: '#17191e',
     fullscreenable: !auxiliary,
     icon: path.join(root, 'electron/assets/streamglass.png'),
-    // Traffic lights centre in the 52px main toolbar and in the 46px header of editor windows.
-    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: editor ? 16 : 20 } } : {}),
+    // Traffic lights centre in the 52px main toolbar and in the 46px header of editor and inspector windows.
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: auxiliary ? 16 : 20 } } : {}),
     ...(background ? { show: false } : {}),
     webPreferences: { preload: path.join(root, 'electron/preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, ...(background ? { backgroundThrottling: false } : {}) },
   });
@@ -100,6 +117,8 @@ function createWindow(recordId, editor) {
   applicationMenu?.register(win, !!recordId, !!editor && editor.type !== 'tools', editor?.type === 'tools');
   if (!recordId && !editor) mainWindow = win;
   win.on('closed', () => { windows.delete(win); applicationMenu?.forget(win); });
+  // Zoom is per origin, so one level applies to every window; reapplying after load covers windows opened later.
+  win.webContents.on('did-finish-load', () => { if (!win.isDestroyed()) win.webContents.setZoomLevel(uiZoom); });
   win.webContents.on('did-start-loading', () => applicationMenu?.forget(win));
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
@@ -186,11 +205,32 @@ function openEditor(input, automatic = false) {
     // Forget the window as soon as it starts closing: a gate that arrives while it closes (the Breakpoints
     // window closes itself once its list empties) must open a new window rather than land in the closing one.
     const forget = () => { if (editorWindows.get(key) === win) editorWindows.delete(key); };
+    // The Breakpoints window closes itself once its list empties. A gate handed to it just before that never reached
+    // the list, so it must not count as dismissed: the next poll opens a new window for it.
+    if (key === 'paused') win.on('close', () => { const recent = Date.now() - 1500; for (const [gate, at] of openedGates) if (at >= recent) openedGates.delete(gate); });
     win.on('close', forget);
     win.on('closed', forget);
   }
-  if (input.type === 'paused' && input.token) openedGates.add(input.token);
+  if (input.type === 'paused' && input.token) openedGates.set(input.token, Date.now());
   return true;
+}
+
+const deviceNames = new Map();
+const tidyHostName = name => name.replace(/\.(local|lan|home|localdomain)\.?$/i, '');
+async function deviceName(address) {
+  const cached = deviceNames.get(address);
+  if (cached && Date.now() - cached.at < 10 * 60_000) return cached.name;
+  let name = null;
+  if (/^(127\.|::1$|::ffff:127\.)/.test(address)) name = tidyHostName(hostname());
+  else {
+    try {
+      const result = await Promise.race([lookupService(address, 0), new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))]);
+      if (result.hostname && result.hostname !== address && !isIP(result.hostname)) name = tidyHostName(result.hostname).slice(0, 80);
+    } catch { /* No name: the table shows the address. */ }
+  }
+  if (deviceNames.size > 512) deviceNames.clear();
+  deviceNames.set(address, { name, at: Date.now() });
+  return name;
 }
 
 // Actions an AI client asks for that need the user's approval in the app. Unanswered requests are refused.
@@ -231,8 +271,8 @@ async function pollPendingEditors() {
     const pending = state.capturePaused ? [] : state.pending ?? [];
     if (shuttingDown) return;
     const active = new Set(pending.map(gate => gate.token));
-    for (const gate of openedGates) if (!active.has(gate)) openedGates.delete(gate);
-    // The Breakpoints window stays open when its list empties; only the user closes it.
+    for (const gate of openedGates.keys()) if (!active.has(gate)) openedGates.delete(gate);
+    // The Breakpoints window closes itself once its list empties (see PausedWindow); a window opened with nothing paused stays open.
     for (const gate of pending) {
       // Gates the user dismissed by closing the window stay dismissed; a new gate opens it again.
       if (!openedGates.has(gate.token)) openEditor({ type: 'paused', recordId: gate.recordId, token: gate.token }, true);
@@ -254,7 +294,8 @@ async function start() {
     BrowserWindow.prototype.show = function show() { this.showInactive(); };
   }
   app.dock?.setIcon(path.join(root, 'electron/assets/streamglass.png'));
-  applicationMenu = createApplicationMenu({ app, Menu, BrowserWindow, windows, openAbout: openAboutWindow,
+  await loadZoom();
+  applicationMenu = createApplicationMenu({ app, Menu, BrowserWindow, windows, openAbout: openAboutWindow, zoom: setZoom,
     getToolsOwner:() => toolsOwner && !toolsOwner.isDestroyed() ? toolsOwner : mainWindow && !mainWindow.isDestroyed() ? mainWindow : null });
   handle('menu-state', (event, state) => applicationMenu.updateState(BrowserWindow.fromWebContents(event.sender), state));
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -451,10 +492,21 @@ async function start() {
     if (Buffer.byteLength(text) > 64 * 1024 * 1024) throw new Error('Clipboard text exceeds 64 MiB');
     return text;
   });
+  // Device names for the traffic table: this Mac's name for loopback, otherwise the system resolver's reverse lookup
+  // (DNS or Bonjour .local names). Results, including misses, are cached for ten minutes.
+  handle('device-names', async (_event, addresses) => {
+    if (!Array.isArray(addresses) || addresses.length > 128 || addresses.some(item => typeof item !== 'string' || !isIP(item))) throw new Error('Invalid addresses');
+    return Object.fromEntries(await Promise.all(addresses.map(async address => [address, await deviceName(address)])));
+  });
   handle('detach-inspector', (_event, id) => {
     if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw new Error('Invalid record');
+    // Opening the same request again brings its inspector window forward instead of adding another.
+    const open = inspectorWindows.get(id);
+    if (open && !open.isDestroyed()) { open.restore(); open.focus(); return; }
     if (windows.size >= 8) throw new Error('Close an inspector window before opening another');
-    createWindow(id);
+    const win = createWindow(id);
+    inspectorWindows.set(id, win);
+    win.on('closed', () => { if (inspectorWindows.get(id) === win) inspectorWindows.delete(id); });
   });
   handle('open-editor', (_event, input) => openEditor(input));
   handle('open-tools', (event, input) => openToolsWindow(BrowserWindow.fromWebContents(event.sender), input));
@@ -534,7 +586,7 @@ async function start() {
       const response = await fetch(`${bootstrap.baseUrl}/api/state`, { headers: { Authorization: `Bearer ${token}` } });
       if (!response.ok) throw new Error('Cannot read proxy settings');
       const { settings } = await response.json();
-      if (!settings.proxyEnabled || settings.listenHost !== '0.0.0.0' || !bootstrap.lanAddresses.length) throw new Error('Start the proxy and enable LAN access in Settings before configuring Android.');
+      if (!settings.proxyEnabled || settings.listenHost !== '0.0.0.0' || !lanAddresses().length) throw new Error('Start the proxy and enable LAN access in Settings before configuring Android.');
     }
     const confirmation = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
       type: 'question', buttons: ['Cancel', 'Continue'], defaultId: 0, cancelId: 0,

@@ -118,13 +118,14 @@ c.commit()`, path.join(directory, 'captures.sqlite3')], { input: JSON.stringify(
       assert.equal(await page.getByRole('dialog', { name: 'Connect a device' }).getByRole('heading', { level: 3 }).first().textContent(), selectedPlatform, label);
       if (platform === 'android-device') {
         const dialog = page.getByRole('dialog', { name: 'Connect a device' });
-        assert.equal(await dialog.getByText('Wi-Fi setup does not require ADB or USB debugging.', {exact:false}).isVisible(), true);
+        assert.equal(await dialog.getByText('No ADB needed.', {exact:false}).isVisible(), true);
         const helpers = dialog.locator('details.optional-adb');
         assert.equal(await helpers.getAttribute('open'), null);
         assert.equal(await dialog.getByRole('combobox', {name:'ADB device', exact:true}).isVisible(), false);
         assert.equal(await dialog.getByRole('button', {name:'Enable proxy', exact:true}).isVisible(), false);
         await helpers.locator('summary').click();
-        assert.equal(await dialog.getByRole('combobox', {name:'ADB device', exact:true}).isVisible(), true);
+        // Collapsibles animate open, so wait for the content rather than checking at once.
+        await dialog.getByRole('combobox', {name:'ADB device', exact:true}).waitFor({state:'visible'});
         assert.equal(await dialog.getByRole('button', {name:'Enable proxy', exact:true}).isDisabled(), true);
       }
       await page.getByRole('button', { name: 'Close dialog', exact: true }).click();

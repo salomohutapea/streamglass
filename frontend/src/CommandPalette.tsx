@@ -69,14 +69,14 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
     return [...text].map((ch, i) => set.has(i) ? <mark key={i}>{ch}</mark> : ch);
   };
   return <dialog ref={ref} className="command-palette" aria-label="Command palette" onClose={onClose} onClick={e => { if (e.target === ref.current) onClose(); }}>
-    <input role="combobox" aria-expanded="true" aria-controls="palette-list" aria-activedescendant={results[active] ? `palette-${active}` : undefined} aria-label="Search commands" placeholder="Type a command…" autoComplete="off" spellCheck={false} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={onKeyDown} />
+    <input role="combobox" aria-expanded="true" aria-controls="palette-list" aria-activedescendant={results[active] ? `palette-${active}` : undefined} aria-label="Search commands" placeholder="Command…" autoComplete="off" spellCheck={false} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={onKeyDown} />
     <ul id="palette-list" role="listbox" aria-label="Commands" ref={list}>
       {results.map((r, i) => <li key={r.command.id} id={`palette-${i}`} role="option" aria-selected={i === active} onMouseMove={() => setActive(i)} onClick={() => run(i)}>
         <span className="palette-title">{query ? title(r.command.title, r.indexes) : r.command.title}</span>
         <small>{!query && recent.includes(r.command.id) ? 'Recent' : r.command.group}</small>
         {r.command.shortcut && <kbd>{r.command.shortcut}</kbd>}
       </li>)}
-      {!results.length && <li className="palette-empty" role="presentation">No matching commands</li>}
+      {!results.length && <li className="palette-empty" role="presentation">No match</li>}
     </ul>
   </dialog>;
 }

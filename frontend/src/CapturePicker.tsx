@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Search } from 'lucide-react';
+import { Search, Inbox, type LucideIcon } from 'lucide-react';
 import { requestTime } from './TrafficTable';
 import './capture-picker.css';
 
@@ -20,6 +20,11 @@ type Props = {
 const statusOf = (r: PickerRecord) => r.status ?? r.statusCode;
 const tone = (status?: number) => !status ? 'pending' : status >= 500 ? 'error' : status >= 400 ? 'warn' : 'ok';
 
+/** Icon plus one short line; the icon floats gently unless reduced motion is requested. */
+export function EmptyState({ icon: Icon = Inbox, children, title }: { icon?: LucideIcon; children: string; title?: string }) {
+  return <p className="tool-empty muted" title={title}><Icon size={16} aria-hidden="true" /><span>{children}</span></p>;
+}
+
 /** Searchable capture list shared by the testing tools (Replay, Compare, Mock, Share, ...). */
 export default function CapturePicker({ records, value, onChange, multiple = false, mainSelectionId, label = 'Captures', limit = 200, maxSelected }: Props) {
   const [query, setQuery] = useState('');
@@ -37,9 +42,9 @@ export default function CapturePicker({ records, value, onChange, multiple = fal
   };
   return <section className="capture-picker" aria-label={label}>
     <div className="capture-picker-bar">
-      <label className="capture-picker-search"><Search size={13} /><input type="search" aria-label={`Search ${label.toLowerCase()}`} placeholder="Search method, URL, status or time" value={query} onChange={e => setQuery(e.target.value)} /></label>
-      <label className="capture-picker-check"><input type="checkbox" checked={errorsOnly} onChange={e => setErrorsOnly(e.target.checked)} />Errors only</label>
-      {mainSelectionId && candidates.some(r => r.id === mainSelectionId) && <button type="button" disabled={!multiple && value[0] === mainSelectionId} onClick={() => onChange(multiple ? [...new Set([...value, mainSelectionId])] : [mainSelectionId])}>Use selected in main window</button>}
+      <label className="capture-picker-search"><Search size={13} /><input type="search" aria-label={`Search ${label.toLowerCase()}`} placeholder="Search" value={query} onChange={e => setQuery(e.target.value)} /></label>
+      <label className="capture-picker-check"><input type="checkbox" checked={errorsOnly} onChange={e => setErrorsOnly(e.target.checked)} />Errors</label>
+      {mainSelectionId && candidates.some(r => r.id === mainSelectionId) && <button type="button" disabled={!multiple && value[0] === mainSelectionId} onClick={() => onChange(multiple ? [...new Set([...value, mainSelectionId])] : [mainSelectionId])} title="Use the request selected in the main window">Use selected</button>}
       {multiple && value.length > 0 && <button type="button" onClick={() => onChange([])}>Clear ({value.length})</button>}
     </div>
     <ul className="capture-picker-list" role="listbox" aria-multiselectable={multiple} aria-label={label}>
@@ -57,8 +62,8 @@ export default function CapturePicker({ records, value, onChange, multiple = fal
           </button>
         </li>;
       })}
-      {shown.length === 0 && <li className="capture-picker-empty">{candidates.length ? 'No captures match.' : 'No captures yet.'}</li>}
+      {shown.length === 0 && <li className="capture-picker-empty">{candidates.length ? 'No match' : 'No captures'}</li>}
     </ul>
-    {filtered.length > shown.length && <p className="capture-picker-more">Showing {shown.length} of {filtered.length}. Search to narrow.</p>}
+    {filtered.length > shown.length && <p className="capture-picker-more">{shown.length} of {filtered.length}</p>}
   </section>;
 }

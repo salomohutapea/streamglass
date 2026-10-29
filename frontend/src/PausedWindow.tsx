@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, Radio } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, CirclePause, Lock, Pause, Radio } from 'lucide-react';
 import JsonViewer from './JsonViewer';
 import JsonBodyEditor from './JsonBodyEditor';
 import type { DecodedBody } from './CodecPanel';
@@ -15,14 +15,15 @@ type Lost = EndedGate<Gate>;
 type Connection = { baseUrl: string; token: string };
 type Draft = { url: string; method: string; headers: string; body: string; status: string; event: string };
 const params = new URLSearchParams(location.search);
+const closeSettleMs = 350;
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
 const hashGate = () => new URLSearchParams(location.hash.replace(/^#/, '')).get('gate');
 const stageLabel = (stage: string) => stage === 'event' ? 'SSE event' : stage === 'response' ? 'Response' : 'Request';
 // Outgoing request ↗, incoming response ↙, streamed SSE event (radio), each with its own color.
-function StageBadge({ stage }: { stage: string }) {
+function StageBadge({ stage, compact = false }: { stage: string; compact?: boolean }) {
   const kind = stage === 'event' ? 'event' : stage === 'response' ? 'response' : 'request';
   const Icon = kind === 'event' ? Radio : kind === 'response' ? ArrowDownLeft : ArrowUpRight;
-  return <span className={`editor-stage stage-${kind}`}><Icon size={11} aria-hidden="true"/>{stageLabel(stage)}</span>;
+  return compact ? <span className={`editor-stage stage-${kind}`} role="img" aria-label={stageLabel(stage)} title={stageLabel(stage)}><Icon size={11} aria-hidden="true"/></span> : <span className={`editor-stage stage-${kind}`}><Icon size={11} aria-hidden="true"/>{stageLabel(stage)}</span>;
 }
 
 export function formatWait(ms: number) {
@@ -61,7 +62,7 @@ function GateEditor({ gate, draft, setDraft, api, onResolved, setError }: Editor
       const sequence = gate.value.sequence;
       setHistory({ ...record, events: record.events?.filter(event => typeof sequence !== 'number' || typeof event.sequence !== 'number' || event.sequence < sequence) });
       setHistoryError('');
-    }).catch(() => { if (active) setHistoryError('Request context and previous events are unavailable. The capture may have been removed.'); });
+    }).catch(() => { if (active) setHistoryError('Context unavailable'); });
     return () => { active = false; };
   }, [api, gate.recordId, gate.stage, gate.value.sequence]);
 
@@ -104,20 +105,19 @@ function GateEditor({ gate, draft, setDraft, api, onResolved, setError }: Editor
   });
 
   return <>
-    <div className="editor-window-content">
-      <p className="editor-status" role="status">{`Paused before ${gate.stage === 'event' ? 'this SSE event is delivered' : `the ${gate.stage} continues`}.`}</p>
-      <div className="editor-flow-context"><div className="editor-flow-meta"><span className="editor-method">{gate.method ?? gate.value.method ?? 'HTTP'}</span><StageBadge stage={gate.stage}/><span className="editor-flow-id" title={gate.recordId}>Flow {gate.recordId}</span></div><p>{gate.url ?? gate.value.url ?? draft.url}</p></div>
-      <div className={gate.stage === 'request' ? '' : 'editor-paused-panes'}>
-        {gate.stage !== 'request' && <section className="editor-request-pane" aria-label="Request context"><div className="editor-section-heading"><h2>Request</h2><span>Read only</span></div><dl className="editor-context"><dt>Method</dt><dd>{gate.method ?? 'HTTP'}</dd><dt>URL</dt><dd>{gate.url}</dd></dl>{historyError ? <p className="muted">{historyError}</p> : history ? <><h3>Body</h3><JsonViewer value={history.request?.body} unavailable={history.request?.bodyUnavailable}/><details className="headers-disclosure"><summary>Headers ({history.request?.headers?.length ?? 0})</summary><dl className="editor-request-headers">{history.request?.headers?.map(([name, value], index) => <div key={index}><dt>{name}</dt><dd>{value}</dd></div>)}</dl></details></> : <p className="muted">Loading request…</p>}</section>}
+    <div className="editor-window-content is-gate">
+      <div className="editor-flow-context"><div className="editor-flow-meta"><span className="editor-method">{gate.method ?? gate.value.method ?? 'HTTP'}</span><StageBadge stage={gate.stage}/><span className="editor-held" role="status" title="Live traffic is held until you continue or drop it"><Pause size={10} aria-hidden="true"/>Held</span><span className="editor-flow-id" title={`Flow ${gate.recordId}`}>{gate.recordId}</span></div><p>{gate.url ?? gate.value.url ?? draft.url}</p></div>
+      <div className="editor-paused-panes">
+        {gate.stage !== 'request' && <section className="editor-request-pane" aria-label="Request context"><div className="editor-section-heading"><h2>Request</h2><span title="Read only" aria-label="Read only" role="img"><Lock size={11}/></span></div>{historyError ? <p className="muted">{historyError}</p> : history ? <><h3>Body</h3><JsonViewer value={history.request?.body} unavailable={history.request?.bodyUnavailable}/><details className="headers-disclosure"><summary>Headers ({history.request?.headers?.length ?? 0})</summary><dl className="editor-request-headers">{history.request?.headers?.map(([name, value], index) => <div key={index}><dt>{name}</dt><dd>{value}</dd></div>)}</dl></details></> : <p className="muted">Loading…</p>}</section>}
         <section className="editor-edit-pane" aria-label="Paused traffic editor">
-          {gate.stage === 'event' && <section className="editor-event-history sse-history" aria-label="Previous SSE events"><div className="editor-section-heading"><h2>Previous SSE events</h2><span>{history?.events?.length ?? 0} retained{history?.eventCount != null && history.eventCount !== history.events?.length ? ` of ${history.eventCount}` : ''}</span></div><p className="muted">Read only · select text and press ⌘C to copy. The paused event is editable below.</p>{history?.captureWarning && <p className="editor-history-warning" role="status">{history.captureWarning}</p>}{historyError ? <p className="muted">{historyError}</p> : history ? history.events?.length ? <div className="editor-history-list">{history.events.map((event, index) => <details className="editor-history-event" key={index}><summary><span className="editor-event-number">{String(event.sequence ?? index + 1).padStart(3, '0')}</span><strong>{event.event ?? event.type ?? 'message'}</strong>{event.id && <span>ID {event.id}</span>}<time>{event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : ''}</time></summary><JsonViewer value={event.data}/></details>)}</div> : <p className="muted">No previous events have been retained.</p> : <p className="muted">Loading previous events…</p>}</section>}
-          <div className="editor-section-heading editor-current-heading"><h2>{gate.stage === 'event' ? 'Paused event' : `Paused ${gate.stage}`}</h2><span>Editable</span></div>
+          {gate.stage === 'event' && <section className="editor-event-history sse-history" aria-label="Previous SSE events"><div className="editor-section-heading"><h2>Previous SSE events</h2><span title="Read only. Retained events">{history?.events?.length ?? 0}{history?.eventCount != null && history.eventCount !== history.events?.length ? `/${history.eventCount}` : ''}</span></div>{history?.captureWarning && <p className="editor-history-warning" role="status">{history.captureWarning}</p>}{historyError ? <p className="muted">{historyError}</p> : history ? history.events?.length ? <div className="editor-history-list">{history.events.map((event, index) => <details className="editor-history-event" key={index}><summary><span className="editor-event-number">{String(event.sequence ?? index + 1).padStart(3, '0')}</span><strong>{event.event ?? event.type ?? 'message'}</strong>{event.id && <span>ID {event.id}</span>}<time>{event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : ''}</time></summary><JsonViewer value={event.data}/></details>)}</div> : <p className="muted">None</p> : <p className="muted">Loading…</p>}</section>}
+          <div className="editor-section-heading editor-current-heading"><h2>{gate.stage === 'event' ? 'Paused event' : `Paused ${gate.stage}`}</h2></div>
           <fieldset className="editor-fields form" disabled={busy}>
             {gate.stage === 'request' && <><label>URL<input value={draft.url} onChange={event => setDraft({ ...draft, url: event.target.value })}/></label><label>Method<input value={draft.method} onChange={event => setDraft({ ...draft, method: event.target.value })}/></label></>}
             {gate.stage === 'response' && <label>Status code<input type="number" value={draft.status} onChange={event => setDraft({ ...draft, status: event.target.value })}/></label>}
             {gate.stage === 'event' && <label>Event type<input value={draft.event} onChange={event => setDraft({ ...draft, event: event.target.value })}/></label>}
-            {gate.stage === 'response' && <div><button type="button" onClick={() => setBodyMode('raw')}>Raw body</button><button type="button" onClick={async () => { try { if (!decoded) { const result = await api(`/api/pending/${encodeURIComponent(gate.token)}/decode`, 'POST', {}) as DecodedBody; setDecoded(result); setDecodedText(result.body); } setBodyMode('decoded'); setError(''); } catch (e) { setError(errorMessage(e)); } }}>Decoded body</button>{decoded && <button type="button" onClick={() => { setDecoded(null); setDecodedText(''); setBodyMode('raw'); }}>Discard decoded view and edits</button>}{decoded && <p className="muted">{decoded.warning} {decodedText !== decoded.body ? 'Decoded changes will be re-encoded on Continue.' : ''}</p>}</div>}
-            {bodyMode === 'decoded' && decoded ? <JsonBodyEditor label="Decoded response body" value={decodedText} disabled={!decoded.editable} onChange={setDecodedText} onReplacingChange={setReplacingBody}/> : <div className="editor-body-field"><span className="editor-body-heading"><span>{gate.stage === 'event' ? 'Event data' : 'Body'}</span><button type="button" disabled={Boolean(gate.value.bodyUnavailable) || replacingBody || Boolean(decoded)} onClick={() => { const formatted = prepareJson(draft.body); if (!formatted.isJson) { setError('This body is not valid JSON. Correct it before formatting.'); return; } setDraft({ ...draft, body: formatted.text }); setError(''); }}>Format JSON</button></span><JsonBodyEditor key={gate.token} label={gate.stage === 'event' ? 'Event data' : 'Body'} disabled={Boolean(gate.value.bodyUnavailable) || Boolean(decoded)} value={draft.body} onChange={body => setDraft({ ...draft, body })} onReplacingChange={setReplacingBody}/><small>{gate.value.bodyUnavailable ? gate.value.bodyUnavailableReason || 'Body is unavailable for editing.' : 'JSON is formatted for readability. Leaving it unchanged preserves its original bytes.'}</small></div>}
+            {gate.stage === 'response' && <div><button type="button" onClick={() => setBodyMode('raw')}>Raw body</button><button type="button" onClick={async () => { try { if (!decoded) { const result = await api(`/api/pending/${encodeURIComponent(gate.token)}/decode`, 'POST', {}) as DecodedBody; setDecoded(result); setDecodedText(result.body); } setBodyMode('decoded'); setError(''); } catch (e) { setError(errorMessage(e)); } }}>Decoded body</button>{decoded && <button type="button" onClick={() => { setDecoded(null); setDecodedText(''); setBodyMode('raw'); }}>Discard decoded</button>}{decoded && <p className="muted" title="Decoded edits are re-encoded on Continue">{decoded.warning}{decodedText !== decoded.body ? ' · edited' : ''}</p>}</div>}
+            {bodyMode === 'decoded' && decoded ? <JsonBodyEditor label="Decoded response body" value={decodedText} disabled={!decoded.editable} onChange={setDecodedText} onReplacingChange={setReplacingBody}/> : <div className="editor-body-field"><span className="editor-body-heading"><span>{gate.stage === 'event' ? 'Event data' : 'Body'}</span><button type="button" title="Unchanged JSON keeps its original bytes" disabled={Boolean(gate.value.bodyUnavailable) || replacingBody || Boolean(decoded)} onClick={() => { const formatted = prepareJson(draft.body); if (!formatted.isJson) { setError('Not valid JSON'); return; } setDraft({ ...draft, body: formatted.text }); setError(''); }}>Format JSON</button></span><JsonBodyEditor key={gate.token} label={gate.stage === 'event' ? 'Event data' : 'Body'} disabled={Boolean(gate.value.bodyUnavailable) || Boolean(decoded)} value={draft.body} onChange={body => setDraft({ ...draft, body })} onReplacingChange={setReplacingBody}/>{Boolean(gate.value.bodyUnavailable) && <small>{gate.value.bodyUnavailableReason || 'Body unavailable'}</small>}</div>}
             {gate.stage !== 'event' && <details key={gate.token} className="headers-disclosure"><summary>Headers ({gate.value.headers?.length ?? 0})</summary><label className="editor-headers-field">Headers (JSON pairs)<textarea className="mono" rows={7} spellCheck={false} value={draft.headers} onChange={event => setDraft({ ...draft, headers: event.target.value })}/></label></details>}
           </fieldset>
         </section>
@@ -222,17 +222,25 @@ export default function PausedWindow() {
     previousOrder.current = order;
   }, [data, gates, current, selected]);
 
-  // Close once the last paused request is handled; a window opened with nothing paused stays open.
+  // Close once the last paused request is handled; a window opened with nothing paused stays open. No grace
+  // period: the list is empty only after a fresh /api/pending read agrees, so a transient empty state (load,
+  // refresh, an optimistic local resolve) never closes it. A gate that arrives after that read but before
+  // close() is covered by the main process, which forgets this window as soon as it starts closing and opens a
+  // new one for the gate. If the cleanup runs first (a gate shows up in the list), the pending close is abandoned.
   const hadGates = useRef(false);
   const loaded = Boolean(data);
   useEffect(() => {
     if (!loaded) return;
     if (gates.length) { hadGates.current = true; return; }
     if (!hadGates.current || lost.length) return;
-    // Grace period: a continued response is often followed at once by its SSE event (or a request by its response).
-    const timer = setTimeout(() => window.close(), 2500);
-    return () => clearTimeout(timer);
-  }, [loaded, gates.length, lost.length]);
+    let active = true;
+    // A continued request is usually followed within milliseconds by its response or SSE event gate; this
+    // invisible settle keeps that follow-up in this window instead of closing and reopening it.
+    const timer = setTimeout(() => {
+      api('/api/pending').then((fresh: { pending?: unknown[] }) => { if (active && !fresh.pending?.length) window.close(); }).catch(() => { /* Keep the window; the next poll retries. */ });
+    }, closeSettleMs);
+    return () => { active = false; clearTimeout(timer); };
+  }, [loaded, gates.length, lost.length, api]);
 
   const draft = current ? drafts[current.token] ?? draftFor(current) : null;
   const onResolved = useCallback((token: string, message: string) => {
@@ -245,7 +253,7 @@ export default function PausedWindow() {
     {lost.map(({ gate, reason, pausedMs }) => {
       const { path } = splitUrl(gate.url ?? gate.value.url);
       return <div key={gate.token} className="editor-error paused-lost" role="alert">
-        <span><strong>{gate.method ?? gate.value.method ?? 'HTTP'} {path || '/'}</strong> ended after {formatWait(pausedMs)} paused at {stageLabel(gate.stage).toLowerCase()}: {reason}.{isDisconnect(reason) ? ' The app or the server stopped waiting, usually on its own timeout (OkHttp defaults to 10s; many iOS apps use 15–60s). Continue sooner, or raise the app\'s timeout while debugging.' : ''} Edits were not sent.</span>
+        <span title={isDisconnect(reason) ? 'The app or the server stopped waiting, usually on its own timeout. Continue sooner, or raise the app timeout while debugging.' : undefined}><strong>{gate.method ?? gate.value.method ?? 'HTTP'} {path || '/'}</strong> ended after {formatWait(pausedMs)} at {stageLabel(gate.stage).toLowerCase()}: {reason}. Edits not sent.</span>
         <button onClick={() => setLost(old => old.filter(item => item.gate.token !== gate.token))}>Dismiss</button>
       </div>;
     })}
@@ -254,16 +262,15 @@ export default function PausedWindow() {
         {gates.map(gate => {
           const { host, path } = splitUrl(gate.url ?? gate.value.url);
           const device = devices.get(gate.recordId);
-          return <button key={gate.token} className={`paused-item${gate.token === selected ? ' selected' : ''}`} aria-current={gate.token === selected ? 'true' : undefined} onClick={() => setSelected(gate.token)}>
-            <span className="paused-item-top"><span className="editor-method">{gate.method ?? gate.value.method ?? 'HTTP'}</span><StageBadge stage={gate.stage}/><time className="paused-wait">{formatWait(now - (gate.pausedAt ?? now))}</time></span>
-            <span className="paused-url" title={gate.url}><b>{path || '/'}</b>{host && <small>{host}</small>}</span>
-            {device && <span className="paused-device">{device}</span>}
+          const method = gate.method ?? gate.value.method ?? 'HTTP';
+          return <button key={gate.token} className={`paused-item${gate.token === selected ? ' selected' : ''}`} title={[`${host}${path}`, device].filter(Boolean).join(' · ')} aria-current={gate.token === selected ? 'true' : undefined} onClick={() => setSelected(gate.token)}>
+            <span className="editor-method">{method}</span><span className="paused-url"><b>{path || '/'}</b></span><StageBadge stage={gate.stage} compact/><time className="paused-wait">{formatWait(now - (gate.pausedAt ?? now))}</time>
           </button>;
         })}
       </nav>
       <section className="paused-detail">
         {!data ? <p className="muted paused-empty">Connecting…</p> : current && draft ? <GateEditor key={current.token} gate={current} draft={draft} setDraft={next => setDrafts(old => ({ ...old, [current.token]: next }))} api={api} onResolved={onResolved} setError={setError}/>
-          : <div className="paused-empty"><h2>No paused requests</h2><p className="muted">{notice || 'Matching breakpoints pause here until you continue or drop them.'}</p></div>}
+          : <div className="paused-empty"><CirclePause aria-hidden="true"/><h2>Nothing paused</h2>{notice && <p className="muted">{notice}</p>}</div>}
       </section>
     </div>
   </main>;
