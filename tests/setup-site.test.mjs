@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSetupHandler, createSetupSite, buildPac, buildSetupPage, buildMobileConfig, parsePublicCertificate, defaultSetupPort } from '../electron/setup-site.mjs';
+import { createHash } from 'node:crypto';
+import { createSetupHandler, createSetupSite, buildPac, buildSetupPage, buildMobileConfig, parsePublicCertificate, defaultSetupPort, certificateFingerprint } from '../electron/setup-site.mjs';
 
 const der = Buffer.from('synthetic-certificate-bytes-for-tests');
 const pem = `-----BEGIN CERTIFICATE-----\n${der.toString('base64')}\n-----END CERTIFICATE-----\n`;
-const make = (overrides = {}) => createSetupHandler({ readCertificate: async () => pem, getAddresses: () => ['192.168.1.20', '10.0.0.5'], getProxyPort: () => 9090, getSetupPort: () => 9091, ...overrides });
+// Requests default to the Mac's first LAN address, as a phone opening the setup URL would send it.
+const make = (overrides = {}) => {
+  const handler = createSetupHandler({ readCertificate: async () => pem, getAddresses: () => ['192.168.1.20', '10.0.0.5'], getProxyPort: () => 9090, getSetupPort: () => 9091, ...overrides });
+  return input => handler({ hostHeader: '192.168.1.20:9091', ...input });
+};
 
 test('serves the setup page with proxy details only', async () => {
   const response = await make()({ method: 'GET', url: '/' });
@@ -15,10 +20,26 @@ test('serves the setup page with proxy details only', async () => {
   assert.equal(response.headers['X-Content-Type-Options'], 'nosniff');
 });
 
-test('uses the requested host only when it is a known LAN address', async () => {
+test('answers only requests addressed to a LAN address of this Mac', async () => {
   const handler = make();
   assert.match((await handler({ method: 'GET', url: '/proxy.pac', hostHeader: '10.0.0.5:9091' })).body, /PROXY 10\.0\.0\.5:9090; DIRECT/);
-  assert.match((await handler({ method: 'GET', url: '/proxy.pac', hostHeader: 'evil.example' })).body, /PROXY 192\.168\.1\.20:9090; DIRECT/);
+  assert.match((await handler({ method: 'GET', url: '/proxy.pac', hostHeader: '10.0.0.5' })).body, /PROXY 10\.0\.0\.5:9090; DIRECT/);
+  for (const hostHeader of ['evil.example', 'evil.example:9091', '192.168.1.21:9091', '192.168.1.20:9092', '127.0.0.1:9091', '192.168.1.20.evil.example', undefined]) {
+    for (const url of ['/', '/proxy.pac', '/cert.pem']) {
+      const response = await handler({ method: 'GET', url, hostHeader });
+      assert.equal(response.status, 421, `${hostHeader} ${url}`);
+      assert.doesNotMatch(String(response.body), /PROXY|CERTIFICATE/);
+    }
+  }
+});
+
+test('setup page shows the certificate SHA-256 fingerprint', async () => {
+  const fingerprint = createHash('sha256').update(der).digest('hex').toUpperCase().match(/../g).join(':');
+  assert.equal(certificateFingerprint(parsePublicCertificate(pem)), fingerprint);
+  assert.ok((await make()({ method: 'GET', url: '/' })).body.includes(fingerprint));
+  const missing = await make({ readCertificate: async () => { throw new Error('not ready'); } })({ method: 'GET', url: '/' });
+  assert.equal(missing.status, 200);
+  assert.doesNotMatch(missing.body, /Certificate SHA-256/);
 });
 
 test('serves public certificate in PEM and DER forms', async () => {
@@ -61,12 +82,12 @@ test('PAC rejects invalid addresses', () => {
   assert.match(buildPac('1.2.3.4', 9090), /"PROXY 1\.2\.3\.4:9090; DIRECT"/);
 });
 
-test('reports unavailable when there is no LAN address', async () => {
-  assert.equal((await make({ getAddresses: () => [] })({ method: 'GET', url: '/' })).status, 503);
+test('refuses every request when there is no LAN address', async () => {
+  assert.equal((await make({ getAddresses: () => [] })({ method: 'GET', url: '/' })).status, 421);
 });
 
 test('site starts only when enabled and stops otherwise', async t => {
-  const site = createSetupSite({ handler: make(), bindHost: '127.0.0.1' });
+  const site = createSetupSite({ handler: createSetupHandler({ readCertificate: async () => pem, getAddresses: () => ['127.0.0.1'], getProxyPort: () => 9090, getSetupPort: () => 18765 }), bindHost: '127.0.0.1' });
   t.after(() => site.close());
   await site.sync({ enabled: false, port: 0 });
   assert.equal(site.status().running, false);

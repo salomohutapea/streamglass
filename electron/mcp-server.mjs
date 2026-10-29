@@ -35,7 +35,7 @@ async function readBody(req) {
 }
 
 /** A dedicated local MCP listener; authToken must be independent of engine credentials. */
-export async function startMcpServer({ port = 48722, authToken, bootstrap, workspaces }) {
+export async function startMcpServer({ port = 48722, authToken, bootstrap, workspaces, confirm, isApproved }) {
   if (typeof authToken !== 'string' || authToken.length < 32 || /[\r\n]/.test(authToken)) {
     throw new Error('MCP requires a dedicated bearer token of at least 32 characters');
   }
@@ -51,7 +51,7 @@ export async function startMcpServer({ port = 48722, authToken, bootstrap, works
     sessions.set(id, session);
     const server = new McpServer({ name: 'streamglass', version }, { capabilities: { logging: {} } });
     transport.onclose = () => { sessions.delete(session.id); };
-    try { registerTools(server, { ...bootstrap, workspaces }); await server.connect(transport); }
+    try { registerTools(server, { ...bootstrap, workspaces, confirm, isApproved }); await server.connect(transport); }
     catch (error) { sessions.delete(id); await transport.close(); throw error; }
     const receive = transport.onmessage;
     const send = transport.send.bind(transport);

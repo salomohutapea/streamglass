@@ -1,6 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, protocol, session, shell } from 'electron';
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { networkInterfaces } from 'node:os';
@@ -9,10 +9,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startScriptService } from './script-service.mjs';
 import { createUpdateChecker, releasesPrefix } from './updater.mjs';
 import { createDeviceService } from './devices.mjs';
-import { createSetupHandler, createSetupSite, defaultSetupPort } from './setup-site.mjs';
+import { certificateFingerprint, createSetupHandler, createSetupSite, defaultSetupPort, parsePublicCertificate } from './setup-site.mjs';
 import { createApplicationMenu } from './menu.mjs';
 import { startMcpServer } from './mcp-server.mjs';
-import { loadMcpConfig, saveMcpConfig } from './mcp-config.mjs';
+import { approveRedirects, loadMcpConfig, saveMcpConfig } from './mcp-config.mjs';
 import { createApplicationResolver } from './applications.mjs';
 import { exportSession, importSession } from './export-session.mjs';
 import { readMapLocalFile } from './map-local-file.mjs';
@@ -193,6 +193,33 @@ function openEditor(input, automatic = false) {
   return true;
 }
 
+// Actions an AI client asks for that need the user's approval in the app. Unanswered requests are refused.
+const approvals = new Map();
+const APPROVAL_MS = 120_000;
+const approvalList = () => [...approvals.values()].map(item => item.request);
+function notifyApprovals() {
+  for (const win of windows) if (!win.isDestroyed()) win.webContents.send('approvals-changed', approvalList());
+}
+function requestApproval({ kind, title, detail = [] }) {
+  if (shuttingDown || !startupReady || approvals.size >= 8) return Promise.resolve(false);
+  const id = randomUUID();
+  return new Promise(resolve => {
+    const finish = allowed => {
+      if (!approvals.delete(id)) return;
+      clearTimeout(timer);
+      notifyApprovals();
+      resolve(allowed);
+    };
+    const timer = setTimeout(() => finish(false), APPROVAL_MS);
+    approvals.set(id, { finish, request: { id, kind: String(kind).slice(0, 32), title: String(title).slice(0, 200),
+      detail: detail.slice(0, 40).map(line => String(line).slice(0, 2000)), requestedAt: Date.now(), expiresAt: Date.now() + APPROVAL_MS } });
+    const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
+    notifyApprovals();
+    win.show();
+    app.dock?.bounce('critical');
+  });
+}
+
 async function pollPendingEditors() {
   try {
     // /api/pending carries only the gates, not every table row.
@@ -300,16 +327,28 @@ async function start() {
   let mcpConfig;
   let mcpError = '';
   const mcpPort = Number(process.env.STREAMGLASS_MCP_PORT ?? 48722);
-  const mcpConnection = () => ({ running: Boolean(mcpService), url: mcpService?.url ?? `http://127.0.0.1:${mcpPort}/mcp`, token: mcpConfig?.token ?? '', error: mcpError });
+  const mcpConnection = () => ({ running: Boolean(mcpService), url: mcpService?.url ?? `http://127.0.0.1:${mcpPort}/mcp`, token: mcpConfig?.token ?? '', error: mcpError, approvedRedirects: mcpConfig?.approvedRedirects ?? [] });
+  let mcpConfigOperation = Promise.resolve();
+  const updateMcpConfig = edit => {
+    const operation = mcpConfigOperation.then(async () => { const next = edit(mcpConfig); await saveMcpConfig(mcpFile, next); mcpConfig = next; });
+    mcpConfigOperation = operation.catch(() => {});
+    return operation;
+  };
+  const confirmMcp = async request => {
+    const allowed = await requestApproval(request);
+    // Approved redirect servers are remembered; the user can remove them in Tools → Agent (MCP).
+    if (allowed && request.targets?.length) await updateMcpConfig(config => approveRedirects(config, request.targets));
+    return allowed;
+  };
+  const isApprovedRedirect = target => Boolean(mcpConfig?.approvedRedirects.includes(target));
   async function enableMcp(enabled) {
     if (typeof enabled !== 'boolean') throw new Error('Expected boolean');
     if (!mcpConfig) throw new Error(mcpError || 'MCP configuration unavailable');
     if (mcpService) { await mcpService.close(); mcpService = undefined; }
     mcpError = '';
     try {
-      if (enabled) mcpService = await startMcpServer({ port: mcpPort, authToken: mcpConfig.token, bootstrap, workspaces });
-      mcpConfig.enabled = enabled;
-      await saveMcpConfig(mcpFile, mcpConfig);
+      if (enabled) mcpService = await startMcpServer({ port: mcpPort, authToken: mcpConfig.token, bootstrap, workspaces, confirm: confirmMcp, isApproved: isApprovedRedirect });
+      await updateMcpConfig(config => ({ ...config, enabled }));
     } catch (error) { mcpError = error.message; }
     return mcpConnection();
   }
@@ -321,6 +360,16 @@ async function start() {
     const operation = mcpOperation.then(() => enableMcp(enabled));
     mcpOperation = operation.catch(() => {});
     return operation;
+  });
+  handle('mcp-forget-redirect', async (_event, target) => {
+    if (typeof target !== 'string' || target.length > 300) throw new Error('Invalid server');
+    await updateMcpConfig(config => ({ ...config, approvedRedirects: config.approvedRedirects.filter(item => item !== target) }));
+    return mcpConnection();
+  });
+  handle('approvals', () => approvalList());
+  handle('resolve-approval', (_event, input) => {
+    if (!input || typeof input.id !== 'string' || typeof input.allow !== 'boolean' || Object.keys(input).length !== 2) throw new Error('Invalid approval');
+    approvals.get(input.id)?.finish(input.allow);
   });
 
   const deviceServiceForCurrentPort = async () => {
@@ -355,7 +404,11 @@ async function start() {
     if (!response.ok) throw new Error('Cannot read proxy settings');
     return (await response.json()).settings;
   };
-  let setupProxyPort = 0, setupPort = 0;
+  let setupProxyPort = 0, setupPort = 0, proxyWasEnabled;
+  const caFingerprint = async () => {
+    try { return certificateFingerprint(parsePublicCertificate(await readFile(path.join(dataDir, 'mitmproxy/mitmproxy-ca-cert.pem'), 'utf8'))); }
+    catch { return null; }
+  };
   const setupSite = createSetupSite({ handler: createSetupHandler({
     readCertificate: () => readFile(path.join(dataDir, 'mitmproxy/mitmproxy-ca-cert.pem'), 'utf8'),
     getAddresses: lanAddresses, getProxyPort: () => setupProxyPort, getSetupPort: () => setupPort,
@@ -366,9 +419,16 @@ async function start() {
       const override = Number(process.env.STREAMGLASS_SETUP_PORT);
       setupProxyPort = settings.proxyPort;
       setupPort = Number.isInteger(override) && override >= 1024 && override <= 65535 ? override : defaultSetupPort(settings.proxyPort);
+      // Stopping the proxy hands the Mac's network back: saved system proxy settings are restored, and Mac
+      // monitoring reapplies them when the proxy starts again.
+      if (proxyWasEnabled !== undefined && settings.proxyEnabled !== proxyWasEnabled && devices && !checkingQuit) {
+        if (!settings.proxyEnabled) await devices.service.releaseSystemProxy().catch(() => {});
+        else await devices.service.restoreMonitor({ startListener: false }).catch(() => {});
+      }
+      proxyWasEnabled = settings.proxyEnabled;
       await setupSite.sync({ enabled: settings.listenHost === '0.0.0.0', port: setupPort });
-      return { lanEnabled: settings.listenHost === '0.0.0.0', port: setupPort, ...setupSite.status() };
-    } catch (error) { return { lanEnabled: false, port: setupPort || null, running: false, error: error.message }; }
+      return { lanEnabled: settings.listenHost === '0.0.0.0', port: setupPort, fingerprint: await caFingerprint(), ...setupSite.status() };
+    } catch (error) { return { lanEnabled: false, port: setupPort || null, running: false, fingerprint: await caFingerprint(), error: error.message }; }
   };
   setupSiteTimer = setInterval(() => void syncSetupSite(), 3000);
   setupSiteTimer.unref?.();

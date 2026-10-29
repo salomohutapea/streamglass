@@ -19,7 +19,7 @@
     "build:ui": "vite build --config frontend/vite.config.ts",
     "build:engine": ".venv/bin/python scripts/package_engine.py",
     "package:mac": "npm run build:release",
-    "test:shell": "node --test tests/scripts.test.mjs tests/json-viewer.test.mjs frontend/src/editor-draft.test.mjs frontend/src/paused-gates.test.mjs frontend/src/sidebar-favorites.test.mjs frontend/src/command-match.test.mjs frontend/src/domain-tree.test.mjs frontend/src/rule-order.test.mjs frontend/src/filter-conditions.test.mjs frontend/src/app-badge.test.mjs frontend/src/device-labels.test.mjs tests/devices.test.mjs tests/setup-site.test.mjs tests/mcp-server.test.mjs tests/mcp-tools.test.mjs tests/mcp-config.test.mjs tests/applications.test.mjs tests/applications-service.test.mjs frontend/src/applications.test.mjs tests/export-session.test.mjs tests/developer-tools.test.mjs tests/map-local-file.test.mjs frontend/src/traffic-preferences.test.mjs frontend/src/capture-tools.test.mjs frontend/src/replay-body.test.mjs tests/workspaces.test.mjs tests/mcp-lab-tools.test.mjs tests/mcp-daily-tools.test.mjs tests/tools-window.test.mjs frontend/src/daily-tools.test.mjs frontend/src/custom-fields.test.mjs frontend/src/saved-filters.test.mjs frontend/src/table-selection.test.mjs frontend/src/http-structure.test.mjs frontend/src/timing.test.mjs frontend/src/qr-code.test.mjs tests/bump-version.test.mjs tests/updater.test.mjs",
+    "test:shell": "node --test tests/scripts.test.mjs tests/json-viewer.test.mjs frontend/src/editor-draft.test.mjs frontend/src/paused-gates.test.mjs frontend/src/sidebar-favorites.test.mjs frontend/src/command-match.test.mjs frontend/src/domain-tree.test.mjs frontend/src/rule-order.test.mjs frontend/src/filter-conditions.test.mjs frontend/src/app-badge.test.mjs frontend/src/device-labels.test.mjs tests/devices.test.mjs tests/setup-site.test.mjs tests/mcp-server.test.mjs tests/mcp-tools.test.mjs tests/mcp-config.test.mjs tests/applications.test.mjs tests/applications-service.test.mjs frontend/src/applications.test.mjs tests/export-session.test.mjs tests/developer-tools.test.mjs tests/map-local-file.test.mjs frontend/src/traffic-preferences.test.mjs frontend/src/capture-tools.test.mjs frontend/src/replay-body.test.mjs tests/workspaces.test.mjs tests/mcp-lab-tools.test.mjs tests/mcp-daily-tools.test.mjs tests/tools-window.test.mjs frontend/src/daily-tools.test.mjs frontend/src/custom-fields.test.mjs frontend/src/saved-filters.test.mjs frontend/src/table-selection.test.mjs frontend/src/http-structure.test.mjs frontend/src/timing.test.mjs frontend/src/qr-code.test.mjs tests/bump-version.test.mjs tests/updater.test.mjs tests/uninstall.test.mjs",
     "test:desktop": "node --test --test-concurrency=1 tests/desktop.test.mjs tests/table-desktop.test.mjs tests/workbench-features.test.mjs tests/lab-desktop.test.mjs tests/daily-tools-desktop.test.mjs",
     "typecheck": "tsc -p frontend/tsconfig.json",
     "start": "STREAMGLASS_BUILT_UI=1 electron .",
@@ -31,6 +31,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
+    "dompurify": "3.4.17",
     "lucide-react": "1.57.0",
     "monaco-editor": "^0.57.0",
     "quickjs-emscripten": "0.32.0",
@@ -42,14 +43,15 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "6.1.2",
-    "electron": "44.8.0",
+    "electron": "44.10.0",
     "electron-builder": "26.15.3",
     "playwright": "1.64.1",
     "typescript": "7.0.2",
     "vite": "8.3.4"
   },
   "overrides": {
-    "global-agent": "4.1.3"
+    "global-agent": "4.1.3",
+    "dompurify": "$dompurify"
   },
   "build": {
     "appId": "dev.streamglass.desktop",

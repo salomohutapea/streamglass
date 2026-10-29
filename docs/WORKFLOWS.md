@@ -84,6 +84,8 @@ Reaching the retained SSE capture budget stops retaining later events, not forwa
 
 Captured traffic can contain credentials, cookies, and personal data. Keep the local capture store private and review its contents before exporting; exports contain raw captured data. Streamglass uses a private local CA for TLS interception. Never share its private key. The public certificate may be installed on a selected device; it does not bypass certificate pinning or make an application trust user-installed certificates automatically.
 
+The proxy listens on `127.0.0.1` unless you turn on **Allow devices on the local network** in Settings → Proxy. While it is on, a new device is refused until you click **Allow device** in the banner in the main window, and Settings → Proxy lists approved and refused devices. Approved devices cannot reach this Mac's own services or private networks unless you list the destination under **LAN destinations**. See [device setup](DEVICES.md#local-network-exposure). Do not store real passwords or production tokens in Map Remote, Rewrite or Map Local rules; use test accounts and staging credentials, and delete captures and exports when finished. Retention keeps TLS-allowlisted captures in their own budget (5,000 captures and 1 GiB by default, adjustable in Settings → Storage from 256 MiB to 4 GiB) apart from other traffic (1,000 captures and 256 MiB).
+
 
 Device labels support a custom name, color, and icon using the pencil beside each device. Automatic icons use platform hints from request user agents; unknown or mixed platforms remain generic. Labels persist locally by device IP. New traffic gets a subtle half-second highlight, disabled with reduced motion.
 
@@ -95,7 +97,7 @@ New local connections are matched to their owning process in the background. The
 
 ## Controls and session export
 
-The toolbar has one Play/Pause capture control. Play starts the listener if needed and resumes capture and rules; Pause keeps traffic passing through without rules. Stop Proxy remains an advanced menu action. Single-capture deletion is immediate. Clearing all captures or an entire device requires confirmation.
+The toolbar has one Play/Pause capture control. Play starts the listener if needed and resumes capture and rules; Pause keeps traffic passing through without rules. Stop Proxy remains an advanced menu action; it also restores saved Mac proxy settings that still point at Streamglass within about 3 seconds, and Mac capture reapplies them when the proxy starts again. Single-capture deletion is immediate. Clearing all captures or an entire device requires confirmation.
 
 Export all captures (toolbar or File menu) writes a JSON session containing the complete retained request/response headers, bodies, SSE events, logs and connection metadata, regardless of current UI filters. The selected capture set is fixed when export begins; active records are serialized as the export progresses and may continue afterward. Existing bodyUnavailable and captureWarning flags remain in the export: data not retained cannot be recovered. Exports stream directly to a temporary file and replace the chosen destination only after a successful transfer.
 

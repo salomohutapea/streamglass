@@ -69,9 +69,9 @@ class EventStorageTests(unittest.TestCase):
 
     def test_allowlist_changes_rebuild_the_retention_index(self):
         self.service.save(stream(events=1))
-        self.assertIn("stream", self.service.retention_index()["limited"])
+        self.assertIn("stream", self.service.retention_index()["groups"]["limited"]["ids"])
         self.service.settings["tlsDomains"] = ["api.example.test"]
-        self.assertNotIn("stream", self.service.retention_index()["limited"])
+        self.assertNotIn("stream", self.service.retention_index()["groups"]["limited"]["ids"])
 
     def test_exports_restore_raw_base64(self):
         event = {"sequence": 1, "raw": "data: é\n\n"}

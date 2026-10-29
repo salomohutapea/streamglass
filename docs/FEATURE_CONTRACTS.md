@@ -1,6 +1,6 @@
 # Contracts for new features
 
-These are current constraints and extension guidance, not a second API specification. Use [architecture](ARCHITECTURE.md), [workflows](WORKFLOWS.md), and [MCP](MCP.md) for existing behavior and payload examples. Last source review: 2026-10-18.
+These are current constraints and extension guidance, not a second API specification. Use [architecture](ARCHITECTURE.md), [workflows](WORKFLOWS.md), and [MCP](MCP.md) for existing behavior and payload examples. Last source review: 2026-10-29.
 
 ## Ownership and communication
 
@@ -21,9 +21,20 @@ When adding an operation, trace it through the management route, service mutatio
 - Enabling SSL inspection affects new connections after existing matching opaque tunnels are interrupted. Never relabel historical encrypted records as decrypted requests.
 - TLS inspection does not decrypt application-level encrypted payloads. Preserve those bytes and allow raw text/base64 views where available.
 - Capture limits and preview pagination must not silently truncate bytes sent to the client. Mark missing retained content explicitly in views and exports.
-- Compressed bodies must be decoded for inspection with a bounded output. A small wire body can expand beyond the retention budget; mark it incomplete instead of storing or displaying an unbounded decoded body. This capture limit must not change forwarded bytes.
+- Compressed bodies must be decoded for inspection with a bounded output. A small wire body can expand beyond the retention budget; mark it incomplete instead of storing or displaying an unbounded decoded body. This capture limit must not change forwarded bytes. Compressed SSE streams use the same bounded decoding: Brotli output is requested in steps of at most 64 KiB.
 - Do not buffer an entire long-lived SSE response to implement search, export, throttling, or a new viewer.
 - Preserve duplicate headers using header pairs. Keep content encoding and length consistent when applying edits; reuse current mutation helpers.
+
+## LAN access and MCP approvals
+
+These controls came from the 2026-10-29 hardening. Keep them when changing proxy or MCP behavior.
+
+- New profiles listen on `127.0.0.1` (`listenHost`); the user opts in to `0.0.0.0` in Settings. MCP is off until enabled; `mcp.json` starts as `{enabled:false, token, approvedRedirects:[]}`. Existing profiles keep stored values.
+- `backend/lan_guard.py` owns LAN policy. While LAN access is on, a non-loopback client must be in `settings.lanDevices` (IP addresses), otherwise the connection is refused with `client.error` and recorded as a request in the state summary (`lanRequests`: at most 32, not persisted). Approving writes `lanDevices` through `/api/lan-devices`. Loopback clients (this Mac, simulators, `10.0.2.2`, `adb reverse`) are never restricted.
+- Approved LAN devices cannot reach non-global destinations (loopback, private, link-local, CGNAT, ULA, multicast, reserved) unless matched by `settings.lanAllowedDestinations` (host wildcards, IP addresses or CIDR ranges; `*`, `*.*` and `/0` rejected; at most 100). The `server_connect` hook checks every resolved address and `server_connected` checks the peer actually connected. Do not add a path that connects before these hooks run. Public IPs behind a VPN are not detected.
+- The phone setup site answers only a `Host` header that is one of the Mac's LAN IPv4 addresses (421 otherwise) and shows the CA's SHA-256 fingerprint.
+- MCP actions that send traffic or widen access wait for an in-app Allow (`requestApproval` in `electron/main.mjs`, `approve` in `electron/mcp-tools.mjs`): Deny is the default, a request is refused after 120 s, and at most 8 can wait. Covered: `replay_request` and `start_replay_job`; newly enabled Map Remote redirect servers (also via `set_traffic_rule_group_enabled` and any traffic-tools edit); `resolve_pending` edits to another scheme/host/port; new `tlsDomains`; new or changed rule JavaScript; `load_workspace`. Approved servers persist as `approvedRedirects` (at most 200). MCP refuses TLS patterns whose last two host labels are not literal; the desktop does not. A new MCP tool that sends traffic, redirects it or unlocks decryption must ask the same way and reuse the engine validators.
+- Stopping the proxy listener restores saved Mac system proxy settings that still point at Streamglass, and starting it reapplies them through Mac monitoring.
 
 ## TLS failure diagnostics
 
@@ -37,7 +48,7 @@ Breakpoint gates have no timeout. They wait until continued or dropped by the us
 
 **Pause capture and rules** is pass-through: no new capture, breakpoints, or scripts. Waiting gates release their original values and unsent transformations are discarded. Already-transmitted edits cannot be undone. Requests begun paused and streams switched to pass-through retain that mode until completion. **Stop Proxy** instead interrupts traffic.
 
-Map Local and network conditions also honor pause.Map Remote, Rewrite and Block follow the same rule: nothing applies while paused, and a flow marked pass-through never receives them. Their order is Block, Map Local, Map Remote, request Rewrite, upstream, response Rewrite; response body replacement is limited to complete UTF-8 non-SSE bodies of at most 8 MiB and otherwise forwards the original bytes.  An unsent mapped response returns to the origin path when pause releases its response gate; network waits are cancelled. Do not add a separate toggle that appears paused while an engine tool still alters traffic.
+Map Local and network conditions also honor pause.Map Remote, Rewrite and Block follow the same rule: nothing applies while paused, and a flow marked pass-through never receives them. Their order is Block, Map Local, Map Remote, request Rewrite, upstream, response Rewrite; response body replacement is limited to complete UTF-8 non-SSE bodies of at most 8 MiB (compressed bodies are decoded with the bounded decoder, and the decoded size counts) and otherwise forwards the original bytes.  An unsent mapped response returns to the origin path when pause releases its response gate; network waits are cancelled. Do not add a separate toggle that appears paused while an engine tool still alters traffic.
 
 Gate tokens are the authority for Continue/Drop. Reject stale or duplicate resolutions, including concurrent UI/MCP submissions. Continue should apply the current validated draft, support Command+Enter, and close the editor after success. Validation failures must leave the editor open with its draft intact. Closing the editor alone is not a resolution.
 
@@ -69,7 +80,7 @@ UI windows and MCP clients can edit rules concurrently. Follow the existing rule
 
 The rules PUT endpoint replaces the entire rule list and requires the current integer `rulesRevision` from `/api/state`. It returns the new revision. A missing revision is rejected with HTTP 428; a stale revision returns HTTP 409 `revision_conflict`, so the client must reload and reconcile its draft. Editor and MCP mutations fetch current rules before applying a change. Folder mutations and workspace loads also advance the persisted revision when they change the rule list. Do not retry a rejected write blindly or replace another client's changes from a stale snapshot. Folder deletion ungroups contained rules rather than deleting or disabling them.
 
-Pins protect captures from automatic eviction within the existing capture budget. Explicit deletion removes them, and pins do not restore truncated content. Saved-session features must distinguish complete bodies from previews and retain incomplete-capture warnings.
+Captures of TLS-allowlisted (inspected) domains have their own budget of 5000 captures and `settings.inspectedStorageMiB` (default 1024, accepted 256–4096; Settings → Storage), separate from the 1000 captures and 256 MiB for other traffic, so other traffic never evicts them. Both evict the oldest unpinned capture first, and retention never truncates forwarded data. Pins protect captures from automatic eviction within the existing capture budget. Explicit deletion removes them, and pins do not restore truncated content. Saved-session features must distinguish complete bodies from previews and retain incomplete-capture warnings.
 
 ## Verification to design with the change
 

@@ -46,6 +46,30 @@ class RetentionTests(unittest.TestCase):
             self.assertIn("r1", service.records)
             self.assertEqual(sorted(service.records), ["r1", "r4"])
 
+    def test_allowlisted_domains_have_their_own_bounded_budget(self):
+        with tempfile.TemporaryDirectory() as directory, patch("backend.service.MAX_RECORDS", 2), patch("backend.service.MAX_INSPECTED_RECORDS", 3):
+            service = self.service(directory, ["api.example.test"])
+            service.save(record(0, "api.example.test", pinned=True))
+            for index in range(1, 8):
+                service.save(record(index, "api.example.test"))
+            for index in range(8, 12):
+                service.save(record(index, "other.example.test"))
+            inspected = sorted(r["id"] for r in service.records.values() if "api.example.test" in r["url"])
+            others = sorted(r["id"] for r in service.records.values() if "other.example.test" in r["url"])
+            self.assertEqual(inspected, ["r0", "r6", "r7"])
+            self.assertEqual(others, ["r10", "r11"])
+            service.db.close()
+
+    def test_allowlisted_byte_budget_follows_the_setting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            service = self.service(directory, ["api.example.test"])
+            self.assertEqual(service.settings["inspectedStorageMiB"], 1024)
+            service.settings["inspectedStorageMiB"] = 1  # below the API minimum, to keep the fixture small
+            for index in range(1, 6):
+                service.save(record(index, "api.example.test", note="x" * 400_000))
+            self.assertEqual(sorted(service.records), ["r4", "r5"])
+            service.db.close()
+
     def test_discard_captures_empties_memory_and_database_but_keeps_settings(self):
         with tempfile.TemporaryDirectory() as directory:
             service = self.service(directory, ["api.example.test"])

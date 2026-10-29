@@ -9,15 +9,16 @@ import urllib.request
 import zipfile
 
 UPSTREAM_VERSION = "12.2.3"
-VERSION = "12.2.3+streamglass.1"
+VERSION = "12.2.3+streamglass.2"
 URL = "https://files.pythonhosted.org/packages/e0/56/0df365a56624472c397b45788b64a5c10ecabf0de3858bf538b42875a268/mitmproxy-12.2.3-py3-none-any.whl"
 SHA256 = "df75ccd15ccb39ab55ce9dd4130312270e8ba208eb927a7cbe50cb52678ec722"
 REPLACEMENTS = {
     "Version: 12.2.3": f"Version: {VERSION}",
+    "Requires-Dist: Brotli<=1.2.0,>=1.0": "Requires-Dist: Brotli==1.2.1",
     "Requires-Dist: cryptography<=48.1,>=42.0": "Requires-Dist: cryptography==50.0.2",
     "Requires-Dist: h2<=4.3.0,>=4.3.0": "Requires-Dist: h2==4.4.1",
     "Requires-Dist: msgpack<=1.1.2,>=1.0.0": "Requires-Dist: msgpack==1.2.3",
-    "Requires-Dist: tornado<=6.5.5,>=6.5.0": "Requires-Dist: tornado==6.5.10",
+    "Requires-Dist: tornado<=6.5.5,>=6.5.0": "Requires-Dist: tornado==6.6",
     "Requires-Dist: pyOpenSSL<=27.0.0,>=24.3": "Requires-Dist: pyOpenSSL==26.4.0",
 }
 

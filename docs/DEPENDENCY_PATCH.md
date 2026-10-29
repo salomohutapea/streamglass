@@ -1,18 +1,19 @@
 # mitmproxy compatibility build
 
-Streamglass maintains `mitmproxy==12.2.3+streamglass.1` because upstream 12.2.3 still restricts dependencies to releases with known advisories. This is a Streamglass-maintained compatibility build, **not an upstream-supported dependency combination**. It changes wheel metadata only; the 285 upstream non-metadata files and the MIT license are preserved byte-for-byte.
+Streamglass maintains `mitmproxy==12.2.3+streamglass.2` because upstream 12.2.3 still restricts dependencies to releases with known advisories. This is a Streamglass-maintained compatibility build, **not an upstream-supported dependency combination**. It changes wheel metadata only; the 285 upstream non-metadata files and the MIT license are preserved byte-for-byte.
 
 ## Exact changes
 
 | Package | Old installed version | Compatibility build requirement |
 | --- | --- | --- |
+| Brotli | 1.2.0 | 1.2.1, fixes CVE-2026-111497 |
 | cryptography | 48.0.1 | 50.0.2 |
 | h2 | 4.3.0 | 4.4.1 |
 | msgpack | 1.1.2 | 1.2.3 |
-| tornado | 6.5.5 | 6.5.10 |
+| tornado | 6.5.5 | 6.6 |
 | pyOpenSSL | 26.2.0 | 26.4.0, compatible with cryptography 50 |
 
-The package version is the sixth metadata change. The `.dist-info` directory is renamed and all wheel RECORD digests are regenerated. No upstream Python source, license, signatures, or security checks are removed. We do not use `--no-deps`, edit installed dependency metadata, suppress advisories, or mark known advisories as ignored.
+The package version is the seventh metadata change. Build `+streamglass.2` added the Brotli requirement and moved tornado from 6.5.10 to 6.6; `+streamglass.1` is superseded. The `.dist-info` directory is renamed and all wheel RECORD digests are regenerated. No upstream Python source, license, signatures, or security checks are removed. We do not use `--no-deps`, edit installed dependency metadata, suppress advisories, or mark known advisories as ignored.
 
 ## Reproduction and provenance
 
@@ -22,7 +23,7 @@ The package version is the sixth metadata change. The `.dist-info` directory is 
 df75ccd15ccb39ab55ce9dd4130312270e8ba208eb927a7cbe50cb52678ec722
 ```
 
-The recipe writes the wheel to ignored `build/wheels/`. Cached upstream bytes are checked again on every run. Archive timestamps and ordering are fixed; repeated builds using the same Python/zlib runtime produce identical bytes. The initial local output SHA-256 was `d387a5935b1f876aa4d61f32ad3613ecee39a7975d23d071c9f5d46bc7cfc654`; the upstream digest, exact metadata assertions, and preserved source bytes are the cross-toolchain provenance checks.
+The recipe writes the wheel to ignored `build/wheels/`. Cached upstream bytes are checked again on every run. Archive timestamps and ordering are fixed; repeated builds using the same Python/zlib runtime produce identical bytes. The upstream digest, exact metadata assertions, and preserved source bytes are the cross-toolchain provenance checks.
 
 `npm run setup`, `npm run dev`, and `npm run build:release` prepare this wheel automatically. Manual setup from the repository root:
 

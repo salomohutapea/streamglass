@@ -16,7 +16,7 @@ test('lab MCP tools validate requests, mark remote sends and bound timing data',
     return new Response(JSON.stringify(value),{headers:{'content-type':'application/json'}});
   };
   t.after(() => { globalThis.fetch = previous; });
-  const tools = new Map(); registerTools({registerTool(name,config,handler){tools.set(name,{config,handler});}},{baseUrl:'http://127.0.0.1:49871',token:'management-secret'});
+  const tools = new Map(); registerTools({registerTool(name,config,handler){tools.set(name,{config,handler});}},{baseUrl:'http://127.0.0.1:49871',token:'management-secret',confirm:async()=>true});
   const call = async (name,args={}) => { const tool=tools.get(name); const result=await tool.handler(z.object(tool.config.inputSchema).parse(args),{}); assert.equal(result.isError,undefined); return JSON.parse(result.content[0].text); };
   const rule = {id:'one',name:'Experiment',pattern:'*',method:'GET',enabled:false,action:'context-only'};
   assert.deepEqual(await call('set_scenarios',{rules:[rule]}),{saved:true,count:1});

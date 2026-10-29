@@ -19,7 +19,7 @@ flowchart LR
   Proxy -->|Captured traffic| Store[(Local SQLite)]
   UI[Streamglass desktop] <-->|Inspect and control| Proxy
   Proxy <-->|Allowed inspection only| Tools[Breakpoints and JS scripts]
-  Agent[AI agent] <-->|Authenticated local MCP| UI
+  Agent[AI agent] <-->|Authenticated local MCP, off by default| UI
 ```
 
 Clients send traffic through the local proxy. HTTPS content is visible only when the client trusts the certificate and the domain has SSL inspection enabled; otherwise, Streamglass shows encrypted connection metadata. SSE events arrive progressively. Breakpoints and scripts can change inspected traffic; **Pause capture and rules** bypasses both and forwards traffic without new capture. See [architecture](docs/ARCHITECTURE.md) for the detailed lifecycle and limits.
@@ -33,7 +33,7 @@ Clients send traffic through the local proxy. HTTPS content is visible only when
 - Read formatted JSON with folding and precise numeric text; expand headers when needed.
 - Export a selected capture as cURL or JSON, or export all retained captures as a session file.
 - Follow the active Mac network automatically, prepare simulator capture, and connect Android or iOS devices.
-- Connect a local AI client through the authenticated [MCP server](docs/MCP.md), including gradual SSE event delivery.
+- Connect a local AI client through the authenticated [MCP server](docs/MCP.md), which is off until you enable it. Actions that send traffic or widen access wait for your approval in the app.
 - Pin captures, combine HTTP/HTTPS/SSE and status-family filters, choose table columns, and place the inspector below or to the right.
 - Serve local response fixtures with Map Local and simulate request latency and per-flow upload/download rates. Active-tool pills open their settings.
 - Diagnose SSE timing, run repeatable scenarios, compare captures, create mocks, edit and resend requests, share redacted exports, and switch configuration workspaces.
@@ -69,9 +69,21 @@ Open Streamglass and choose **Connect device**. For Mac traffic, enable Mac capt
 
 For a first local inspection, start the proxy, configure a client to use the address shown in **Connect device**, and send a request to a test endpoint you control. Select its row to inspect the request and response. If the row is an encrypted HTTPS destination, complete certificate trust and allowlist setup, then reconnect and retry the request. To inspect an SSE stream, open its **SSE** tab; events appear as they arrive. When finished, turn off Mac capture if enabled and use the app's restoration controls before removing a development profile.
 
+The proxy listens on `127.0.0.1` and MCP is off in a new installation. To connect a phone or another device, turn on **Allow devices on the local network** in Settings → Proxy; each device then has to be approved in the app, and devices cannot reach this Mac's own services or private networks unless you allow it. Existing profiles keep their stored settings. See [device setup](docs/DEVICES.md#local-network-exposure) and [security](SECURITY.md).
+
 Only allowlisted HTTPS domains are decrypted. Other HTTPS connections appear as encrypted destinations. Adding a domain can interrupt its existing encrypted connections so the client reconnects with inspection enabled.
 
 **Pause capture and rules** forwards traffic without new capture, breakpoints, or scripts. Waiting breakpoints continue with their original value. Existing pass-through requests and streams stay pass-through until they finish. **Stop Proxy** interrupts active traffic. Deleting a capture removes retained data and does not stop its connection.
+
+## Uninstall
+
+`scripts/uninstall.sh` removes Streamglass for the current Mac user. Run it as that user, not as root, from a checkout of this repository:
+
+```sh
+scripts/uninstall.sh
+```
+
+It quits the app, restores the Mac proxy settings Streamglass changed, removes trust in this installation's CA and its login-keychain copy, deletes `~/Library/Application Support/Streamglass` (captures, rules, the CA private key and the MCP token) with its preferences and caches, and deletes Streamglass.app from `/Applications` or `~/Applications`. Use `--keep-app` to keep the app and `--yes` to skip the confirmation; `STREAMGLASS_DATA_DIR` selects a non-default data folder. It warns about a copy of the CA in the System keychain and about Android devices. Remove the CA from phones and simulators, and any Streamglass entry in your AI client's MCP configuration, yourself. See [security](SECURITY.md#removing-streamglass).
 
 ## Run from source
 
@@ -100,8 +112,8 @@ Start with [workflows](docs/WORKFLOWS.md) for capture and breakpoints, [testing 
 | [Workflows](docs/WORKFLOWS.md) | Search, breakpoints, JavaScript hooks, JSON editing, exports, and capture limits |
 | [Testing tools](docs/TESTING_TOOLS.md) | SSE timeline, scenarios, comparison, replay, mocks, redaction, workspaces, and codecs |
 | [Daily debugging](docs/DAILY_TOOLS.md) | Saved sessions, journey waterfall, custom fields, assertions, repeated replay, saved filters, and notes |
-| [Device setup](docs/DEVICES.md) | Mac networks, simulators, Android, physical iOS, trust, and restoration |
-| [MCP](docs/MCP.md) | Client configuration, tools, authentication, and streaming notifications |
+| [Device setup](docs/DEVICES.md) | Mac networks, simulators, Android, physical iOS, trust, LAN approval, and restoration |
+| [MCP](docs/MCP.md) | Client configuration, tools, authentication, approvals, and streaming notifications |
 | [Architecture](docs/ARCHITECTURE.md) | Runtime components, data flow, storage, and isolation |
 | [Development](docs/DEVELOPMENT.md) | Setup, commands, verification matrix, and troubleshooting |
 | [Release qualification](docs/RELEASE.md) | Candidate checklist and evidence record |
@@ -111,7 +123,7 @@ Start with [workflows](docs/WORKFLOWS.md) for capture and breakpoints, [testing 
 | [Feature roadmap](docs/ROADMAP.md) | Implemented workbench additions and follow-up ideas |
 | [Contributing](CONTRIBUTING.md) | Focused changes and useful verification |
 | [Security](SECURITY.md) | Captured secrets, local access, certificate handling, and reporting |
-| [Security review](docs/SECURITY_REVIEW.md) | Hardening evidence, dependency repairs and qualification limits |
+| [Security review](docs/SECURITY_REVIEW.md) | Hardening evidence, the 2026-10-29 defaults and approvals, dependency repairs and qualification limits |
 | [Dependency compatibility build](docs/DEPENDENCY_PATCH.md) | Reproducible mitmproxy patch, provenance and maintenance |
 | [Architecture review](docs/ARCHITECTURE_REVIEW.md) | SOLID assessment, extension seams, and remaining design limits |
 | [Performance audit](docs/PERFORMANCE_AUDIT.md) | Hot paths in the engine, renderer and main process, ranked fixes, and a measurement plan |
@@ -120,7 +132,7 @@ Start with [workflows](docs/WORKFLOWS.md) for capture and breakpoints, [testing 
 
 The current dependency build targets macOS Apple Silicon; Intel is not qualified because the updated cryptography package no longer provides Intel macOS wheels. Local application attribution is best-effort; remote devices are identified by peer address and may share an address. Apps that ignore system proxies or pin certificates may need app-specific debug configuration. OS and organization policies still apply.
 
-Capture retention, viewers, scripting, and editable bodies are bounded. Streamed bodies may have previews rather than complete retained content; exports identify unavailable data. Streamglass does not recover events that were forwarded without retention. Physical-device workflows, Intel packaging, signed distribution, and long-duration load need qualification on the intended target.
+Capture retention, viewers, scripting, and editable bodies are bounded. Streamed bodies may have previews rather than complete retained content; exports identify unavailable data. Streamglass does not recover events that were forwarded without retention. Physical-device workflows, Intel packaging, signed distribution, and long-duration load need qualification on the intended target. Captures are stored unencrypted on your Mac, and local builds are not Developer ID signed or notarized.
 
 ## Contributing
 

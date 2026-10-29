@@ -62,7 +62,7 @@ export async function prepare({ packaging = false } = {}) {
   if (!await supportsPython(python)) throw new Error(`${python} must be Python 3.12 or newer. Set STREAMGLASS_PYTHON to a compatible environment or recreate .venv.`);
   const imports = ['import mitmproxy, aiohttp',
     'from importlib.metadata import version',
-    'assert version("mitmproxy") == "12.2.3+streamglass.1", "Run the compatibility dependency setup"',
+    'assert version("mitmproxy") == "12.2.3+streamglass.2", "Run the compatibility dependency setup"',
     ...(packaging ? ['import PyInstaller'] : [])].join('; ');
   if (process.env.STREAMGLASS_PYTHON) {
     try { await run(python, ['-c', imports], { stdio: 'ignore' }); }

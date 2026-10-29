@@ -9,7 +9,7 @@ test('daily MCP tools require confirmed bounded sends and preserve read-only arc
     const value=path==='/api/replay-jobs'&&options.method==='GET'?{jobs:Array.from({length:3},(_,index)=>({id:`job-${index}`,state:'complete'}))}:{id:'job',state:'running'};
     return new Response(JSON.stringify(value),{headers:{'content-type':'application/json'}});};
   t.after(()=>{globalThis.fetch=previous;});
-  const tools=new Map();registerTools({registerTool(name,config,handler){tools.set(name,{config,handler});}},{baseUrl:'http://127.0.0.1:47821',token:'fixture-secret'});
+  const tools=new Map();registerTools({registerTool(name,config,handler){tools.set(name,{config,handler});}},{baseUrl:'http://127.0.0.1:47821',token:'fixture-secret',confirm:async()=>true});
   const parse=(name,value)=>z.object(tools.get(name).config.inputSchema).parse(value);
   const params={request:{url:'https://example.test/',method:'POST',headers:[],bodyBase64:''},count:5,intervalMs:1000,timeoutMs:5000,stopOnError:true,confirmSend:true};
   assert.throws(()=>parse('start_replay_job',{...params,confirmSend:false}));
@@ -34,7 +34,7 @@ test('custom field MCP tools edit one field through the revision-checked prefere
     const value=path==='/api/productivity'?store:{id:'capture',rev:1,fields:[]};
     return new Response(JSON.stringify(value),{headers:{'content-type':'application/json'}});};
   t.after(()=>{globalThis.fetch=previous;});
-  const tools=new Map();registerTools({registerTool(name,config,handler){tools.set(name,{config,handler});}},{baseUrl:'http://127.0.0.1:47821',token:'fixture-secret'});
+  const tools=new Map();registerTools({registerTool(name,config,handler){tools.set(name,{config,handler});}},{baseUrl:'http://127.0.0.1:47821',token:'fixture-secret',confirm:async()=>true});
   const parse=(name,value)=>z.object(tools.get(name).config.inputSchema).parse(value);
   const call=async(name,value)=>JSON.parse((await tools.get(name).handler(parse(name,value),{})).content[0].text);
   assert.equal(tools.get('list_custom_fields').config.annotations.readOnlyHint,true);

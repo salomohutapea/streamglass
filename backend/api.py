@@ -76,6 +76,14 @@ def create_app(service):
             result.update(events=selected, eventsFrom=start)
         return web.json_response(result)
 
+    async def lan_device(request):
+        """Approve or refuse a LAN device; approval persists in settings.lanDevices."""
+        value = await request.json()
+        if not isinstance(value, dict) or set(value) != {"address", "allow"} or type(value["allow"]) is not bool or not isinstance(value["address"], str):
+            raise ValueError("Expected device address and allow boolean")
+        service.lan_guard.decide(value["address"], value["allow"])
+        return web.json_response({"lanDevices": service.settings["lanDevices"], "lanRequests": service.lan_guard.summary()})
+
     async def traffic_tools(request):
         if request.method == "PUT":
             from .traffic_tools import validate
@@ -108,8 +116,18 @@ def create_app(service):
         changes = await request.json()
         if isinstance(changes, dict) and "running" in changes:
             changes["proxyEnabled"] = changes.pop("running")
-        if not isinstance(changes, dict) or set(changes) - {"capturePaused", "proxyEnabled", "proxyPort", "listenHost", "tlsDomains"}:
+        if not isinstance(changes, dict) or set(changes) - {"capturePaused", "proxyEnabled", "proxyPort", "listenHost", "tlsDomains", "lanDevices", "lanAllowedDestinations", "inspectedStorageMiB"}:
             raise ValueError("Unknown settings")
+        from .lan_guard import validate_devices, validate_destinations
+        if "lanDevices" in changes:
+            changes["lanDevices"] = validate_devices(changes["lanDevices"])
+        if "lanAllowedDestinations" in changes:
+            changes["lanAllowedDestinations"] = validate_destinations(changes["lanAllowedDestinations"])
+        if "inspectedStorageMiB" in changes:
+            from .service import INSPECTED_MIB_RANGE
+            low, high = INSPECTED_MIB_RANGE
+            if type(changes["inspectedStorageMiB"]) is not int or not low <= changes["inspectedStorageMiB"] <= high:
+                raise ValueError(f"inspectedStorageMiB must be an integer from {low} to {high}")
         if "proxyEnabled" in changes and type(changes["proxyEnabled"]) is not bool:
             raise ValueError("proxyEnabled must be boolean")
         if "capturePaused" in changes and type(changes["capturePaused"]) is not bool:
@@ -158,6 +176,8 @@ def create_app(service):
             service.master.options.update(allow_hosts=service.tls_patterns())
             if "tlsDomains" in changes:
                 interrupted = service.interrupt_newly_inspected_tunnels(previous["tlsDomains"])
+        if "inspectedStorageMiB" in changes and service.evict("inspected"):
+            service.db.commit()  # a smaller budget applies now, not at the next capture
         service.persist_config()
         return web.json_response({**service.state()["settings"], "interruptedConnections": interrupted})
 
@@ -419,7 +439,7 @@ def create_app(service):
         return socket
 
     app.add_routes([web.get("/api/state", state), web.get("/api/pending", pending), web.get("/api/workspace-config", workspace_config), web.put("/api/workspace-config", workspace_config), web.get("/api/traffic-tools", traffic_tools), web.put("/api/traffic-tools", traffic_tools), web.post("/api/records/{id}/pin", pin), web.get("/api/search", search), web.get("/api/records/{id}", record), web.get("/api/records/{id}/fields", record_fields),
-                    web.put("/api/settings", settings), web.put("/api/rules", rules),
+                    web.put("/api/settings", settings), web.post("/api/lan-devices", lan_device), web.put("/api/rules", rules),
                     web.post("/api/folders", folder), web.patch("/api/folders/{id}", folder), web.delete("/api/folders/{id}", folder),
                     web.post("/api/pending/{token}", resume), web.delete("/api/records", delete),
                     web.delete("/api/records/{id}", delete), web.get("/api/export/{id}", export),

@@ -7,8 +7,8 @@ from importlib.metadata import version
 
 
 def patch_engine(on_cancel):
-    if version("mitmproxy") != "12.2.3+streamglass.1":
-        raise RuntimeError("Streamglass requires mitmproxy 12.2.3+streamglass.1; run npm run setup")
+    if version("mitmproxy") != "12.2.3+streamglass.2":
+        raise RuntimeError("Streamglass requires mitmproxy 12.2.3+streamglass.2; run npm run setup")
     from mitmproxy.proxy import commands
     from mitmproxy.proxy.layers import http as engine
     from mitmproxy.proxy.layers.http._events import ResponseData, RequestProtocolError, ResponseProtocolError

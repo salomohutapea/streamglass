@@ -60,7 +60,7 @@ class ProxyLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_occupied_port_restores_previous_listener_without_exiting(self):
         previous_port = self.service.settings["proxyPort"]
-        occupied = await asyncio.start_server(lambda reader, writer: writer.close(), "0.0.0.0", 0)
+        occupied = await asyncio.start_server(lambda reader, writer: writer.close(), "127.0.0.1", 0)
         try:
             port = occupied.sockets[0].getsockname()[1]
             error = await self.settings({"proxyPort": port}, status=400)
@@ -86,7 +86,7 @@ class OccupiedStartupPortTests(unittest.IsolatedAsyncioTestCase):
     async def test_startup_on_occupied_port_reports_error_and_recovers_after_port_change(self):
         directory = tempfile.TemporaryDirectory(prefix="streamglass-occupied-")
         self.addCleanup(directory.cleanup)
-        occupied = await asyncio.start_server(lambda reader, writer: writer.close(), "0.0.0.0", 0)
+        occupied = await asyncio.start_server(lambda reader, writer: writer.close(), "127.0.0.1", 0)
         service = Service(directory.name, "lifecycle-only-token-1234567890", free_port())
         service.settings["proxyPort"] = occupied.sockets[0].getsockname()[1]
         try:
