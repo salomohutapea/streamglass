@@ -18,3 +18,4 @@
 - Restore the sidebar collapse button's full click area, remove device selection checkmarks, and hide application counts while pin controls are visible.
 - Preserve editor Find shortcuts when searching Tools.
 - Keep automated verification and release builds on a supported macOS runner.
+- Keep text filtering usable in narrow traffic panes and prevent queued scroll events from dismissing a newly opened request menu.

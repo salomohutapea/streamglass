@@ -135,6 +135,10 @@ An empty trailing area fills unused pane width so row borders, hover and selecti
 extend to the right edge without stretching data columns. Row actions remain at
 the right edge. When columns and actions exceed the pane width, the table scrolls
 horizontally inside the traffic pane.
+Request context menus remember the table scroll position at opening: an already
+queued scroll event at that position leaves the menu open, while later movement
+closes it. The text-filter controls wrap when needed to keep the input usable in
+narrow panes; the content-type quick-filter strip remains a single row.
 
 ## Inspector orientation transition
 
