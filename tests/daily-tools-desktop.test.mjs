@@ -82,8 +82,17 @@ c.commit()`,path.join(directory,'captures.sqlite3'),String(proxyPort)],{input:JS
     assert.equal(await panel.getByLabel(/^Field name /).last().inputValue(),'Draft field');
     await panel.getByRole('button',{name:'Delete field Draft field',exact:true}).click();
     // Right-clicking a request starts an unsaved field scoped to that API.
+    await page.evaluate(()=>{
+      window.__contextMenuEvents=[];
+      const table=document.querySelector('.table-scroll');
+      const record=(event)=>window.__contextMenuEvents.push({type:event.type,left:table.scrollLeft,top:table.scrollTop,width:table.clientWidth,scrollWidth:table.scrollWidth,menu:!!document.querySelector('[aria-label="Request actions"]'),focus:document.activeElement?.tagName});
+      table.addEventListener('scroll',record);
+      window.addEventListener('resize',record);
+      document.addEventListener('focusin',record);
+    });
     await page.locator('.traffic tbody tr').filter({hasText:'/initial'}).filter({hasNotText:'/sse'}).click({button:'right'});
-    await page.getByRole('menuitem',{name:'Add custom field…'}).click();
+    try{await page.getByRole('menuitem',{name:'Add custom field…'}).click();}
+    catch(error){console.error('CONTEXT_MENU_EVENTS',JSON.stringify(await page.evaluate(()=>window.__contextMenuEvents)));throw error;}
     await toolsPage.waitForFunction(()=>[...document.querySelectorAll('input[aria-label^="Field URL wildcard "]')].some(input=>input.value.endsWith('/initial*')));
     assert.equal(await panel.getByLabel(/^Field method /).last().inputValue(),'POST');
     // Clicking a path in the open picker fills the active field; no separate target to choose.

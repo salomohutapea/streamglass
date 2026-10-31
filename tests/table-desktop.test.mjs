@@ -93,6 +93,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await openSidebar(page);
     const deviceRow = page.locator('.device-row').filter({ hasText: 'test-device' });
     await openSidebar(page);
+    await deviceRow.hover();
     await deviceRow.getByRole('button', { name: 'Customize test-device', exact: true }).click();
     const deviceDialog = page.getByRole('dialog');
     await deviceDialog.getByRole('textbox', { name: 'Name', exact: true }).fill('Flight Pixel');
@@ -111,6 +112,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await deviceRow.getByText('Flight Pixel', { exact: false }).waitFor();
     assert.equal(await page.locator('tbody tr.incoming-row').count(), 0);
     await openSidebar(page);
+    await deviceRow.hover();
     await deviceRow.getByRole('button', { name: 'Customize Flight Pixel', exact: true }).click();
     assert.equal(await deviceDialog.getByRole('textbox', { name: 'Name', exact: true }).inputValue(), 'Flight Pixel');
     assert.equal(await deviceDialog.getByLabel('Color', { exact: true }).inputValue(), '#e6a355');
@@ -490,6 +492,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     }
     await dismissBulk(() => page.getByRole('button', { name: 'Delete all records', exact: true }).click());
     await openSidebar(page);
+    await deviceRow.hover();
     await dismissBulk(() => deviceRow.getByRole('button', { name: 'Delete Flight Pixel and its records', exact: true }).click());
     await dismissBulk(() => clickMenu('clear-all'));
     await openSidebar(page);
