@@ -17,3 +17,4 @@
 - Open HTTPS / TLS directly from TLS allowlist links and align the approved-devices heading.
 - Restore the sidebar collapse button's full click area, remove device selection checkmarks, and hide application counts while pin controls are visible.
 - Preserve editor Find shortcuts when searching Tools.
+- Keep automated verification and release builds on a supported macOS runner.
