@@ -7,6 +7,12 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   renameWorkspace: (input) => ipcRenderer.invoke('workspaces-rename', input),
   deleteWorkspace: (input) => ipcRenderer.invoke('workspaces-delete', input),
   getBootstrap: () => ipcRenderer.invoke('bootstrap'),
+  getUiZoom: () => ipcRenderer.invoke('ui-zoom'),
+  onUiZoom: (callback) => {
+    const listener = (_event, factor) => callback(factor);
+    ipcRenderer.on('ui-zoom-changed', listener);
+    return () => ipcRenderer.removeListener('ui-zoom-changed', listener);
+  },
   copyText: (text) => ipcRenderer.invoke('copy-text', text),
   readClipboardText: () => ipcRenderer.invoke('read-clipboard-text'),
   getMcpConnection: () => ipcRenderer.invoke('mcp-connection'),

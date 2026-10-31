@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Folder, Globe, Pencil, Plus, Trash2 } from 'lucide-react';
+import ListSearch from './ListSearch';
+import {matchesRuleSearch} from './list-search.mjs';
 import RuleList, { PopupMenu, ruleDragType } from './RuleList';
 import { upsertRule } from './rule-order.mjs';
 import './editor-window.css';
@@ -30,6 +32,7 @@ export default function EditorWindow() {
   const [data, setData] = useState<State | null>(null);
   const [editing, setEditing] = useState<Rule | null>(null);
   const [editingRevision, setEditingRevision] = useState<number | null>(null);
+  const [query, setQuery] = useState('');
   const [selectedFolder, setSelectedFolder] = useState('all');
   const [dropFolder, setDropFolder] = useState<string | null>(null);
   const [folderForm, setFolderForm] = useState<{ id?: string; name: string } | null>(null);
@@ -46,7 +49,8 @@ export default function EditorWindow() {
   const folders = data?.folders?.filter(folder => folder.kind === kind) ?? [];
   const rules = data?.rules.filter(rule => mode === 'scripts' ? rule.breakpoint === false : rule.breakpoint !== false) ?? [];
   const activeFolder = folders.find(folder => folder.id === selectedFolder);
-  const visibleRules = rules.filter(rule => selectedFolder === 'all' || (selectedFolder === 'ungrouped' ? !rule.folderId : rule.folderId === selectedFolder));
+  const scopedRules = rules.filter(rule => selectedFolder === 'all' || (selectedFolder === 'ungrouped' ? !rule.folderId : rule.folderId === selectedFolder));
+  const visibleRules = scopedRules.filter(rule => matchesRuleSearch(rule, query, folders));
 
   useEffect(() => {
     if (data && selectedFolder !== 'all' && selectedFolder !== 'ungrouped' && !data.folders?.some(folder => folder.id === selectedFolder)) {
@@ -181,7 +185,8 @@ export default function EditorWindow() {
         <section className="rule-folder-content" aria-label="Folder rules">
           <div className="rule-folder-title"><h2>{selectedFolder === 'all' ? 'All rules' : activeFolder?.name ?? 'Ungrouped'} <small>{visibleRules.length}</small></h2>{activeFolder && <div className="rule-folder-actions"><button className="icon-button" aria-label="Rename folder" title="Rename folder" onClick={() => { setFolderForm({ id: activeFolder.id, name: activeFolder.name }); setConfirmDeleteFolder(false); setError(''); }}><Pencil size={13}/></button><button className="icon-button" aria-label="Delete folder" title="Delete folder" onClick={() => { setConfirmDeleteFolder(true); setFolderForm(null); }}><Trash2 size={13}/></button></div>}</div>
           {confirmDeleteFolder && activeFolder && <div className="rule-folder-confirm" role="group" aria-label="Delete folder?"><p>Delete “{activeFolder.name}”? Rules move to Ungrouped.</p><div><button onClick={() => setConfirmDeleteFolder(false)}>Cancel</button><button className="error-text" aria-label="Keep rules and delete folder" onClick={() => void deleteFolder()}>Delete folder</button></div></div>}
-          <RuleList rules={visibleRules} folders={folders} onMove={(rule, folderId) => void moveRule(rule, folderId)} onCreateFolderAndMove={(rule, name) => void createFolderAndMove(rule, name)} emptyMessage={selectedFolder !== 'all' ? 'Folder is empty' : mode === 'scripts' ? 'No scripts yet' : 'No breakpoints yet'} onToggle={(rule, enabled) => void mutateRules(rules => rules.map(item => item.id === rule.id ? { ...item, enabled } : item))} onEdit={rule => { setEditing(rule); setEditingRevision(data?.rulesRevision ?? null); setError(''); }} onDelete={rule => void mutateRules(rules => rules.filter(item => item.id !== rule.id))}/>
+          <ListSearch label={mode === 'scripts' ? 'Search scripts' : 'Search breakpoints'} placeholder={mode === 'scripts' ? 'Search name, URL, method or script…' : 'Search name, URL, method or stage…'} value={query} onChange={setQuery} matches={visibleRules.length} total={scopedRules.length}/>
+          <RuleList rules={visibleRules} folders={folders} onMove={(rule, folderId) => void moveRule(rule, folderId)} onCreateFolderAndMove={(rule, name) => void createFolderAndMove(rule, name)} emptyMessage={query.trim() ? 'No matching rules. Clear search to show the list.' : selectedFolder !== 'all' ? 'Folder is empty' : mode === 'scripts' ? 'No scripts yet' : 'No breakpoints yet'} onToggle={(rule, enabled) => void mutateRules(rules => rules.map(item => item.id === rule.id ? { ...item, enabled } : item))} onEdit={rule => { setEditing(rule); setEditingRevision(data?.rulesRevision ?? null); setError(''); }} onDelete={rule => void mutateRules(rules => rules.filter(item => item.id !== rule.id))}/>
         </section>
       </fieldset> : <p className="muted">Connecting…</p>}</>}
     </div>

@@ -9,7 +9,7 @@ th:first-child{width:104px}th:nth-child(3){width:100px}th:last-child{width:28px}
 
 .header-search{display:flex;align-items:center;gap:6px;flex:1;min-width:0;margin:0 16px;-webkit-app-region:no-drag}.header-search .search{min-width:0}.header-search .search input{min-width:0}.toolbar-controls{flex-shrink:0}.detached .header-search{display:none}
 .toolbar-labeled-button{width:auto;gap:5px;padding:5px 7px;white-space:nowrap;font-size:10px}
-.traffic table{min-width:480px}
+.traffic table{min-width:0}
 
 .device-name small{display:block;margin-top:2px;font-size:10px;font-weight:400;color:var(--muted)}
 #device-label-form input[type=color]{width:54px;height:32px;padding:3px;cursor:pointer}
@@ -31,7 +31,7 @@ th:first-child{width:104px}th:nth-child(3){width:100px}th:last-child{width:28px}
 .traffic-filters{display:flex;align-items:center;gap:12px;padding:7px 10px;border-bottom:1px solid var(--line);flex-shrink:0;flex-wrap:wrap}
 .traffic-filters [role=group]{display:flex;gap:3px}.traffic-filters button{padding:3px 7px;font-size:10px;background:transparent}.traffic-filters button[aria-pressed=true]{background:var(--selection);color:var(--accent);border-color:var(--accent)}.traffic-filters>.icon-button{margin-left:auto}
 .traffic-footer .active-tools{display:flex;gap:4px;overflow:auto}.active-tools button{font-size:10px;padding:2px 6px;border-radius:9px;color:var(--accent);white-space:nowrap}.traffic-footer{gap:8px}.traffic-footer>span{white-space:nowrap}
-.traffic td:last-child{white-space:nowrap}.traffic th:last-child{width:62px}.traffic th[data-column=request]{width:auto;min-width:160px}.traffic th[data-column=method]{width:104px}.traffic th[data-column=time]{width:100px}.traffic th[data-column=duration],.traffic th[data-column=status],.traffic th[data-column=protocol]{width:85px}.traffic th[data-column=device],.traffic th[data-column=application]{width:120px}
+.traffic td:last-child{white-space:nowrap}.traffic th:last-child{width:62px}
 .workspace.inspector-below{display:grid;grid-template-columns:clamp(160px,var(--sidebar-width),calc(100vw - 588px)) 4px minmax(0,1fr);grid-template-rows:minmax(80px,1fr) 4px minmax(180px,var(--inspector-height))}
 .inspector-below>.sidebar{grid-column:1;grid-row:1/4;width:auto}.inspector-below>.splitter:first-of-type{grid-column:2;grid-row:1/4}.inspector-below>.traffic{grid-column:3;grid-row:1;min-height:0}.inspector-below>.splitter:last-of-type{grid-column:3;grid-row:2;width:100%;height:4px;cursor:row-resize;border:0}.inspector-below>.inspector{grid-column:3;grid-row:3;width:auto;max-width:none;min-width:0;min-height:0}
 dialog[aria-label="Traffic tools"]{width:min(740px,calc(100vw - 40px))}dialog[aria-label="Traffic tools"] .modal-body{display:flex;flex-direction:column;gap:12px}dialog[aria-label="Traffic tools"] fieldset{border:1px solid var(--line);border-radius:6px;margin:0;padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:12px}dialog[aria-label="Traffic tools"] legend{color:var(--muted);padding:0 6px}dialog[aria-label="Traffic tools"] fieldset label{display:flex;flex-direction:column;gap:6px;min-width:0}dialog[aria-label="Traffic tools"] fieldset label:has(input[type=checkbox]){flex-direction:row;align-items:center;grid-column:1/-1}dialog[aria-label="Traffic tools"] label:has(textarea){grid-column:1/-1}dialog[aria-label="Traffic tools"] textarea{min-height:90px;font-family:monospace}dialog[aria-label="Traffic tools"] ol{padding:0;list-style:none;margin:0;display:flex;flex-direction:column;gap:6px}dialog[aria-label="Traffic tools"] li{display:flex;gap:4px;align-items:center;padding:6px;background:var(--raised);border-radius:5px}dialog[aria-label="Traffic tools"] li label{display:flex;gap:6px;align-items:center;flex:1;overflow-wrap:anywhere}dialog[aria-label="Traffic tools"] .tabs button[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
@@ -306,3 +306,29 @@ details[open]:not(.menu)::details-content{block-size:auto}
 .traffic-filters .traffic-filter-end .saved-view-chooser{max-width:260px}
 .sidebar .device-name{display:block;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sidebar .device-name small{margin-left:6px}
+
+/* One non-wrapping row: filters scroll, saved views and columns stay fixed. */
+.traffic-filters{flex-wrap:nowrap;min-width:0}
+.quick-filter-strip{display:flex;align-items:center;flex:1 1 0;min-width:0;gap:2px}
+.quick-filter-viewport{min-width:0;flex:1;overflow-x:auto;scrollbar-width:none}
+.quick-filter-viewport::-webkit-scrollbar{display:none}
+.quick-filter-options{display:flex;align-items:center;width:max-content;gap:6px;white-space:nowrap;padding:2px 0}
+.quick-filter-options>[role=group]{flex-shrink:0;border-left:1px solid var(--line);padding-left:6px}
+.quick-filter-options button{flex-shrink:0;white-space:nowrap}
+.traffic-filters .quick-filter-scroll{display:flex;align-items:center;justify-content:center;flex:0 0 20px;width:20px;padding:3px 0}
+.traffic-filters .quick-filter-scroll:disabled{opacity:.22}
+.traffic-filters .traffic-filter-end{flex:0 0 auto;min-width:100px;max-width:180px;margin-left:6px}
+.traffic-filters .traffic-filter-end .saved-view-chooser{max-width:140px}
+
+.sidebar .sidebar-tls-link{width:100%;justify-content:flex-start;border-radius:0;border-left:0;border-right:0;border-bottom:0;background:transparent;text-align:left;font-size:12px}
+.sidebar .sidebar-tls-link:hover{background:var(--hover)}
+.sidebar-tls-count{display:inline-flex;align-items:center;margin-left:auto;font-size:11px;white-space:nowrap}
+
+/* Fixed traffic columns grow the table rather than redistributing adjacent widths. */
+.traffic th[data-column]{width:auto;min-width:0}
+.traffic .traffic-filler{width:auto;min-width:0;padding:0}
+.traffic th[data-column]>button[draggable=true]{cursor:grab}
+.traffic th[data-column]>button[draggable=true]:active{cursor:grabbing}
+.traffic th[data-column-drop]::after{content:"";position:absolute;top:0;bottom:0;width:2px;background:var(--accent);pointer-events:none;z-index:3}
+.traffic th[data-column-drop=before]::after{left:0}
+.traffic th[data-column-drop=after]::after{right:0}

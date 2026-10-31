@@ -11,7 +11,7 @@ import {GripVertical,Plus,X,Trash2,TriangleAlert,Route,Layers,Filter,StickyNote,
 import {fieldSources,newField,newLocation,changeSource,isHeaderSource,isDefaultLocation,locationMatches,locationText,pickInto,moveField,moveFieldBy,placeField,orderLike,urlWildcard,type FieldSource} from './custom-fields.mjs';
 
 export const dailyTabs = ['Sessions','Journeys','Custom Fields','Assertions','Repeat','Saved filters','Notes'];
-export type SavedView = {id:string;name:string;filter:string;scope:'url'|'request'|'response'|'event';mode:string;protocols:string[];statuses:number[];device:string;application:string|null;library:string;conditions?:{joiner:'and'|'or';scope:'url'|'request'|'response'|'event';mode:string;filter:string}[]};
+export type SavedView = {id:string;name:string;filter:string;scope:'url'|'request'|'response'|'event';mode:string;protocols:string[];statuses:number[];contentTypes?:string[];device:string;application:string|null;library:string;conditions?:{joiner:'and'|'or';scope:'url'|'request'|'response'|'event';mode:string;filter:string}[]};
 export type FieldDraft = {nonce:string;pattern:string;method:string;recordId?:string|null};
 type Props = {tab:string;fieldDraft?:FieldDraft;api:(path:string,method?:string,body?:any)=>Promise<any>;records:any[];selectedId?:string;serverRevision?:number;currentView?:Omit<SavedView,'id'|'name'>;onApplyView?:(view:SavedView)=>void;onChanged:()=>Promise<void>;onSelect:(id:string)=>void};
 const optionName=(record:any)=>`${requestTime(record.startedAt)}  ${record.method} ${record.url}`;

@@ -1,3 +1,5 @@
+import ListSearch from './ListSearch';
+import {matchesListSearch} from './list-search.mjs';
 import McpSettings from './McpSettings';
 import { useEffect, useRef, useState } from 'react';
 import JsonViewer from './JsonViewer';
@@ -20,6 +22,7 @@ const freshScenario=(template:typeof scenarioTemplates[number])=>({id:crypto.ran
 export default function LabPanel({api,connection,records,selectedId,initialTab='Compare',navigationRevision=0,standalone=false,preferencesRevision,currentView,fieldDraft,onApplyView,onClose,onChanged,onSelect}:Props){
   const dialog=useRef<HTMLDialogElement>(null);
   const [tab,setTab]=useState(initialTab);
+  const [toolQuery,setToolQuery]=useState('');
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
   const [scenarioRules,setScenarioRules]=useState<any[]>([]),[scenarioBaseline,setScenarioBaseline]=useState(''),[scenariosLoaded,setScenariosLoaded]=useState(false);
   const [workspaces,setWorkspaces]=useState<any>({activeId:null,workspaces:[]}),[workspaceName,setWorkspaceName]=useState(''),[openScenario,setOpenScenario]=useState(''),[renamingId,setRenamingId]=useState(''),[renameValue,setRenameValue]=useState('');
@@ -29,8 +32,14 @@ export default function LabPanel({api,connection,records,selectedId,initialTab='
   async function act(operation:()=>Promise<void>){setBusy(true);setError('');setNotice('');try{await operation();}catch(e:any){setError(e.message??String(e));}finally{setBusy(false);}}
   async function refreshWorkspaces(){const value=await window.streamglass!.getWorkspaces();setWorkspaces(value);}
   function updateScenario(id:string,patch:any){setScenarioRules(rules=>rules.map(rule=>rule.id===id?{...rule,...patch}:rule));}
+  const toolGroups=[{name:'AI agents',items:['Agent (MCP)']},{name:'Traffic',items:['Map Local','Map Remote','Rewrite','Block','Network Conditioner']},{name:'Daily work',items:dailyTabs},{name:'Testing',items:tabs},{name:'Setup',items:setupTabs}];
+  const aliases:Record<string,string>={'Agent (MCP)':'AI assistant integration','Map Local':'mock file fixture','Map Remote':'redirect proxy','Network Conditioner':'throttle latency bandwidth slow speed','Sessions':'capture archive','Journeys':'correlate search','Custom Fields':'extract JSONPath values','Assertions':'validate checks','Repeat':'loop requests','Saved filters':'views search','Scenarios':'simulate SSE failure delay reconnect','Codecs':'decode encode encryption','Workspaces':'configuration profiles'};
+  const matchingGroups=toolGroups.map(group=>({...group,items:group.items.filter(name=>matchesListSearch(toolQuery,[name,group.name,aliases[name]]))})).filter(group=>group.items.length);
+  const matchingTools=matchingGroups.flatMap(group=>group.items);
+  const totalTools=toolGroups.reduce((count,group)=>count+group.items.length,0);
+  const openTool=(name:string)=>{setTab(name);setError('');setNotice('');};
   const content=<><div className={standalone?'modal-head window-header':'modal-head'}><h2>Tools</h2>{!standalone&&<button aria-label="Close tools" onClick={onClose}>Close</button>}</div>
-    <div className="lab-layout"><nav className="lab-tabs" aria-label="Tools navigation"><span>AI agents</span><button aria-pressed={tab==='Agent (MCP)'} onClick={()=>{setTab('Agent (MCP)');setError('');setNotice('');}}><SectionIcon name="Agent (MCP)"/><span className="lab-tab-name">Agent (MCP)</span></button><span>Traffic</span>{['Map Local','Map Remote','Rewrite','Block','Network Conditioner'].map(name=><button key={name} aria-pressed={tab===name} onClick={()=>setTab(name)}><SectionIcon name={name}/><span className="lab-tab-name">{name}</span></button>)}<span>Daily work</span>{dailyTabs.map(name=><button key={name} aria-pressed={tab===name} onClick={()=>setTab(name)}><SectionIcon name={name}/><span className="lab-tab-name">{name}</span></button>)}<span>Testing</span>{tabs.map(name=><button key={name} aria-pressed={tab===name} onClick={()=>{setTab(name);setError('');setNotice('');}}><SectionIcon name={name}/><span className="lab-tab-name">{name}</span></button>)}<span>Setup</span>{setupTabs.map(name=><button key={name} aria-pressed={tab===name} onClick={()=>{setTab(name);setError('');setNotice('');}}><SectionIcon name={name}/><span className="lab-tab-name">{name}</span></button>)}</nav>
+    <div className="lab-layout"><div className="lab-tool-navigation"><ListSearch label="Search tools" placeholder="Search tools…" value={toolQuery} onChange={setToolQuery} matches={matchingTools.length} total={totalTools} onEnter={()=>{if(matchingTools[0])openTool(matchingTools[0]);}}/><nav className="lab-tabs" aria-label="Tools navigation">{matchingGroups.map(group=><div className="lab-tool-group" key={group.name}><span className="lab-tool-heading">{group.name}</span>{group.items.map(name=><button key={name} aria-pressed={tab===name} onClick={()=>openTool(name)}><SectionIcon name={name}/><span className="lab-tab-name">{name}</span></button>)}</div>)}{!matchingTools.length&&<p className="list-search-empty" role="status">No matching tools.</p>}</nav></div>
     <div className="modal-body lab-body">{error&&<p role="alert" className="error-text">{error}</p>}{notice&&<p role="status">{notice}</p>}
     <div hidden={!dailyTabs.includes(tab)}><DailyTools tab={tab} fieldDraft={fieldDraft} api={api} records={records} selectedId={selectedId} serverRevision={preferencesRevision} currentView={currentView} onApplyView={onApplyView} onChanged={onChanged} onSelect={id=>{onSelect(id);if(!standalone)onClose();}}/></div>
     {(['Map Remote','Rewrite','Block'] as const).map(name=><TrafficRules key={name} api={api} onChanged={onChanged} active={tab===name} kind={({'Map Remote':'mapRemoteRules','Rewrite':'rewriteRules','Block':'blockRules'} as Record<string,RuleKind>)[name]}/>)}

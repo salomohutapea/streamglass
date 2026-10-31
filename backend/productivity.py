@@ -130,6 +130,8 @@ def validate(value):
             allowed = {"id", "name", "locations"} if key == "fields" else {"id", "name", "enabled", "pattern", "method", "kind", "path", "source", "eventName", "timeoutMs"} if key == "assertions" else {"id", "name", "filter", "scope", "mode", "protocols", "statuses", "device", "application", "library"}
             if key == "views" and "conditions" in item:
                 allowed = allowed | {"conditions"}
+            if key == "views" and "contentTypes" in item:
+                allowed = allowed | {"contentTypes"}
             if set(item) != allowed:
                 raise ValueError(f"Unexpected {key} fields")
             if key == "fields":
@@ -181,6 +183,10 @@ def validate(value):
                         text(condition["filter"], "filter", 1024, True)
                 if not isinstance(item["protocols"], list) or len(item["protocols"]) > 3 or any(p not in ("HTTP", "HTTPS", "SSE") for p in item["protocols"]):
                     raise ValueError("Invalid protocol filters")
+                if "contentTypes" in item:
+                    types = item["contentTypes"]
+                    if not isinstance(types, list) or len(types) > 8 or any(kind not in ("json", "form", "xml", "js", "css", "document", "media", "other") for kind in types):
+                        raise ValueError("Invalid content type filters")
                 if not isinstance(item["statuses"], list) or len(item["statuses"]) > 5 or any(type(s) is not int or s not in range(1, 6) for s in item["statuses"]):
                     raise ValueError("Invalid status filters")
     return value

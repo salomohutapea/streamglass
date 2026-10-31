@@ -4,6 +4,13 @@ import {viewMatches,matchingViewId,describeView} from './saved-filters.mjs';
 
 const base = {filter: 'search', scope: 'url', mode: 'contains', protocols: ['HTTPS'], statuses: [2], device: 'all', application: null, library: 'all'};
 
+test('content-type saved filters remain compatible with old views and are order independent', () => {
+  assert.equal(viewMatches(base, {...base, contentTypes: []}), true);
+  assert.equal(viewMatches(base, {...base, contentTypes: ['json']}), false);
+  assert.equal(viewMatches({...base, contentTypes: ['json','form']}, {...base, contentTypes: ['form','json']}), true);
+  assert.ok(describeView({...base, contentTypes: ['json']}).includes('JSON'));
+});
+
 test('a saved filter matches only identical traffic filters, ignoring order and empty conditions', () => {
   assert.equal(viewMatches(base, {...base, conditions: []}), true);
   assert.equal(viewMatches({...base, protocols: ['HTTPS', 'SSE']}, {...base, protocols: ['SSE', 'HTTPS']}), true);

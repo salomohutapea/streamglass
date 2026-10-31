@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { fieldsColumnValue, type FieldResult } from './custom-fields.mjs';
 
-export type TrafficRecord = { id: string; method: string; url: string; startedAt?: string | number; kind?: 'request' | 'tunnel'; isSSE?: boolean; eventCount?: number; events?: unknown[]; state?: string; status?: number; statusCode?: number; duration?: number; durationMs?: number|null; serverMs?: number|null; device?:string; deviceId?:string; application?:{name:string}|null; fields?: FieldResult[]; response?: { headers?: unknown } };
+export type TrafficRecord = { id: string; requestContentType?:string;responseContentType?:string;hasJsonEvents?:boolean;isEncrypted?:boolean; method: string; url: string; startedAt?: string | number; kind?: 'request' | 'tunnel'; isSSE?: boolean; eventCount?: number; events?: unknown[]; state?: string; status?: number; statusCode?: number; duration?: number; durationMs?: number|null; serverMs?: number|null; device?:string; deviceId?:string; application?:{name:string}|null; fields?: FieldResult[]; response?: { headers?: unknown } };
 export type SortColumn = 'method' | 'request' | 'time' | 'status' | 'duration' | 'serverTime' | 'device' | 'application' | 'protocol' | 'host' | 'path' | 'events' | 'fields';
 export {isSSE} from './traffic-preferences.mjs';
 export function startedAtMs(value: TrafficRecord['startedAt']): number | undefined {

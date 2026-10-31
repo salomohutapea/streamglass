@@ -87,3 +87,98 @@ Captures of TLS-allowlisted (inspected) domains have their own budget of 5000 ca
 Build small cases around the affected boundary: malformed API input; stale gate; pause before/during interception; split SSE frame; compressed and large body; restart with older config; two clients updating the same settings. Add only relevant cases and use existing suites from [the agent guide](AGENT_GUIDE.md).
 
 Run builds/tests only when authorized. A source review does not establish successful packaging, certificate trust, device connectivity, or long-duration streaming behavior.
+
+## Content-type quick filters
+
+The row summary includes bounded `requestContentType` and `responseContentType`
+strings, normalized from captured Content-Type headers; it adds no body or full
+header arrays to snapshots. JSON/Form/XML/JS/CSS/Document/Media/Other filters use
+these values. Form may match the request independently of the response type;
+opaque tunnels do not match content categories. Each group is OR, groups compose
+with AND, and All resets only the quick-filter groups. Saved views carry optional
+`contentTypes` through backend validation, Tools IPC and MCP; absence in an older
+saved view means no content-type constraint. These filters never change forwarding.
+
+JSON also includes SSE streams once any retained event data parses as JSON,
+including while streaming. `hasJsonEvents` is a derived snapshot boolean, cached
+per append-only retained event history and cleared on capture removal. It is
+recomputed from retained events after restart, not trusted from persisted input.
+Blank events, plain text, malformed JSON and [DONE] alone do not match. Detection
+is bounded to 1,048,576 characters per event and does not change event forwarding.
+
+## Rule-list and tool-navigation search
+
+Search is display-only and runs locally over the already loaded rules or static
+tool navigation. It must preserve rule IDs, original order, folder assignment,
+enabled state, server revisions and unsaved editor drafts. The selected folder
+scopes rule results. Rule actions still receive the original full rule object.
+Older and newly added rules enter results on the next normal state refresh.
+Tool navigation search must not switch sections until the user selects a result
+or presses Enter. No search query is sent to the backend or saved in workspaces.
+Cmd/Ctrl+F within Monaco retains its editor Find behavior rather than focusing
+the Tools navigation search.
+
+## Traffic column sizing
+
+Dragging a column title before or after another title reorders the visible columns;
+Option+Left/Right on the focused title moves it one position. Column widths and
+the active row sort stay attached to their column identities. Order uses the
+existing local column preference. Clicking a title still sorts rows; dragging
+does not change the row sort. A drop marker shows the insertion edge.
+
+Dragging or keyboard-resizing a column separator changes only the column to its
+left, including Request. Separators appear only between data columns, never after
+the last data column. Other visible widths are held
+at their current sizes; later columns move without resizing. Double-click resets
+only that column. Widths remain local preferences, bounded to 48–900 CSS pixels.
+An empty trailing area fills unused pane width so row borders, hover and selection
+extend to the right edge without stretching data columns. Row actions remain at
+the right edge. When columns and actions exceed the pane width, the table scrolls
+horizontally inside the traffic pane.
+
+## Inspector orientation transition
+
+The Right/Below buttons and equivalent menu commands share one position handler.
+Manual changes may use native view-transition snapshots, without replacing the
+live pane nodes or changing selected capture, body/editor data, forwarding or
+listener state. The sidebar/toolbar are not animated. A superseded queued callback
+must not overwrite the latest orientation request. Skipped/unsupported transitions
+fall back to the requested position; reduced motion removes the spatial animation.
+Narrow windows still force below placement and keep the stored wide-window
+preference. Resizing splitters is immediate and does not start this animation.
+
+## Sidebar controls
+
+The pin/collapse header button has a full-row hit target even though only its
+icon carries pressed styling. Device action buttons use a separate inline group:
+hidden buttons occupy no space, and hover or focus within the row reveals the
+actions so they remain keyboard-accessible. An active pin remains visible. Device
+selection uses its highlight and pressed state rather than an extra check icon.
+Application request counts hide while their pin action is visible (hover, keyboard
+focus, or an active pin), retaining their layout space to avoid label movement.
+
+## Window chrome zoom and settings routing
+
+`getUiZoom` reads only the invoking window's native WebContents zoom factor.
+`onUiZoom` reports native zoom changes and returns an unsubscribe function. Renderer
+resize handlers re-read that value without deriving it from window dimensions;
+newer native updates supersede older asynchronous reads. Fullscreen chrome and
+per-window header insets keep their existing behavior. About windows receive the
+same zoom setup as other application windows.
+
+TLS allowlist links (sidebar, connection setup, inspector and SSL footer control)
+open HTTPS / TLS. General settings and proxy-port entry points open Proxy. The
+settings section is controlled independently of the unsaved settings values, so
+section navigation does not discard drafts or save configuration implicitly.
+
+### Packaged layout inspection snapshot
+
+The 2026-10-30 local build `1.1.0-2026-10-30T13-41-59-660Z` was inspected in an
+isolated synthetic-data profile. Native page zoom 1 and 1.2 at widths 900, 1100
+and 1480 kept the toolbar at 52 physical points. The TLS footer opened HTTPS / TLS,
+approved-device icon/text centers matched, the full sidebar hit target unpinned
+and collapsed to 48 points, and no device checkmark remained. Inspector motion
+reported 260 ms; rapid toggles kept the final request, reduced motion skipped
+animation, selection stayed intact, and no renderer errors were observed. This
+was packaged UI inspection; no test suites were run. Local evidence is under the
+ignored `release/layout-fixes-preview/` directory.

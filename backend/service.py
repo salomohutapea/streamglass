@@ -52,6 +52,31 @@ def is_sse(record):
         for name, value in (record.get("response") or {}).get("headers", [])))
 
 
+def content_type(record, direction):
+    for name, value in (record.get(direction) or {}).get("headers", []):
+        if name.lower() == "content-type":
+            return value.split(";", 1)[0].strip().lower()[:256]
+    return ""
+
+
+MAX_JSON_EVENT_CHARS = 1024 * 1024
+
+
+def reject_json_constant(value):
+    raise ValueError("Non-JSON numeric constant")
+
+
+def json_event_data(event):
+    data = event.get("data") if isinstance(event, dict) else None
+    if not isinstance(data, str) or not data or len(data) > MAX_JSON_EVENT_CHARS:
+        return False
+    try:
+        json.loads(data, parse_constant=reject_json_constant)
+        return True
+    except (ValueError, RecursionError):
+        return False
+
+
 def message_value(message, request=False):
     raw = message.raw_content or b""
     from .body_preview import text_preview
@@ -232,6 +257,7 @@ class Service:
         self.instance = uuid.uuid4().hex[:8]
         # Per-record revision for detail refetches, and the serialized table rows for the current revision.
         self.record_revs = {}
+        self.json_event_cache = {}
         self.mark_fields()
         # Records subject to the count/size limits, rebuilt when the TLS allowlist changes or a record is removed elsewhere.
         self.retention = None
@@ -358,6 +384,7 @@ class Service:
         return self.retention
 
     def forget_record(self, record_id):
+        self.json_event_cache.pop(record_id, None)
         """Drop one retained capture from memory and storage; the caller commits and calls changed()."""
         self.records.pop(record_id, None)
         self.record_sizes.pop(record_id, None)
@@ -394,7 +421,19 @@ class Service:
         self.field_dirty.clear()
         self.assertion_summaries.clear()
         self.record_revs.clear()
+        self.json_event_cache.clear()
         self.changed()
+
+    def has_json_events(self, record):
+        # Retained event history is append-only. Parse new data once, never ship it in table rows.
+        events = record.get("events") or []
+        count, found = self.json_event_cache.get(record["id"], (0, False))
+        if len(events) < count:
+            count, found = 0, False
+        if not found:
+            found = any(json_event_data(event) for event in events[count:])
+        self.json_event_cache[record["id"]] = (len(events), found)
+        return found
 
     def state_rows(self):
         """Table rows, newest first, plus each application's icon once; rows carry no icon data."""
@@ -403,6 +442,9 @@ class Service:
         fields_cache, current = self.field_cache, self.productivity["fields"]
         for r in sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True):
             row = {**{key: r.get(key) for key in keys}, "pinned": bool(r.get("pinned")), "isSSE": is_sse(r), "serverMs": (r.get("timings") or {}).get("serverMs"), "devicePlatform": device_platform(r), **({"sseStatus": sse_status(r)} if is_sse(r) else {}), "assertionSummary": self.assertion_summaries.get(r["id"]), "rev": self.record_revs.get(r["id"], 0)}
+            row["requestContentType"] = content_type(r, "request")
+            row["responseContentType"] = content_type(r, "response")
+            row["hasJsonEvents"] = self.has_json_events(r) if row["isSSE"] else False
             # Never evaluates: the latest finished results (possibly from an older revision) until the worker refreshes them.
             entry = fields_cache.get(r["id"])
             if entry and entry["fields"] is current and entry["results"]:
