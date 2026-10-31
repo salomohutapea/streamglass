@@ -322,17 +322,18 @@ class LocationTests(FieldTestCase):
     def test_body_shared_by_two_locations_is_parsed_once(self):
         self.use(multi("two", where("$.id"), where("$.name")), field("other", "$.tags[*]"))
         self.service.save(capture())
-        with patch("backend.custom_fields.json.loads", wraps=json.loads) as loads:
+        with patch("backend.custom_fields.json", wraps=json) as field_json:
             by_id = {item["id"]: item for item in self.results()}
-            self.assertEqual(loads.call_count, 1)
+            self.assertEqual(field_json.loads.call_count, 1)
         self.assertEqual(by_id["two"]["values"], ["7", "Ann"])
 
     def test_events_are_parsed_once_for_all_event_locations(self):
         self.use(multi("kinds", where("$.kind", source="event"), where("$.n", source="event")))
         self.service.save(capture(eventCount=4, events=events(4)))
-        with patch("backend.custom_fields.json.loads", wraps=json.loads) as loads:
+        # Spy only on field extraction; state summaries also classify JSON SSE.
+        with patch("backend.custom_fields.json", wraps=json) as field_json:
             item = self.results()[0]
-            self.assertEqual(loads.call_count, 4)
+            self.assertEqual(field_json.loads.call_count, 4)
         self.assertEqual(item["values"], ["even", "odd", "0", "1", "2"])
         self.assertTrue(item["limited"])
 
