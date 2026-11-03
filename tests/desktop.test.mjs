@@ -134,7 +134,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     await editor.getByRole('button', { name: 'Add rule', exact: true }).click();
     await editor.getByRole('textbox', { name: 'Name', exact: true }).fill('Binary hook');
     await editor.getByRole('textbox', { name: 'URL wildcard', exact: false }).fill(`http://127.0.0.1:${fixturePort}/*`);
-    await editor.getByRole('textbox', { name: 'JavaScript', exact: true }).fill('function onRequest(context, url, request) { request.headers.push(["X-Hook", "executed"]); return request; }');
+    await setMonacoText(app, editor.getByRole('textbox', { name: 'JavaScript', exact: true }), 'function onRequest(context, url, request) { request.headers.push(["X-Hook", "executed"]); return request; }');
     await editor.getByRole('button', { name: 'Save rule', exact: true }).click();
     await editor.getByRole('button', { name: 'Add rule', exact: true }).waitFor();
     await editor.close();

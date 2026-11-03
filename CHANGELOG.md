@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Edit JavaScript rules in the bundled Monaco editor with JavaScript syntax colors, line numbers and find.
+
 ## [1.1.1] - 2026-11-01
 
 ### Added

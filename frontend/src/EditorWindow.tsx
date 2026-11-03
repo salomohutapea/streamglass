@@ -3,6 +3,7 @@ import { Folder, Globe, Pencil, Plus, Trash2 } from 'lucide-react';
 import ListSearch from './ListSearch';
 import {matchesRuleSearch} from './list-search.mjs';
 import RuleList, { PopupMenu, ruleDragType } from './RuleList';
+import ScriptEditor from './ScriptEditor';
 import { upsertRule } from './rule-order.mjs';
 import './editor-window.css';
 
@@ -24,6 +25,7 @@ async function onResponse(context, url, request, response) {
 async function onEvent(context, url, request, event) {
   return event;
 }`;
+const scriptLimit = 100000;
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
 const newRule = (): Rule => ({ id: crypto.randomUUID(), name: '', enabled: true, pattern: '*', method: '*', stages: ['request'], breakpoint: mode !== 'scripts', ...(mode === 'scripts' ? { script: scriptTemplate } : {}) });
 
@@ -172,7 +174,7 @@ export default function EditorWindow() {
         <label>Method<input list="http-methods" placeholder="*" title="* matches any method" value={editing.method} onChange={event => setEditing({ ...editing, method: event.target.value })}/><datalist id="http-methods">{['*','GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].map(method => <option key={method} value={method}/>)}</datalist></label>
         <fieldset><legend>{mode === 'scripts' ? 'Run hooks at' : 'Pause at'}</legend>{['request','response','event'].map(stage => <label className="check" key={stage}><input type="checkbox" checked={editing.stages.includes(stage)} onChange={event => setEditing({ ...editing, stages: event.target.checked ? [...editing.stages, stage] : editing.stages.filter(value => value !== stage) })}/>{stage === 'event' ? 'Each SSE event' : stage === 'request' ? 'Request' : 'Response'}</label>)}</fieldset>
         <label className="check"><input type="checkbox" checked={editing.enabled} onChange={event => setEditing({ ...editing, enabled: event.target.checked })}/>Enabled</label>
-        {mode === 'scripts' && <><label>JavaScript<textarea className="mono script-editor" spellCheck={false} maxLength={100000} value={editing.script ?? ''} onChange={event => setEditing({ ...editing, script: event.target.value })}/></label></>}
+        {mode === 'scripts' && <div className="editor-body-field"><span className="editor-body-heading"><span>JavaScript</span></span><ScriptEditor label="JavaScript" disabled={busy} value={editing.script ?? ''} onChange={script => setEditing(current => current && { ...current, script })}/>{(editing.script ?? '').length > scriptLimit && <small className="error-text">Script is {(editing.script ?? '').length.toLocaleString()} characters; the limit is {scriptLimit.toLocaleString()}.</small>}</div>}
       </fieldset> : <>{data ? <fieldset className="editor-fields rule-browser" disabled={busy}>
         <aside className="rule-folder-sidebar" onContextMenu={event => { event.preventDefault(); setFolderMenu({ x: event.clientX, y: event.clientY }); }}>
           <div className="rule-folder-heading"><h2>Folders</h2><button className="icon-button" aria-label="New folder" title="New folder" onClick={() => { setFolderForm({ name: '' }); setConfirmDeleteFolder(false); setError(''); }}><Plus size={14}/></button></div>
