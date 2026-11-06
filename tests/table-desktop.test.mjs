@@ -93,6 +93,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await openSidebar(page);
     const deviceRow = page.locator('.device-row').filter({ hasText: 'test-device' });
     await openSidebar(page);
+    await deviceRow.hover();
     await deviceRow.getByRole('button', { name: 'Customize test-device', exact: true }).click();
     const deviceDialog = page.getByRole('dialog');
     await deviceDialog.getByRole('textbox', { name: 'Name', exact: true }).fill('Flight Pixel');
@@ -111,6 +112,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await deviceRow.getByText('Flight Pixel', { exact: false }).waitFor();
     assert.equal(await page.locator('tbody tr.incoming-row').count(), 0);
     await openSidebar(page);
+    await deviceRow.hover();
     await deviceRow.getByRole('button', { name: 'Customize Flight Pixel', exact: true }).click();
     assert.equal(await deviceDialog.getByRole('textbox', { name: 'Name', exact: true }).inputValue(), 'Flight Pixel');
     assert.equal(await deviceDialog.getByLabel('Color', { exact: true }).inputValue(), '#e6a355');
@@ -186,10 +188,16 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await openSidebar(page);
     assert.equal(await page.locator('.application-row[aria-pressed="true"]').count(), 0);
     await openSidebar(page);
-    const deviceWidth = await deviceRow.evaluate(element => ({ row: element.getBoundingClientRect().width, button: element.querySelector('.nav-row').getBoundingClientRect().width, selected: getComputedStyle(element).backgroundColor, editPosition: getComputedStyle(element.querySelector('.icon-button')).position }));
-    assert.ok(Math.abs(deviceWidth.row - deviceWidth.button) < 1, 'Device selected button fills the row');
+    await deviceRow.hover();
+    const deviceWidth = await deviceRow.evaluate(element => {
+      const row = element.getBoundingClientRect(), button = element.querySelector('.nav-row').getBoundingClientRect(), actions = element.querySelector('.device-row-actions').getBoundingClientRect();
+      return { row: row.width, button: button.width, actions: actions.width, labelRight: button.right, actionsLeft: actions.left, actionsRight: actions.right, rowRight: row.right, selected: getComputedStyle(element).backgroundColor, editPosition: getComputedStyle(element.querySelector('.icon-button')).position };
+    });
+    assert.ok(Math.abs(deviceWidth.row - deviceWidth.button - deviceWidth.actions) < 1, 'Device label and inline actions fill the selected row');
+    assert.ok(deviceWidth.labelRight <= deviceWidth.actionsLeft + 1, 'Device label does not overlap actions');
+    assert.ok(deviceWidth.actionsRight <= deviceWidth.rowRight + 1, 'Device actions stay inside the row');
     assert.notEqual(deviceWidth.selected, 'rgba(0, 0, 0, 0)');
-    assert.equal(deviceWidth.editPosition, 'absolute');
+    assert.equal(deviceWidth.editPosition, 'static');
     await safari.click();
     await openFilter(page);
     const applicationQuery = page.getByRole('textbox', { name: 'Filter requests' });
@@ -484,6 +492,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     }
     await dismissBulk(() => page.getByRole('button', { name: 'Delete all records', exact: true }).click());
     await openSidebar(page);
+    await deviceRow.hover();
     await dismissBulk(() => deviceRow.getByRole('button', { name: 'Delete Flight Pixel and its records', exact: true }).click());
     await dismissBulk(() => clickMenu('clear-all'));
     await openSidebar(page);

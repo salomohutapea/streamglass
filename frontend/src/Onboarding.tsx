@@ -36,7 +36,7 @@ function Certificate() {
     <div className="ob-allow"><small>TLS allowlist</small><span style={{ animationDelay: '.6s' }}>api.example.com</span><span style={{ animationDelay: '.8s' }}>chat.example.com</span><span className="add" style={{ animationDelay: '1s' }}>+ Add domain</span></div></div>;
 }
 function Tools({ active, onPick }: { active: number; onPick: (index: number) => void }) {
-  return <div className="ob-tools">{tools.map(([name, , , Icon], index) => <button key={name} className={index === active ? 'on' : ''} onClick={() => onPick(index)}><Icon size={14} aria-hidden="true"/>{name}</button>)}
+  return <div className="ob-tools">{tools.map(([name, , , Icon], index) => <button key={name} className={index === active ? 'on' : ''} aria-pressed={index === active} onClick={() => onPick(index)}><Icon size={14} aria-hidden="true"/>{name}</button>)}
     <div className="ob-paused" key={active}>{tools[active][2]}</div></div>;
 }
 function Agent() {

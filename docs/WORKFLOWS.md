@@ -89,7 +89,7 @@ The proxy listens on `127.0.0.1` unless you turn on **Allow devices on the local
 
 Device labels support a custom name, color, and icon using the pencil beside each device. Automatic icons use platform hints from request user agents; unknown or mixed platforms remain generic. Labels persist locally by device IP. New traffic gets a subtle half-second highlight, disabled with reduced motion.
 
-JSON and text bodies use the same editor as VS Code (Monaco, bundled locally): line numbers, folding, bracket matching, Command-F find, multi-cursor, and native select/copy. Read-only inspectors cannot be edited. Breakpoint body editors are fully editable text with JSON validation squiggles; Command-Return still continues the paused request. Bodies over 2 MB disable folding and bracket matching to stay responsive.
+JSON and text bodies use the same editor as VS Code (Monaco, bundled locally): line numbers, folding, bracket matching, Command-F find, multi-cursor, and native select/copy. Read-only inspectors cannot be edited. Breakpoint body editors are fully editable text with JSON validation squiggles; Command-Return still continues the paused request. Bodies over 2 MB disable folding and bracket matching to stay responsive. The JavaScript field in the JavaScript rules window uses the same editor with JavaScript syntax colors (highlighting only; no completion or type checking), and warns when the script exceeds the 100,000-character limit.
 
 ## Applications on this Mac
 

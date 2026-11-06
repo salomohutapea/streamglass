@@ -2,7 +2,7 @@ import random
 import tempfile
 import unittest
 
-from backend.service import Service, MAX_RECORDS
+from backend.service import Service, MAX_RECORDS, json_event_data, MAX_JSON_EVENT_CHARS
 from backend.sse import exported, wire_event
 from backend.timings import GapStats, gap_stats
 
@@ -26,6 +26,28 @@ class EventStorageTests(unittest.TestCase):
 
     def rows(self, record_id="stream"):
         return [row[0] for row in self.service.db.execute("SELECT seq FROM events WHERE record=? ORDER BY seq", (record_id,))]
+
+    def test_json_sse_summary_follows_retained_events_without_exposing_their_data(self):
+        record = stream()
+        self.service.save(record)
+        self.assertFalse(self.service.state_rows()[0][0]["hasJsonEvents"])
+        for index, data in enumerate(("heartbeat", '{"result":1}', "[DONE]")):
+            record["events"].append({"data": data, "sequence": index + 1})
+            self.service.save(record)
+            row = self.service.state_rows()[0][0]
+            self.assertEqual(row["hasJsonEvents"], index >= 1)
+            self.assertNotIn("events", row)
+        record["events"] = []
+        self.service.save(record)
+        self.assertFalse(self.service.state_rows()[0][0]["hasJsonEvents"])
+        self.service.forget_record(record["id"])
+        self.assertNotIn(record["id"], self.service.json_event_cache)
+
+    def test_json_event_detection_rejects_non_json_and_bounds_parsing(self):
+        for data in ("", "heartbeat", "[DONE]", "{unfinished", "NaN", "Infinity", " " * (MAX_JSON_EVENT_CHARS + 1)):
+            self.assertFalse(json_event_data({"data": data}))
+        for data in ('{"ok":true}', '[1,2]', '"text"', 'null', '42'):
+            self.assertTrue(json_event_data({"data": data}))
 
     def test_events_append_without_rewriting_the_record_row(self):
         record = stream()

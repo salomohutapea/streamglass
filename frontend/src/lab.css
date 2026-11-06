@@ -194,3 +194,11 @@
 /* Children of an open <details> live in its ::details-content box, so spacing between them is set there. */
 .path-picker::details-content{display:flex;flex-direction:column;gap:14px}
 .path-picker[open]{display:block}
+
+.lab-tool-navigation{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;border-right:1px solid var(--line)}
+.lab-tool-navigation>.list-search-bar{padding:10px 8px 4px}
+.lab-layout .lab-tool-navigation .lab-tabs{flex:1 1 0;min-height:0;border-right:0}
+.lab-tool-group{display:flex;flex-direction:column;gap:2px;flex-shrink:0}
+.lab-tool-heading{display:block;margin:6px 0 4px;padding:10px 8px 6px;color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.lab-tool-group+.lab-tool-group{margin-top:10px;padding-top:6px;border-top:1px solid var(--line)}
+@media(max-width:640px){.lab-tool-navigation{border-right:0;border-bottom:1px solid var(--line)}.lab-layout .lab-tool-navigation .lab-tabs{flex-basis:auto;border-bottom:0;max-height:110px;overflow-x:auto}.lab-tool-group{display:contents}.lab-tool-heading{display:none}.lab-tool-group+.lab-tool-group{border:0;margin:0;padding:0}}

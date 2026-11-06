@@ -49,6 +49,7 @@ export default function RuleList({ rules, emptyMessage, folders = [], onToggle, 
   const [choosing, setChoosing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
+  useEffect(() => { if (menu && !rules.some(rule => rule.id === menu.rule.id)) setMenu(null); }, [rules, menu]);
   const canMove = Boolean(onMove && onCreateFolderAndMove);
   function open(rule: Rule, label: string, x: number, y: number, opener: HTMLElement | null) { setChoosing(false); setCreating(false); setName(''); setMenu({ x, y, rule, label, opener }); }
   const close = () => setMenu(null);

@@ -36,7 +36,7 @@ Read [architecture](ARCHITECTURE.md) before changing contracts across these laye
 
 ## Continuous integration and releases
 
-GitHub Actions workflows live in `.github/workflows/` and run on macOS (Apple Silicon) runners:
+GitHub Actions workflows live in `.github/workflows/` and run app verification/release packaging on `macos-15` (Apple Silicon) runners:
 
 - **CI** (`ci.yml`) runs on every pull request and every push to `main`: typecheck, shell tests, engine tests, UI build, and desktop tests. Require the `Test` check in branch protection.
 - **Bump version** (`bump-version.yml`) is started manually from the Actions tab (patch, minor, major, or an exact `x.y.z`). It runs `npm run bump`, which updates `package.json`, the lockfile root, and `pyproject.toml`, then opens a pull request. With the default workflow token, GitHub holds that PR's CI run until someone clicks "Approve and run workflows" on the PR; add a `BUMP_PR_TOKEN` repository secret (a personal access token with `repo` scope) to skip the approval. You can also run `npm run bump -- patch` locally.

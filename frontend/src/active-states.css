@@ -1,0 +1,207 @@
+/* Shared selection treatment, loaded after surface styles. Insets avoid layout shifts. */
+:root{
+  --selection:#1a3f6b;
+  --selection-hover:#244f80;
+  --selection-border:#7dabf7;
+  --selection-text:#f5f8ff;
+  --selection-muted:#c4d8f4;
+  --selection-icon:#b6d2ff;
+  --selection-get:#85e0b3;
+  --selection-post:#ffd194;
+  --selection-put:#b7cfff;
+  --selection-danger:#ffb4b4;
+  --traffic-selection:#1b2133;
+  --running-ink:#7ce0a0;
+  --running-surface:#143b28;
+}
+:root[data-theme=light]{
+  --selection:#d5e6ff;
+  --selection-hover:#c3dcff;
+  --selection-border:#2861ad;
+  --selection-text:#113e75;
+  --selection-muted:#315783;
+  --selection-icon:#174f9a;
+  --selection-get:#0b613a;
+  --selection-post:#784500;
+  --selection-put:#244b9a;
+  --selection-danger:#9e2028;
+  --traffic-selection:#eef1fd;
+  --running-ink:#126a37;
+  --running-surface:#e2f4e8;
+}
+
+/* Navigation and list selections must remain obvious after the pointer leaves. */
+.sidebar .nav-row.selected,
+.sidebar .nav-row.subselected,
+.sidebar .device-row.selected,
+.domain-tree .domain-row.selected,
+.rule-folder-nav button.selected,
+.paused-list .paused-item.selected,
+.lab-layout .lab-tabs button[aria-pressed=true],
+.settings-nav button[aria-pressed=true],
+.capture-picker-list button.selected,
+.command-palette li[aria-selected=true]{
+  background:var(--selection);
+  color:var(--selection-text);
+  box-shadow:inset 0 0 0 1px var(--selection-border);
+}
+.sidebar .nav-row.selected:hover,
+.sidebar .nav-row.subselected:hover,
+.sidebar .device-row.selected:hover,
+.domain-tree .domain-row.selected:hover,
+.rule-folder-nav button.selected:hover,
+.paused-list .paused-item.selected:hover,
+.lab-layout .lab-tabs button[aria-pressed=true]:hover,
+.settings-nav button[aria-pressed=true]:hover,
+.capture-picker-list button.selected:hover,
+.command-palette li[aria-selected=true]:hover{background:var(--selection-hover)}
+
+/* A selected device/application is one full row, including its action area. */
+.sidebar .device-row.selected .nav-row,
+.sidebar .device-row.selected .nav-row:hover{
+  background:transparent;
+  color:var(--selection-text);
+  box-shadow:none;
+}
+.sidebar .nav-row:is(.selected,.subselected) svg,
+.sidebar .device-row.selected .nav-row svg,
+.lab-tabs button[aria-pressed=true] .lab-tab-icon{color:var(--selection-icon)}
+.sidebar .device-row.selected>.icon-button{color:var(--selection-text)}
+.sidebar .nav-row:is(.selected,.subselected)>span:last-child:not(.device-name),
+.sidebar .device-row.selected .nav-row>span:last-child:not(.device-name),
+.sidebar .device-row.selected .device-name small,
+.domain-row.selected .domain-count,
+.rule-folder-nav button.selected small,
+.paused-item.selected .paused-wait,
+.capture-picker-list button.selected :is(.capture-picker-time,.capture-picker-duration),
+.command-palette li[aria-selected=true] :is(small,kbd){color:var(--selection-muted)}
+/* Keep the full header hit target; apply pressed styling to the icon only. */
+.sidebar .sidebar-pin{width:100%;height:28px;align-self:stretch;padding:0}
+.sidebar .sidebar-pin>svg{box-sizing:content-box;width:15px;height:15px;padding:6px;border-radius:5px}
+.sidebar .sidebar-pin[aria-pressed=true]{background:transparent;box-shadow:none;color:var(--selection-icon)}
+.sidebar .sidebar-pin[aria-pressed=true]>svg{background:var(--selection);box-shadow:inset 0 0 0 1px var(--selection-border)}
+.sidebar .sidebar-pin:hover{background:transparent}
+.sidebar .sidebar-pin:hover>svg{background:var(--hover)}
+.sidebar .sidebar-pin[aria-pressed=true]:hover>svg{background:var(--selection-hover)}
+/* Hidden actions occupy no slots, so device labels can use the full row width. */
+.sidebar .device-row:has(>.device-row-actions)>.nav-row{flex:1 1 0;width:auto;min-width:0;padding-right:8px}
+.sidebar .device-row-actions{display:flex;align-items:center;gap:2px;flex:0 0 auto;min-height:28px;padding-right:3px}
+.sidebar .device-row-actions>button.icon-button{display:none;position:static;transform:none;width:22px;height:24px;flex:0 0 22px;margin:0;padding:4px;opacity:1}
+.sidebar .device-row:is(:hover,:focus-within) .device-row-actions>button.icon-button,
+.sidebar .device-row-actions>button.icon-button.active{display:inline-flex}
+.sidebar .device-row.selected .device-row-actions>button.icon-button{color:var(--selection-text)}
+:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) .device-row-actions{display:none}
+/* Application counts share the pin slot; keep their space while the pin is visible. */
+.sidebar .device-row:is(:hover,:focus-within)>.application-row>.application-count,
+.sidebar .device-row:has(>.icon-button.active)>.application-row>.application-count{visibility:hidden}
+
+/* Pressed toggles use the same selected surface rather than a faint accent tint. */
+.tool-button.active,
+button.icon-button.active,
+.sidebar-pin[aria-pressed=true],
+.sidebar .device-row>.icon-button.active,
+.structured-toggle button[aria-pressed=true],
+.traffic-tools .tt-chip[aria-pressed=true],
+.testing-source button[aria-checked=true],
+.ob-tools button.on,
+.status-badge.accent,
+.domain-chip,
+.rule-menu button[aria-checked=true],
+.record-context-menu button[aria-checked=true]{
+  background:var(--selection);
+  color:var(--selection-text);
+  border-color:transparent;
+  box-shadow:inset 0 0 0 1px var(--selection-border);
+}
+.tool-button.active:hover:not(:disabled),
+button.icon-button.active:hover:not(:disabled),
+.structured-toggle button[aria-pressed=true]:hover,
+.traffic-tools .tt-chip[aria-pressed=true]:hover,
+.testing-source button[aria-checked=true]:hover,
+.ob-tools button.on:hover,
+.rule-menu button[aria-checked=true]:hover,
+.record-context-menu button[aria-checked=true]:hover{background:var(--selection-hover)}
+.record-context-menu button[aria-checked=true] svg{color:var(--selection-icon)}
+.command-palette li[aria-selected=true] mark{color:var(--selection-icon)}
+.domain-row.selected :is(.domain-twisty,.domain-actions button){color:var(--selection-muted)}
+.paused-item.selected .editor-method{color:var(--selection-icon)}
+.paused-item.selected .editor-stage{background:transparent;color:var(--selection-muted)}
+.paused-item.selected .editor-stage.stage-request{color:var(--selection-put)}
+.paused-item.selected .editor-stage.stage-response{color:var(--selection-get)}
+.paused-item.selected .editor-stage.stage-event,.paused-item.selected .editor-held{color:var(--selection-post)}
+/* Method badges are metadata, not selections; keep their original quiet role. */
+.compact-rule-method{background:color-mix(in srgb,var(--accent) 12%,var(--panel));color:var(--selection-icon)}
+
+/* Selected tabs retain their underline as a second, non-color-only cue. */
+.tabs button[aria-selected=true],
+dialog[aria-label="Traffic tools"] .tabs button[aria-pressed=true]{
+  color:var(--selection-text);
+  background:var(--selection);
+  border-bottom-color:var(--selection-border);
+  font-weight:600;
+}
+.filter-bar.active{background:color-mix(in srgb,var(--accent) 7%,var(--panel));box-shadow:inset 3px 0 var(--accent)}
+.filter-summary{background:color-mix(in srgb,var(--accent) 7%,var(--panel));color:var(--muted);border-bottom-color:var(--line)}
+.filter-summary button{color:var(--accent)}
+
+/* Keep semantic method/error colors legible on selected traffic and picker rows. */
+tbody tr.selected{background:var(--selection);color:var(--selection-text);box-shadow:inset 0 0 0 1px var(--selection-border)}
+tbody tr.selected:hover{background:var(--selection-hover)}
+tr.selected :is(.host,.sse-method,.timing,.field-chip-more){color:var(--selection-muted)}
+tr.selected .field-chip-name::after{color:var(--selection-muted)}
+tr.selected :is(td[data-method=GET],.field-chip-name){color:var(--selection-get)}
+tr.selected td[data-method=POST],tr.selected td[data-status="4"]{color:var(--selection-post)}
+tr.selected :is(td[data-method=PUT],td[data-method=PATCH]){color:var(--selection-put)}
+tr.selected :is(td[data-method=DELETE],td[data-status="5"]){color:var(--selection-danger)}
+tr.selected:has(td[data-method=CONNECT]) .path{color:var(--selection-muted)}
+.capture-picker-list button.selected .capture-picker-method{color:var(--selection-icon)}
+.capture-picker-list button.selected .capture-picker-status{color:var(--selection-muted)}
+.capture-picker-list button.selected .capture-picker-status.ok{color:var(--selection-get)}
+.capture-picker-list button.selected .capture-picker-status.warn{color:var(--selection-post)}
+.capture-picker-list button.selected .capture-picker-status.error{color:var(--selection-danger)}
+.traffic th:is([aria-sort=ascending],[aria-sort=descending]){background:var(--selection);color:var(--selection-text);border-bottom-color:var(--selection-border)}
+
+/* Traffic filtering and selected API rows intentionally keep the original quiet treatment. */
+.traffic tbody tr.selected,.traffic tbody tr.selected:hover{background:var(--traffic-selection);color:var(--text);box-shadow:inset 2px 0 var(--accent)}
+.traffic tr.selected :is(.host,.sse-method,.timing,.field-chip-more){color:var(--muted)}
+.traffic tr.selected .field-chip-name{color:var(--accent)}
+.traffic tr.selected .field-chip-name::after{color:var(--muted)}
+.traffic tr.selected td[data-method=GET]{color:var(--q-get)}
+.traffic tr.selected td[data-method=POST]{color:var(--q-post)}
+.traffic tr.selected :is(td[data-method=PUT],td[data-method=PATCH]){color:var(--q-put)}
+.traffic tr.selected td[data-method=DELETE]{color:var(--q-delete)}
+.traffic tr.selected td[data-status="4"]{color:var(--q-warn)}
+.traffic tr.selected td[data-status="5"]{color:var(--danger)}
+.traffic tr.selected:has(td[data-method=CONNECT]) .path{color:var(--muted)}
+
+/* Open editing targets get a clear boundary without tinting every input. */
+.traffic-tools .tt-rule[data-open=true]{border-color:var(--selection-border)}
+.traffic-tools .tt-rule[data-open=true]>.tt-rule-row{background:var(--selection);color:var(--selection-text);box-shadow:inset 0 0 0 1px var(--selection-border)}
+.traffic-tools .tt-rule[data-open=true] .tt-rule-detail{opacity:1;color:var(--selection-text)}
+.traffic-tools .tt-rule[data-open=true] :is(.tt-rule-summary,.tt-rule-pattern,.tt-chevron){color:var(--selection-muted)}
+.custom-field-rule.active{border-color:var(--selection-border)}
+.custom-field-rule.active>legend{color:var(--selection-text);background:var(--selection);border-radius:3px}
+.custom-field-location.active{border-color:var(--selection-border);background:var(--selection)}
+.connect-card.selected{background:var(--selection);color:var(--selection-text);border-color:var(--selection-border)}
+.connect-card.selected small{color:var(--selection-muted)}
+.connect-steps li.current{background:var(--selection);color:var(--selection-text);border-bottom-color:var(--selection-border)}
+.connect-steps li.current span{background:var(--selection-text);color:var(--selection);border-color:var(--selection-text)}
+.ob-row.sel{background:var(--selection);box-shadow:inset 0 0 0 1px var(--selection-border)}
+
+/* Running is a semantic status, distinct from selecting a navigation item. */
+.traffic-tools .tt-status[data-active=true]{padding:4px 8px;width:fit-content;max-width:100%;border:1px solid var(--running-ink);border-radius:5px;background:var(--running-surface);color:var(--running-ink)}
+.traffic-tools .tt-status[data-active=true] strong{color:var(--running-ink)}
+.traffic-tools .tt-status[data-active=true] .tt-dot{background:var(--running-ink)}
+.traffic-tools .tt-status[data-active=true] .muted{color:var(--running-ink)}
+.domain-lock.on{color:var(--running-ink)}
+.active-tools:not(:has(.tools-suspended)) button{background:var(--selection);color:var(--selection-text);border-color:var(--selection-border)}
+.sse-status li.current{background:var(--selection);color:var(--selection-text)}
+.sse-status li.current.sse-live{border-top-color:var(--selection-get)}
+.sse-status li.current.sse-live>i{background:var(--selection-get)}
+.sse-status li.current.sse-warn{border-top-color:var(--selection-post)}
+.sse-status li.current.sse-warn>i{background:var(--selection-post)}
+.sse-status li.current.sse-bad{border-top-color:var(--selection-danger)}
+.sse-status li.current.sse-bad>i{background:var(--selection-danger)}
+.sse-status li.current.sse-done>i{background:var(--selection-text)}
+
+input[type=checkbox]:checked{outline:1px solid var(--selection-border);outline-offset:1px}

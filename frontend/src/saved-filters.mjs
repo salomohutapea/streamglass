@@ -1,10 +1,11 @@
+import {contentTypeLabels} from './traffic-preferences.mjs';
 import { normalizeExtraConditions } from './filter-conditions.mjs';
 
 const modeLabels = {contains: 'contains', not_contains: "doesn't contain", equals: 'equals', starts_with: 'starts with', ends_with: 'ends with', wildcard: 'matches'};
 const libraryLabels = {sse: 'SSE only', pinned: 'Pinned'};
 
 const normalize = view => ({filter: view.filter ?? '', scope: view.scope, mode: view.mode, conditions: normalizeExtraConditions(view.conditions),
-  protocols: [...(view.protocols ?? [])].sort(), statuses: [...(view.statuses ?? [])].sort(), device: view.device ?? 'all', application: view.application ?? null, library: view.library ?? 'all'});
+  contentTypes: [...(view.contentTypes ?? [])].sort(), protocols: [...(view.protocols ?? [])].sort(), statuses: [...(view.statuses ?? [])].sort(), device: view.device ?? 'all', application: view.application ?? null, library: view.library ?? 'all'});
 
 // A saved filter is shown as applied while the traffic window's filters are exactly its filters.
 export function viewMatches(view, current) {
@@ -23,6 +24,7 @@ export function describeView(view) {
   parts.push(value.filter ? `${value.scope} ${modeLabels[value.mode] ?? value.mode} "${value.filter}"` : 'any content');
   if (value.conditions.length) parts.push(`+${value.conditions.length} ${value.conditions.length === 1 ? 'condition' : 'conditions'}`);
   if (value.protocols.length) parts.push(value.protocols.join('/'));
+  if (value.contentTypes.length) parts.push(value.contentTypes.map(type => contentTypeLabels[type]).join('/'));
   if (value.statuses.length) parts.push(value.statuses.map(status => `${status}xx`).join(', '));
   if (libraryLabels[value.library]) parts.push(libraryLabels[value.library]);
   if (value.device !== 'all') parts.push(`device ${value.device}`);

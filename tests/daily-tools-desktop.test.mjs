@@ -83,7 +83,11 @@ c.commit()`,path.join(directory,'captures.sqlite3'),String(proxyPort)],{input:JS
     await panel.getByRole('button',{name:'Delete field Draft field',exact:true}).click();
     // Right-clicking a request starts an unsaved field scoped to that API.
     await page.locator('.traffic tbody tr').filter({hasText:'/initial'}).filter({hasNotText:'/sse'}).click({button:'right'});
-    await page.getByRole('menuitem',{name:'Add custom field…'}).click();
+    const addCustomField=page.getByRole('menuitem',{name:'Add custom field…'});
+    await addCustomField.waitFor();
+    // A delayed scroll event at the already-current position must not dismiss the menu.
+    await page.locator('.table-scroll').evaluate(element=>element.dispatchEvent(new Event('scroll')));
+    await addCustomField.click();
     await toolsPage.waitForFunction(()=>[...document.querySelectorAll('input[aria-label^="Field URL wildcard "]')].some(input=>input.value.endsWith('/initial*')));
     assert.equal(await panel.getByLabel(/^Field method /).last().inputValue(),'POST');
     // Clicking a path in the open picker fills the active field; no separate target to choose.

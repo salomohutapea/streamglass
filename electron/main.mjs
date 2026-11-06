@@ -38,8 +38,13 @@ async function loadZoom() {
 function setZoom(change) {
   const next = change === 'reset' ? 0 : Math.max(ZOOM_LEVELS.min, Math.min(ZOOM_LEVELS.max, uiZoom + (change === 'in' ? 1 : -1) * ZOOM_LEVELS.step));
   uiZoom = next;
-  for (const win of [...windows, aboutWindow]) if (win && !win.isDestroyed()) win.webContents.setZoomLevel(next);
+  for (const win of [...windows, aboutWindow]) applyWindowZoom(win);
   void writeFile(zoomFile(), JSON.stringify({ level: next }), { mode: 0o600 }).catch(() => {});
+}
+function applyWindowZoom(win) {
+  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
+  win.webContents.setZoomLevel(uiZoom);
+  win.webContents.send('ui-zoom-changed', win.webContents.getZoomFactor());
 }
 // Gates already shown, with when they were handed to the window; a gate stays dismissed after the user closes it.
 const openedGates = new Map();
@@ -118,7 +123,7 @@ function createWindow(recordId, editor) {
   if (!recordId && !editor) mainWindow = win;
   win.on('closed', () => { windows.delete(win); applicationMenu?.forget(win); });
   // Zoom is per origin, so one level applies to every window; reapplying after load covers windows opened later.
-  win.webContents.on('did-finish-load', () => { if (!win.isDestroyed()) win.webContents.setZoomLevel(uiZoom); });
+  win.webContents.on('did-finish-load', () => applyWindowZoom(win));
   win.webContents.on('did-start-loading', () => applicationMenu?.forget(win));
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
@@ -170,6 +175,7 @@ function openAboutWindow() {
   });
   windows.add(win);
   applicationMenu?.register(win, false, true, false);
+  win.webContents.on('did-finish-load', () => applyWindowZoom(win));
   win.on('closed', () => { windows.delete(win); applicationMenu?.forget(win); aboutWindow = undefined; });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
@@ -298,6 +304,7 @@ async function start() {
   applicationMenu = createApplicationMenu({ app, Menu, BrowserWindow, windows, openAbout: openAboutWindow, zoom: setZoom,
     getToolsOwner:() => toolsOwner && !toolsOwner.isDestroyed() ? toolsOwner : mainWindow && !mainWindow.isDestroyed() ? mainWindow : null });
   handle('menu-state', (event, state) => applicationMenu.updateState(BrowserWindow.fromWebContents(event.sender), state));
+  handle('ui-zoom', event => event.sender.getZoomFactor());
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
   protocol.handle('app', async request => {

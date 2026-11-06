@@ -1,0 +1,23 @@
+/* Native snapshot layers move; live panes are laid out only once in the final position. */
+:root.inspector-transition .app:not(.detached)>.workspace>.traffic{view-transition-name:traffic-pane}
+:root.inspector-transition .app:not(.detached)>.workspace>.inspector{view-transition-name:inspector-pane}
+:root.inspector-transition::view-transition{pointer-events:none}
+:root.inspector-transition::view-transition-old(root),
+:root.inspector-transition::view-transition-new(root){animation:none}
+:root.inspector-transition::view-transition-group(traffic-pane),
+:root.inspector-transition::view-transition-group(inspector-pane){
+  animation-duration:260ms;
+  animation-timing-function:cubic-bezier(.16,1,.3,1);
+}
+:root.inspector-transition::view-transition-old(traffic-pane),
+:root.inspector-transition::view-transition-old(inspector-pane){animation-duration:120ms}
+:root.inspector-transition::view-transition-new(traffic-pane),
+:root.inspector-transition::view-transition-new(inspector-pane){animation-duration:200ms}
+@media(prefers-reduced-motion:reduce){
+  :root.inspector-transition::view-transition-group(traffic-pane),
+  :root.inspector-transition::view-transition-group(inspector-pane),
+  :root.inspector-transition::view-transition-old(traffic-pane),
+  :root.inspector-transition::view-transition-old(inspector-pane),
+  :root.inspector-transition::view-transition-new(traffic-pane),
+  :root.inspector-transition::view-transition-new(inspector-pane){animation:none}
+}
