@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-11-06
+
 ### Added
 
 - Edit JavaScript rules in the bundled Monaco editor with JavaScript syntax colors, line numbers and find.
