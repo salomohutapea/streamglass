@@ -1,31 +1,31 @@
 /* Shared selection treatment, loaded after surface styles. Insets avoid layout shifts. */
 :root{
-  --selection:#1a3f6b;
-  --selection-hover:#244f80;
-  --selection-border:#7dabf7;
+  --selection:#2b3765;
+  --selection-hover:#334277;
+  --selection-border:#4f66bd;
   --selection-text:#f5f8ff;
-  --selection-muted:#c4d8f4;
-  --selection-icon:#b6d2ff;
+  --selection-muted:#aab4d0;
+  --selection-icon:#93a9ff;
   --selection-get:#85e0b3;
   --selection-post:#ffd194;
   --selection-put:#b7cfff;
   --selection-danger:#ffb4b4;
-  --traffic-selection:#1b2133;
+  --traffic-selection:#2c3c72;
   --running-ink:#7ce0a0;
   --running-surface:#143b28;
 }
 :root[data-theme=light]{
-  --selection:#d5e6ff;
-  --selection-hover:#c3dcff;
-  --selection-border:#2861ad;
-  --selection-text:#113e75;
-  --selection-muted:#315783;
-  --selection-icon:#174f9a;
+  --selection:#d5ddfa;
+  --selection-hover:#c8d2f8;
+  --selection-border:#8fa2ea;
+  --selection-text:#1a2a66;
+  --selection-muted:#4d5b8c;
+  --selection-icon:#3f5fe0;
   --selection-get:#0b613a;
   --selection-post:#784500;
   --selection-put:#244b9a;
   --selection-danger:#9e2028;
-  --traffic-selection:#eef1fd;
+  --traffic-selection:#d0dafa;
   --running-ink:#126a37;
   --running-surface:#e2f4e8;
 }
@@ -43,7 +43,9 @@
 .command-palette li[aria-selected=true]{
   background:var(--selection);
   color:var(--selection-text);
-  box-shadow:inset 0 0 0 1px var(--selection-border);
+  box-shadow:none;
+  border-radius:7px;
+  font-weight:500;
 }
 .sidebar .nav-row.selected:hover,
 .sidebar .nav-row.subselected:hover,
@@ -79,7 +81,7 @@
 .sidebar .sidebar-pin{width:100%;height:28px;align-self:stretch;padding:0}
 .sidebar .sidebar-pin>svg{box-sizing:content-box;width:15px;height:15px;padding:6px;border-radius:5px}
 .sidebar .sidebar-pin[aria-pressed=true]{background:transparent;box-shadow:none;color:var(--selection-icon)}
-.sidebar .sidebar-pin[aria-pressed=true]>svg{background:var(--selection);box-shadow:inset 0 0 0 1px var(--selection-border)}
+.sidebar .sidebar-pin[aria-pressed=true]>svg{background:var(--selection);box-shadow:none}
 .sidebar .sidebar-pin:hover{background:transparent}
 .sidebar .sidebar-pin:hover>svg{background:var(--hover)}
 .sidebar .sidebar-pin[aria-pressed=true]:hover>svg{background:var(--selection-hover)}
@@ -109,10 +111,11 @@ button.icon-button.active,
 .rule-menu button[aria-checked=true],
 .record-context-menu button[aria-checked=true]{
   background:var(--selection);
-  color:var(--selection-text);
+  color:var(--selection-icon);
   border-color:transparent;
-  box-shadow:inset 0 0 0 1px var(--selection-border);
+  box-shadow:none;
 }
+.status-badge.accent,.domain-chip{color:var(--selection-text)}
 .tool-button.active:hover:not(:disabled),
 button.icon-button.active:hover:not(:disabled),
 .structured-toggle button[aria-pressed=true]:hover,
@@ -135,17 +138,18 @@ button.icon-button.active:hover:not(:disabled),
 /* Selected tabs retain their underline as a second, non-color-only cue. */
 .tabs button[aria-selected=true],
 dialog[aria-label="Traffic tools"] .tabs button[aria-pressed=true]{
-  color:var(--selection-text);
-  background:var(--selection);
-  border-bottom-color:var(--selection-border);
+  color:var(--text);
+  background:transparent;
+  border-bottom-color:var(--accent);
   font-weight:600;
 }
+.tabs button:hover:not([aria-selected=true]){color:var(--text)}
 .filter-bar.active{background:color-mix(in srgb,var(--accent) 7%,var(--panel));box-shadow:inset 3px 0 var(--accent)}
 .filter-summary{background:color-mix(in srgb,var(--accent) 7%,var(--panel));color:var(--muted);border-bottom-color:var(--line)}
 .filter-summary button{color:var(--accent)}
 
 /* Keep semantic method/error colors legible on selected traffic and picker rows. */
-tbody tr.selected{background:var(--selection);color:var(--selection-text);box-shadow:inset 0 0 0 1px var(--selection-border)}
+tbody tr.selected{background:var(--selection);color:var(--selection-text);box-shadow:inset 2px 0 var(--accent)}
 tbody tr.selected:hover{background:var(--selection-hover)}
 tr.selected :is(.host,.sse-method,.timing,.field-chip-more){color:var(--selection-muted)}
 tr.selected .field-chip-name::after{color:var(--selection-muted)}
@@ -176,7 +180,7 @@ tr.selected:has(td[data-method=CONNECT]) .path{color:var(--selection-muted)}
 
 /* Open editing targets get a clear boundary without tinting every input. */
 .traffic-tools .tt-rule[data-open=true]{border-color:var(--selection-border)}
-.traffic-tools .tt-rule[data-open=true]>.tt-rule-row{background:var(--selection);color:var(--selection-text);box-shadow:inset 0 0 0 1px var(--selection-border)}
+.traffic-tools .tt-rule[data-open=true]>.tt-rule-row{background:var(--selection);color:var(--selection-text)}
 .traffic-tools .tt-rule[data-open=true] .tt-rule-detail{opacity:1;color:var(--selection-text)}
 .traffic-tools .tt-rule[data-open=true] :is(.tt-rule-summary,.tt-rule-pattern,.tt-chevron){color:var(--selection-muted)}
 .custom-field-rule.active{border-color:var(--selection-border)}
@@ -186,7 +190,7 @@ tr.selected:has(td[data-method=CONNECT]) .path{color:var(--selection-muted)}
 .connect-card.selected small{color:var(--selection-muted)}
 .connect-steps li.current{background:var(--selection);color:var(--selection-text);border-bottom-color:var(--selection-border)}
 .connect-steps li.current span{background:var(--selection-text);color:var(--selection);border-color:var(--selection-text)}
-.ob-row.sel{background:var(--selection);box-shadow:inset 0 0 0 1px var(--selection-border)}
+.ob-row.sel{background:var(--selection);box-shadow:inset 2px 0 var(--accent)}
 
 /* Running is a semantic status, distinct from selecting a navigation item. */
 .traffic-tools .tt-status[data-active=true]{padding:4px 8px;width:fit-content;max-width:100%;border:1px solid var(--running-ink);border-radius:5px;background:var(--running-surface);color:var(--running-ink)}
@@ -194,14 +198,35 @@ tr.selected:has(td[data-method=CONNECT]) .path{color:var(--selection-muted)}
 .traffic-tools .tt-status[data-active=true] .tt-dot{background:var(--running-ink)}
 .traffic-tools .tt-status[data-active=true] .muted{color:var(--running-ink)}
 .domain-lock.on{color:var(--running-ink)}
-.active-tools:not(:has(.tools-suspended)) button{background:var(--selection);color:var(--selection-text);border-color:var(--selection-border)}
-.sse-status li.current{background:var(--selection);color:var(--selection-text)}
-.sse-status li.current.sse-live{border-top-color:var(--selection-get)}
-.sse-status li.current.sse-live>i{background:var(--selection-get)}
-.sse-status li.current.sse-warn{border-top-color:var(--selection-post)}
-.sse-status li.current.sse-warn>i{background:var(--selection-post)}
-.sse-status li.current.sse-bad{border-top-color:var(--selection-danger)}
-.sse-status li.current.sse-bad>i{background:var(--selection-danger)}
-.sse-status li.current.sse-done>i{background:var(--selection-text)}
+.active-tools button{display:inline-flex;align-items:center;gap:5px;height:18px;padding:0 8px;border-radius:5px;background:transparent;border:1px solid var(--line);color:var(--text-secondary);font-size:10px}
+.active-tools button::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--accent);flex:none}
+.active-tools button:hover{background:var(--hover);color:var(--text);border-color:var(--line-strong)}
+.active-tools:has(.tools-suspended) button::before{background:var(--muted)}
 
 input[type=checkbox]:checked{outline:1px solid var(--selection-border);outline-offset:1px}
+
+/* Traffic rows alternate two close neutral greys; hover is a step lighter and selection is the only blue. */
+:root{--row-a:#0f1012;--row-b:#151619;--row-hover:#1d1f24}
+:root[data-theme=light]{--row-a:#ffffff;--row-b:#f6f6f8;--row-hover:#ececf0}
+/* :where keeps these below selection and note-highlight rules. */
+:where(.traffic tbody) tr{background:var(--row-a)}
+:where(.traffic tbody) tr.row-alt{background:var(--row-b)}
+:where(.traffic) tbody tr:hover{background:var(--row-hover)}
+:where(.traffic tbody) tr.row-spacer,:where(.traffic) tbody tr.row-spacer:hover{background:transparent}
+.traffic .table-scroll{background:var(--row-a)}
+/* Every column starts with the same inset, so text never touches the divider on its left. */
+.traffic th,.traffic td{padding-left:10px}
+.traffic th:first-child,.traffic td:first-child{padding-left:12px}
+.traffic :is(th,td).traffic-filler{padding-left:0}
+.ssl-cell{color:var(--muted)}
+.ssl-cell svg{vertical-align:-2px}
+.ssl-cell[data-ssl=inspected]{color:var(--running-ink)}
+/* Compact rows: less vertical padding and smaller row actions, with the 12px text and its line height unchanged. */
+.traffic td{padding-top:3px;padding-bottom:3px}
+.traffic td .icon-button{height:20px}
+/* The proxy address in the header opens Proxy settings. */
+button.status-address{border:0;background:transparent;padding:2px 4px;border-radius:5px;cursor:pointer}
+button.status-address:hover{background:var(--hover)}
+/* Inspector put away: the table takes the whole workspace. */
+.workspace.inspector-hidden>.inspector,.workspace.inspector-hidden>.splitter:last-of-type{display:none}
+.workspace.inspector-below.inspector-hidden{grid-template-rows:minmax(80px,1fr) 0 0}

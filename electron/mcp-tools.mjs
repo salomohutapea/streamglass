@@ -313,7 +313,7 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
   tool('list_folders', 'List rule folders.', { offset, limit }, true, async a => page((await state()).folders, a.offset, a.limit));
   tool('create_folder', 'Create a breakpoint or script folder.', { name: z.string().trim().min(1).max(128), kind: z.enum(['breakpoints', 'scripts']) }, false, a => serializeMutation(() => api('/api/folders', 'POST', a)));
   tool('rename_folder', 'Rename an existing folder.', { folderId: id, name: z.string().trim().min(1).max(128) }, false, a => serializeMutation(() => api(`/api/folders/${encodeURIComponent(a.folderId)}`, 'PATCH', { name: a.name })));
-  tool('delete_folder', 'Delete a folder and ungroup its rules. The rules remain enabled.', { folderId: id }, false, a => serializeMutation(() => api(`/api/folders/${encodeURIComponent(a.folderId)}`, 'DELETE')), true);
+  tool('delete_folder', 'Delete a folder. Its rules and sub-folders move up one level and stay enabled.', { folderId: id }, false, a => serializeMutation(() => api(`/api/folders/${encodeURIComponent(a.folderId)}`, 'DELETE')), true);
   tool('list_pending', 'List paused breakpoint metadata. Use get_pending to read editable content.', { offset, limit }, true, async a => page((await state()).pending.map(({ value, ...gate }) => gate), a.offset, a.limit));
   tool('get_pending', 'Read a paused breakpoint including editable value as paginated JSON text. Gate tokens are local breakpoint identifiers.', { gateToken: id, offset, maxChars }, true, async a => {
     const gate = (await state()).pending.find(g => g.token === a.gateToken); if (!gate) throw new Error('Breakpoint is no longer pending');

@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { fieldsColumnValue, type FieldResult } from './custom-fields.mjs';
 
 export type TrafficRecord = { id: string; requestContentType?:string;responseContentType?:string;hasJsonEvents?:boolean;isEncrypted?:boolean; method: string; url: string; startedAt?: string | number; kind?: 'request' | 'tunnel'; isSSE?: boolean; eventCount?: number; events?: unknown[]; state?: string; status?: number; statusCode?: number; duration?: number; durationMs?: number|null; serverMs?: number|null; device?:string; deviceId?:string; application?:{name:string}|null; fields?: FieldResult[]; response?: { headers?: unknown } };
-export type SortColumn = 'method' | 'request' | 'time' | 'status' | 'duration' | 'serverTime' | 'device' | 'application' | 'protocol' | 'host' | 'path' | 'events' | 'fields';
+export type SortColumn = 'method' | 'request' | 'time' | 'status' | 'duration' | 'serverTime' | 'device' | 'application' | 'protocol' | 'host' | 'path' | 'events' | 'fields' | 'ssl';
 export {isSSE} from './traffic-preferences.mjs';
 export function startedAtMs(value: TrafficRecord['startedAt']): number | undefined {
   if (value == null || value === '') return undefined;
@@ -19,8 +19,15 @@ export function requestTime(value: TrafficRecord['startedAt']) {
 export function statusClass(record: TrafficRecord) { const code = record.kind === 'tunnel' ? 0 : Number(record.status ?? record.statusCode ?? 0); return code >= 100 && code < 600 ? String(Math.floor(code / 100)) : undefined; }
 export function protocol(record: TrafficRecord) { return record.kind === 'tunnel' || record.url.toLowerCase().startsWith('https:') ? 'HTTPS' : 'HTTP'; }
 export {matchesQuickFilters} from './traffic-preferences.mjs';
+/** HTTPS state of a capture: an opaque encrypted tunnel, an HTTPS request Streamglass decrypted, or plain HTTP. */
+export function sslState(record: TrafficRecord): 'encrypted' | 'inspected' | 'plain' {
+  const row = record as TrafficRecord & { kind?: string; isEncrypted?: boolean; sslInspected?: boolean };
+  if (row.kind === 'tunnel' || row.isEncrypted) return 'encrypted';
+  return row.sslInspected || /^https:/i.test(record.url ?? '') ? 'inspected' : 'plain';
+}
 export function columnValue(record: TrafficRecord, column: SortColumn): string | number | undefined {
   if (column === 'host' || column === 'path') { try { const url = new URL(record.url); return column === 'host' ? url.host : url.pathname + url.search; } catch { return undefined; } }
+  if (column === 'ssl') return sslState(record);
   if (column === 'events') return record.eventCount ?? record.events?.length;
   if (column === 'fields') return fieldsColumnValue(record.fields);
   if (column === 'time') return startedAtMs(record.startedAt);

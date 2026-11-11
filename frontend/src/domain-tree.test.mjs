@@ -9,7 +9,7 @@ const records = [
   r(6, 'api.example.com:443', { kind: 'tunnel', host: 'API.example.com' }), r(7, 'broken url'),
 ];
 
-test('groups by host then path with counts, sorted by count', () => {
+test('groups by host then path with counts', () => {
   const tree = buildDomainTree(records);
   assert.equal(tree[0].host, 'api.example.com');
   assert.equal(tree[0].count, 5);
@@ -53,4 +53,11 @@ test('hidden hosts persist defensively', () => {
   assert.equal(readHiddenHosts({ getItem() { throw new Error('blocked'); } }).size, 0);
   assert.equal(readHiddenHosts({ getItem: () => '{bad' }).size, 0);
   writeHiddenHosts(new Set(['a']), { setItem() { throw new Error('blocked'); } });
+});
+
+test('hosts and paths are ordered by name so rows stay put as counts change', () => {
+  const rec = url => ({ url, kind: 'request' });
+  const tree = buildDomainTree([rec('https://b.example.com/z'), rec('https://b.example.com/z'), rec('https://b.example.com/a'), rec('https://b.example.com/z'), rec('https://a.example.com/x')]);
+  assert.deepEqual(tree.map(node => node.host), ['a.example.com', 'b.example.com']);
+  assert.deepEqual(tree[1].children.map(child => child.path), ['/a', '/z']);
 });

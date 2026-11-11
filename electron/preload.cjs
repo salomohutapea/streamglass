@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   },
   detachInspector: (recordId) => ipcRenderer.invoke('detach-inspector', recordId),
   deviceNames: (addresses) => ipcRenderer.invoke('device-names', addresses),
+  lanApprovalAttention: () => ipcRenderer.invoke('lan-approval-attention'),
   openEditor: (input) => ipcRenderer.invoke('open-editor', input),
   openTools: (input) => ipcRenderer.invoke('open-tools', input),
   getToolsContext: () => ipcRenderer.invoke('tools-context'),

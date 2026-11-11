@@ -16,22 +16,62 @@
 @keyframes sse-pulse{70%{box-shadow:0 0 0 5px transparent}100%{box-shadow:0 0 0 0 transparent}}
 @media (prefers-reduced-motion:reduce){.sse-dot.sse-live{animation:none}}
 .sse-method .sse-dot{margin-left:5px;margin-top:-2px}
-.sse-status{margin:4px 0 12px}
-.sse-status ol{display:flex;gap:0;margin:0 0 6px;padding:0;list-style:none}
-.sse-status li{flex:1;min-width:0;display:grid;grid-template-columns:auto 1fr;column-gap:6px;align-items:center;padding-top:8px;border-top:2px solid var(--line);font-size:11px;color:var(--muted)}
-.sse-status li>i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--line)}
-.sse-status li>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sse-status li>small{grid-column:2;font:10px ui-monospace,monospace;font-variant-numeric:tabular-nums;min-height:13px}
-.sse-status li.done{border-top-color:var(--muted);color:var(--text)}
-.sse-status li.done>i{background:var(--muted)}
-.sse-status li.skipped>span{text-decoration:line-through}
+/* SSE timeline: a status pill, a four-step track, stat tiles and the latest events. The section is a size container,
+   so it reflows by its own width (a narrow right-docked inspector), not by the window's. */
+.sse-timeline{container-type:inline-size}
+.sse-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 12px}
+.sse-pill{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;background:var(--raised);border:1px solid var(--line)}
+.sse-pill.sse-live{color:var(--q-get);border-color:color-mix(in srgb,var(--q-get) 35%,var(--line))}
+.sse-pill.sse-warn{color:var(--q-warn);border-color:color-mix(in srgb,var(--q-warn) 35%,var(--line))}
+.sse-pill.sse-bad{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 35%,var(--line))}
+.sse-detail{font-size:11px;overflow-wrap:anywhere}
+.sse-status{margin:0 0 14px}
+.sse-status ol{display:flex;margin:0 0 6px;padding:0;list-style:none}
+.sse-status li{position:relative;flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;padding-top:16px;font-size:11px;color:var(--muted)}
+.sse-status li::before{content:"";position:absolute;top:4px;left:0;right:0;height:2px;background:var(--line)}
+.sse-status li:last-child::before{right:auto;width:9px}
+.sse-status li>i{position:absolute;top:0;left:0;width:10px;height:10px;border-radius:50%;background:var(--panel);border:2px solid var(--line-strong);box-sizing:border-box}
+.sse-status li>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:8px}
+.sse-status li>small{font:10px ui-monospace,monospace;font-variant-numeric:tabular-nums;min-height:13px}
+.sse-status li.done{color:var(--text-secondary)}
+.sse-status li.done::before{background:var(--muted)}
+.sse-status li.done>i{background:var(--muted);border-color:var(--muted)}
+.sse-status li.skipped>span{opacity:.6}
 .sse-status li.current{color:var(--text);font-weight:600}
-.sse-status li.current.sse-live{border-top-color:var(--q-get)}
-.sse-status li.current.sse-warn{border-top-color:var(--q-warn)}
-.sse-status li.current.sse-bad{border-top-color:var(--danger)}
-.sse-status li.current.sse-done{border-top-color:var(--text)}
-.sse-status li.current>small{font-weight:400}
+.sse-status li.current>i{background:var(--text);border-color:var(--text)}
+.sse-status li.current.sse-live>i{background:var(--q-get);border-color:var(--q-get)}
+.sse-status li.current.sse-warn>i{background:var(--q-warn);border-color:var(--q-warn)}
+.sse-status li.current.sse-bad>i{background:var(--danger);border-color:var(--danger)}
+.sse-status li.current>small{font-weight:400;color:var(--muted)}
 .sse-status p{margin:0;font-size:11px}
+.sse-timeline dl.sse-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;margin:0 0 10px}
+.sse-tiles>div{padding:8px 10px;border-radius:7px;background:var(--raised);min-width:0}
+.sse-tiles dt{font-size:10px;color:var(--muted);margin:0 0 3px}
+.sse-tiles dd{margin:0;font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sse-timeline dl.sse-gaps{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px;margin:0 0 12px;font-size:11px}
+.sse-gaps dt{color:var(--muted);margin-right:2px}
+.sse-gaps dd{margin:0;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.sse-gaps dd small{font:10px -apple-system,BlinkMacSystemFont,sans-serif;color:var(--muted);margin-right:5px}
+.sse-events{width:100%}
+.sse-events td{font-variant-numeric:tabular-nums}
+.sse-delivery{display:inline-flex;align-items:center;gap:5px}
+.sse-delivery i{width:6px;height:6px;border-radius:50%;background:var(--muted);flex:none}
+.sse-delivery.forwarded i{background:var(--q-get)}
+.sse-delivery.suppressed i{background:var(--q-warn)}
+.sse-empty{margin:4px 0;font-size:11px}
+/* Narrow: the track becomes a vertical list, tiles go two-up, and the events table keeps only what fits. */
+@container (max-width:420px){
+  .sse-status ol{flex-direction:column;gap:0}
+  .sse-status li{flex-direction:row;align-items:baseline;gap:8px;padding:0 0 10px 20px}
+  .sse-status li::before{top:10px;bottom:-2px;left:4px;right:auto;width:2px;height:auto}
+  .sse-status li:last-child::before{display:none}
+  .sse-status li:last-child{padding-bottom:0}
+  .sse-status li>i{top:2px}
+  .sse-status li>span{flex:1;padding-right:0}
+  .sse-timeline dl.sse-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .sse-col-received{display:none}
+  .sse-delivery span{display:none}
+}
 /* Events tab: rows skip layout off-screen; collapsed events show a short preview instead of an editor. */
 .events .event{content-visibility:auto;contain-intrinsic-size:auto 64px;padding:10px 0}
 .events .event>div{margin-bottom:6px}

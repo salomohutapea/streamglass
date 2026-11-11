@@ -13,7 +13,7 @@ const readRecent = (): string[] => { try { const v = JSON.parse(localStorage.get
 export function buildPaletteCommands(o: {
   menu: (id: string, payload?: any) => void; theme: string; sidebarPinned: boolean; paused: boolean; proxyRunning: boolean;
   savedViews: ViewLike[]; devices: DeviceLike[]; applyView: (id: string) => void; selectDevice: (id: string) => void;
-  toggleSidebarPin: () => void; showTour: () => void; showShortcuts: () => void;
+  toggleSidebarPin: () => void; showTour: () => void; showWalkthrough: () => void; showShortcuts: () => void;
 }): PaletteCommand[] {
   const m = (id: string, title: string, group: string, keywords?: string, payload?: any): PaletteCommand => ({ id, title, group, keywords, shortcut: commandShortcuts[id], run: () => o.menu(id, payload) });
   const tools: [string, string][] = [['map-local', 'Map Local'], ['map-remote', 'Map Remote'], ['rewrite-rules', 'Rewrite'], ['block-rules', 'Block'], ['network-profile', 'Network Conditioner'], ['daily-sessions', 'Sessions'], ['daily-journeys', 'Journeys'], ['daily-fields', 'Custom Fields'], ['daily-assertions', 'Assertions'], ['daily-repeat', 'Repeat'], ['daily-views', 'Saved filters'], ['daily-notes', 'Notes'], ['lab-compare', 'Compare'], ['lab-replay', 'Replay'], ['lab-scenarios', 'Scenarios'], ['lab-fixture', 'Create mock'], ['lab-share', 'Share'], ['lab-workspaces', 'Workspaces'], ['lab-codecs', 'Codecs'], ['lab-mcp', 'Agent (MCP)']];
@@ -34,6 +34,7 @@ export function buildPaletteCommands(o: {
     { id: 'sidebar-pin', title: o.sidebarPinned ? 'Unpin sidebar' : 'Pin sidebar', group: 'View', keywords: 'toggle sidebar expand', run: o.toggleSidebarPin },
     m('focus-search', 'Focus search', 'General', 'find filter'),
     { id: 'welcome-tour', title: 'Show welcome tour', group: 'Help', keywords: 'onboarding intro', run: o.showTour },
+    { id: 'walkthrough', title: 'Show walkthrough', group: 'Help', keywords: 'tour guide tooltips where help', run: o.showWalkthrough },
     { id: 'shortcut-sheet', title: 'Keyboard shortcuts', group: 'Help', keywords: 'keys help', shortcut: commandShortcuts['shortcut-sheet'], run: o.showShortcuts },
     ...o.savedViews.map(v => ({ id: `view:${v.id}`, title: `Apply saved filter: ${v.name}`, group: 'Saved filters', keywords: 'filter view', run: () => o.applyView(v.id) })),
     ...o.devices.map(d => ({ id: `device:${d.id}`, title: `Filter to device: ${d.id}`, group: 'Devices', keywords: 'only show', run: () => o.selectDevice(d.id) })),
@@ -47,7 +48,7 @@ export function CommandPalette({ open, onClose, commands }: { open: boolean; onC
     const dialog = ref.current;
     if (!dialog) return;
     if (open && !dialog.open) { setQuery(''); setActive(0); setRecent(readRecent()); dialog.showModal(); }
-    if (!open && dialog.open) dialog.close();
+    if (!open) { setQuery(''); if (dialog.open) dialog.close(); }
   }, [open]);
   const results = useMemo(() => filterCommands(commands, query, recent), [commands, query, recent]);
   useEffect(() => { setActive(0); }, [query]);

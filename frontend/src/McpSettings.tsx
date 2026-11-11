@@ -64,7 +64,8 @@ export default function McpSettings() {
 
   return <section className="mcp-settings" aria-labelledby="mcp-settings-title">
     <div className="setting-summary"><span className={`mcp-indicator ${connection?.running ? 'running' : ''}`} aria-hidden="true"/><div><strong id="mcp-settings-title">AI agent MCP</strong><p>{connection ? connection.running ? 'Running' : 'Stopped' : 'Checking…'}</p></div></div>
-    <p className="muted mcp-warn" title="Off until enabled; runs only while the app is open. Streamglass asks before an agent sends requests, redirects traffic, unlocks HTTPS sites, runs new JavaScript or loads a workspace."><TriangleAlert size={14} aria-hidden="true"/>Agents can read captured requests, cookies and tokens, and may send them to their provider.</p>
+    <p className="muted mcp-warn"><TriangleAlert size={14} aria-hidden="true"/>Agents can read captured requests, cookies and tokens, and may send them to their provider.</p>
+    <p className="muted">Off until you enable it, and runs only while the app is open. Streamglass asks you before an agent sends requests, redirects traffic, unlocks HTTPS sites, runs new JavaScript or loads a workspace.</p>
     <button type="button" disabled={!connection || busy} onClick={() => void toggle()}>{busy ? 'Updating…' : connection?.running ? 'Disable MCP server' : 'Enable MCP server'}</button>
     {connection && <div className="mcp-details">
       <label>URL<input className="mono" readOnly value={connection.url} onFocus={e => e.currentTarget.select()}/></label>
@@ -74,7 +75,7 @@ export default function McpSettings() {
       </div>
     </div>}
     {connection && <div className="mcp-approved">
-      <strong title="Servers you allowed an agent to redirect traffic to. Removing one makes the agent ask again.">Approved redirects</strong>
+      <strong>Approved redirects</strong><p className="muted">Servers you allowed an agent to redirect traffic to. Removing one makes the agent ask again.</p>
       {connection.approvedRedirects?.length ? <ul>{connection.approvedRedirects.map(target => <li key={target}><code>{target}</code><button type="button" onClick={() => void forget(target)}>Remove</button></li>)}</ul>
         : <p className="muted">None</p>}
     </div>}

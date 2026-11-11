@@ -1,4 +1,4 @@
-export const columnIds = ['method','request','time','status','duration','serverTime','protocol','device','application','host','path','events','fields'];
+export const columnIds = ['method','request','time','status','duration','serverTime','protocol','device','application','host','path','events','fields','ssl'];
 export const defaultColumns = ['method','request','status','duration'];
 export function readColumns(raw) {
   try {

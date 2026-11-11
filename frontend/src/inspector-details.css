@@ -1,4 +1,4 @@
-.structured-toggle{display:inline-flex;margin:12px 0 0;border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.structured-toggle{display:inline-flex;margin:12px 0 0;border:1px solid var(--line-strong);border-radius:5px;overflow:hidden}
 .structured-toggle button{border:0;border-radius:0;padding:3px 10px;font-size:11px;background:transparent;color:var(--muted)}
 .structured-toggle button[aria-pressed=true]{background:var(--selection);color:var(--text)}
 .structured-scroll{overflow-x:auto}

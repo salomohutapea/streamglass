@@ -1,0 +1,16 @@
+dialog.walkthrough{position:fixed;inset:0;width:100vw;height:100vh;max-width:none;max-height:none;margin:0;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;overflow:hidden;animation:none}
+dialog.walkthrough::backdrop{background:transparent;animation:none}
+/* The dim is the spot's own shadow, so the target shows through undimmed. */
+.walk-spot{position:fixed;border-radius:8px;pointer-events:none;box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 70%,transparent),0 0 0 200vmax color-mix(in srgb,#000 46%,transparent);transition:left .26s cubic-bezier(.2,.8,.2,1),top .26s cubic-bezier(.2,.8,.2,1),width .26s cubic-bezier(.2,.8,.2,1),height .26s cubic-bezier(.2,.8,.2,1),opacity .2s}
+:root[data-theme=light] .walk-spot{box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 70%,transparent),0 0 0 200vmax color-mix(in srgb,#1f2024 30%,transparent)}
+.walk-tip{position:fixed;width:312px;max-width:calc(100vw - 20px);box-sizing:border-box;padding:14px 16px 12px;border-radius:10px;background:var(--raised);border:1px solid color-mix(in srgb,var(--text) 12%,var(--line));box-shadow:0 14px 44px #0007;color:var(--text);transition:left .26s cubic-bezier(.2,.8,.2,1),top .26s cubic-bezier(.2,.8,.2,1)}
+.walk-text{animation:walk-in .22s ease}
+.walk-tip h2{margin:0 0 5px;font-size:13px;font-weight:600}
+.walk-tip p{margin:0;font-size:12px;line-height:1.6;color:var(--muted)}
+.walk-foot{display:flex;align-items:center;gap:6px;margin-top:12px}
+.walk-foot .muted{margin-right:auto;font-size:10px;font-variant-numeric:tabular-nums}
+.walk-foot button{padding:4px 11px}
+.walk-foot .walk-skip{background:transparent;border-color:transparent;color:var(--muted)}
+.walk-foot .walk-skip:hover{color:var(--text)}
+@keyframes walk-in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.walk-spot,.walk-tip{transition:none}.walk-text{animation:none}}

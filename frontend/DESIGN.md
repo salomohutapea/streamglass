@@ -34,13 +34,23 @@ The sidebar starts expanded and can be resized from its edge (width in `streamgl
 
 ⌘K opens the command palette (every tool, rule window, setting, device and saved view). ⌘/ shows the shortcut sheet. In the traffic table, ↑/↓, Home and End move the selection, ⌘-click and ⇧-click multi-select, ⌘A selects all visible rows, ⌫ deletes with a 5-second Undo toast, and ⌘C copies the selected request as cURL. Esc in the search clears it and any extra conditions.
 
+## Introduction
+
+The welcome dialog keeps five animated slides, each with a title, one sentence and one visible line of detail (no
+tooltip-only notes). Its last slide offers **Show me around**, which starts a tooltip walkthrough over the real
+interface: nine stops (capture, proxy address, devices, applications and domains, filters, requests, inspector,
+rule tools, settings and shortcuts), each highlighting its target with a thin accent outline and a soft dim.
+Stops live in `walkthrough-steps.mjs` as selectors; a stop with no visible target is skipped and sidebar stops
+hold the sidebar expanded. It runs in a modal dialog (Esc, End tour or a click outside ends it; arrow keys step),
+honors reduced motion, and can be restarted from the command palette.
+
 ## Connect Device
 
-Connect Device is a three-step flow: choose a platform; set up (proxy address, one-click Mac/simulator actions, and for phones and emulators a QR code that opens the LAN setup page with the certificate download and trust steps); then a live "waiting for the first request" check. The setup page follows the same quiet tokens (dark/light via prefers-color-scheme), opens the iPhone or Android tab from the browser user agent, and highlights the required trust step.
+Connect Device is a three-step flow: choose a platform; set up (proxy address, one-click Mac/simulator actions, and for phones and emulators a QR code that opens the LAN setup page with the certificate download and trust steps); then a live "waiting for the first request" check. For physical phones the Set up step lists approved, waiting and refused devices, and the Verify step shows a device that is being refused with Allow device and Deny, so approval never requires leaving the wizard. The setup page follows the same quiet tokens (dark/light via prefers-color-scheme), opens the iPhone or Android tab from the browser user agent, and highlights the required trust step.
 
 ## Domains
 
-The sidebar Domains section groups captured records by host, then by up to two leading path segments, as a collapsible tree with counts (hosts sorted by count, narrowed by the sidebar filter, at most 40 paths per node). Encrypted CONNECT tunnels count under their host and show a lock; the lock turns green when SSL inspection is enabled. Clicking a host or path sets a single domain filter that composes with the search, conditions, library, device and application filters, and appears as a removable "Domain:" chip above the table. Hover or right-click a host for Focus, Hide, Enable SSL inspection (reuses `enableInspection`) and Copy host. Hidden hosts are excluded from the table, persisted in local storage (`streamglass.domains.hidden`, guarded by try/catch) and listed in a "Hidden domains" footer with restore. The collapsed 48px rail shows only a globe button. Pure grouping and matching live in `domain-tree.mjs`.
+The sidebar Domains section groups captured records by host, then by up to two leading path segments, as a collapsible tree with counts (hosts and paths sorted by name so rows do not move as traffic arrives, narrowed by the sidebar filter, the 40 busiest paths per node). Encrypted CONNECT tunnels count under their host and show a lock; the lock turns green when SSL inspection is enabled. Clicking a host or path sets a single domain filter that composes with the search, conditions, library, device and application filters, and appears as a removable "Domain:" chip above the table. Hover or right-click a host for Focus, Hide, Enable SSL inspection (reuses `enableInspection`) and Copy host. Hidden hosts are excluded from the table, persisted in local storage (`streamglass.domains.hidden`, guarded by try/catch) and listed in a "Hidden domains" footer with restore. The collapsed 48px rail shows only a globe button. Pure grouping and matching live in `domain-tree.mjs`.
 
 ## JSON and body viewing
 
@@ -127,3 +137,55 @@ The sidebar TLS allowlist is one full-row button that opens HTTPS / TLS directly
 other TLS-specific shortcuts use the same route. General Settings and proxy-port
 errors continue to open Proxy. The approved-devices heading centers its icon and
 text without changing the alignment of summaries that have descriptive paragraphs.
+
+## Lines, surfaces and text tiers
+
+Borders use three tokens by role: `--line-subtle` for hairlines between rows, `--line` for pane dividers,
+section rules and card or dialog edges, and `--line-strong` for the edges of controls. `--text-secondary`
+sits between `--text` and `--muted` for tabs and field names. Values and measured contrast are in
+[the visibility audit](../docs/VISIBILITY_AUDIT.md). Keep the steps small: structure should be visible
+without the interface becoming high-contrast.
+
+## Shared message and confirmation surfaces
+
+`Banner` (`src/Banner.tsx`) is the one row style for app-level messages under a toolbar or window header:
+tone `info`, `warn` or `error`, an icon, the message, and actions on the right. Errors announce as alerts,
+the others as status. `confirmAction` (`src/confirm-dialog.tsx`) replaces `window.confirm`: Cancel is focused,
+Esc cancels, and destructive confirms use the tinted danger button. Do not add new native prompts or one-off
+banner styles. `Modal` takes a `kind` that becomes a `modal-<kind>` class; size dialogs by that class, never by
+their `aria-label`. All dialogs share the base radius, shadow and backdrop from `style.css`.
+
+Deleting requests hides them and shows an Undo toast; the delete is sent only when the toast goes away
+(timeout, dismissal or a newer message). Hovering or focusing the toast holds both. Warning, success and
+danger colours come from `--q-warn`, `--q-ok` and `--danger`, which have light-theme values.
+
+## Selection, rows and the SSL column
+
+Selected navigation rows, pressed toggles and list selections use a soft accent tint with a 7px radius and no
+outline; tabs use primary text with a 2px accent underline and no fill. Footer status items are bordered chips
+with a small accent dot. Tokens stay in `active-states.css`. Traffic rows alternate `--row-a` and `--row-b`
+(two close neutral greys; selection is the only blue); parity is counted from the end of the list so existing rows keep their shade when a new
+request arrives at the top. Every column has the same 10px left inset. The SSL column shows a closed lock for
+an encrypted tunnel, an open lock for inspected HTTPS and a dash for plain HTTP; it is shown once by default
+and can be hidden from the column menu.
+Traffic rows use 3px vertical padding (about 26px per row). The proxy address in the header status capsule is a button that opens Proxy settings.
+
+## Rule table, inspector hiding and the SSE timeline
+
+Breakpoint and script windows show one compact table (Name, Method, Matching rule, Request, Response, SSE) with
+26px zebra rows. Folders are rows with a twisty, a tri-state checkbox, a count and hover actions; children indent
+18px per level. Rows drag to reorder (a line above or below) or into a folder (the folder highlights); Option+Up/Down
+and the row menu do the same. Sorting is disabled while a search is filtering. New and renamed folders are edited
+inline in the table. There is no folder sidebar.
+
+The inspector hides when the active Right/Below button is clicked again or its splitter is dragged to the window
+edge (its size is kept). A Show inspector button appears beside the column menu, and selecting a request shows it
+again. Detached inspector windows are never hidden.
+
+The SSE timeline is a size container: above 420px it shows a horizontal four-step track and one row of stat tiles;
+below that the track becomes a vertical list, tiles go two-up, and the events table drops the Received column and
+shows delivery as a dot. A step that never happened reads "not reached"; a stream with no events says so instead of
+showing an empty table.
+
+In Connect a device, the certificate page (QR, URL, fingerprint) is step 1 and labelled as not the proxy; the proxy
+address is step 2 with where to enter it.

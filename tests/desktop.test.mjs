@@ -340,7 +340,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     const tunnelRow = page.getByRole('row').filter({ hasText: `127.0.0.1:${httpsPort}` });
     await tunnelRow.waitFor();
     assert.match(await tunnelRow.innerText(), /HTTPS connection/);
-    assert.equal(await tunnelRow.locator('.path svg').count(), 1);
+    assert.equal(await tunnelRow.locator('.ssl-cell[data-ssl=encrypted] svg').count(), 1, 'An encrypted tunnel shows a closed lock in the SSL column');
     await tunnelRow.click();
     await page.getByRole('heading', { name: 'Encrypted HTTPS connection', exact: true }).waitFor();
     assert.equal(await page.getByRole('tab', { name: 'Request', exact: true }).count(), 0);
