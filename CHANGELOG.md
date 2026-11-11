@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-11-11
+
 ### Added
 
 - Breakpoint and script rules are a compact table with folders as expandable rows. Folders can hold folders, remember whether they are open, and have a checkbox that turns everything inside on or off. Drag rows to reorder or move them (Option+Up/Down from the keyboard); the order shown is the order rules are tried in.
