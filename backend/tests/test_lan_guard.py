@@ -8,7 +8,7 @@ from unittest.mock import patch
 from aiohttp.test_utils import TestClient, TestServer
 
 from backend.api import create_app
-from backend.lan_guard import is_lan_client, restricted, validate_destinations, validate_devices, _address
+from backend.lan_guard import DEVICE_TTL_SECONDS, is_lan_client, restricted, validate_destinations, validate_devices, _address
 from backend.service import Service
 
 
@@ -36,6 +36,60 @@ class LanGuardTests(unittest.IsolatedAsyncioTestCase):
     def test_lan_access_is_off_by_default(self):
         self.assertEqual(self.service.settings["listenHost"], "127.0.0.1")
         self.assertEqual(self.service.settings["lanDevices"], [])
+
+    def test_approval_expires_after_seven_days(self):
+        guard = self.service.lan_guard
+        guard.decide("192.168.1.30", True)
+        approved = self.service.settings["lanDeviceApprovals"]["192.168.1.30"]
+        self.assertEqual(guard.prune(now=approved + DEVICE_TTL_SECONDS - 1), [])
+        self.assertTrue(guard.client_connected(client("192.168.1.30")))
+        self.assertEqual(guard.prune(now=approved + DEVICE_TTL_SECONDS), ["192.168.1.30"])
+        self.assertEqual(self.service.settings["lanDevices"], [])
+        self.assertEqual(self.service.settings["lanDeviceApprovals"], {})
+        phone = client("192.168.1.30")
+        self.assertFalse(guard.client_connected(phone))
+        self.assertTrue(phone.error)
+        # The expiry is persisted, and allowing again starts a new seven days.
+        self.service.db.close()
+        reopened = Service(self.directory.name, "synthetic-management-token", 47821)
+        self.assertEqual(reopened.settings["lanDevices"], [])
+        reopened.lan_guard.decide("192.168.1.30", True)
+        self.assertEqual(reopened.settings["lanDevices"], ["192.168.1.30"])
+        reopened.db.close()
+        self.service = reopened
+
+    def test_devices_approved_before_expiry_existed_start_their_seven_days_now(self):
+        self.service.settings["lanDevices"] = ["192.168.1.40", "192.168.1.41"]
+        self.service.settings.pop("lanDeviceApprovals", None)
+        self.assertEqual(self.service.lan_guard.prune(now=1_000_000), [])
+        self.assertEqual(self.service.settings["lanDeviceApprovals"], {"192.168.1.40": 1_000_000, "192.168.1.41": 1_000_000})
+        # Removing a device through settings drops its timestamp; a malformed or future timestamp is reset, not trusted.
+        self.service.settings["lanDevices"] = ["192.168.1.41"]
+        self.service.settings["lanDeviceApprovals"]["192.168.1.41"] = 9_999_999_999
+        self.assertEqual(self.service.lan_guard.prune(now=1_000_100), [])
+        self.assertEqual(self.service.settings["lanDeviceApprovals"], {"192.168.1.41": 1_000_100})
+
+    async def test_expiry_can_be_turned_off_and_restarts_when_turned_on(self):
+        guard = self.service.lan_guard
+        self.assertIs(self.service.settings["lanDeviceExpiry"], True)
+        guard.decide("192.168.1.30", True)
+        approved = self.service.settings["lanDeviceApprovals"]["192.168.1.30"]
+        response = await self.client.put("/api/settings", headers=self.headers, json={"lanDeviceExpiry": False})
+        self.assertEqual(response.status, 200)
+        self.assertEqual(guard.prune(now=approved + DEVICE_TTL_SECONDS * 3), [])
+        self.assertEqual(self.service.settings["lanDevices"], ["192.168.1.30"])
+        self.assertEqual((await self.client.put("/api/settings", headers=self.headers, json={"lanDeviceExpiry": "yes"})).status, 400)
+        # Turning it on again starts a fresh seven days rather than removing the device immediately.
+        self.assertEqual((await self.client.put("/api/settings", headers=self.headers, json={"lanDeviceExpiry": True})).status, 200)
+        self.assertEqual(guard.prune(), [])
+        self.assertEqual(self.service.settings["lanDevices"], ["192.168.1.30"])
+        restarted = self.service.settings["lanDeviceApprovals"]["192.168.1.30"]
+        self.assertGreaterEqual(restarted, approved)
+        self.assertEqual(guard.prune(now=restarted + DEVICE_TTL_SECONDS), ["192.168.1.30"])
+
+    async def test_state_reports_the_approval_lifetime(self):
+        state = await (await self.client.get("/api/state", headers=self.headers)).json()
+        self.assertEqual(state["lanDeviceTtlSeconds"], DEVICE_TTL_SECONDS)
 
     def test_loopback_clients_are_never_restricted(self):
         for address in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):

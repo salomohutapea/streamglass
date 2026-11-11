@@ -1,0 +1,8 @@
+.banner{--banner-tone:var(--accent);display:flex;align-items:center;gap:8px;flex-shrink:0;padding:6px 15px;font-size:11px;line-height:1.5;color:var(--text);background:color-mix(in srgb,var(--banner-tone) 9%,var(--bg));border-bottom:1px solid color-mix(in srgb,var(--banner-tone) 22%,var(--line))}
+.banner-warn{--banner-tone:var(--q-warn)}
+.banner-error{--banner-tone:var(--danger)}
+.banner>svg{flex:none;color:var(--banner-tone)}
+.banner-text{flex:1;min-width:0;overflow-wrap:anywhere}
+.banner-actions{display:flex;gap:6px;flex:none}
+.banner-actions button{padding:2px 9px}
+@media(max-width:560px){.banner{padding:6px 10px}}

@@ -1,6 +1,6 @@
 dialog:has(.compact-rule-list){width:640px}
 .compact-rule-list{min-width:0}
-.compact-rule-row{display:grid;grid-template-columns:16px minmax(0,1fr) auto;align-items:center;gap:6px;min-height:34px;padding:0 4px;border-bottom:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
+.compact-rule-row{display:grid;grid-template-columns:16px minmax(0,1fr) auto;align-items:center;gap:6px;min-height:34px;padding:0 4px;border-bottom:1px solid color-mix(in srgb,var(--line-subtle) 70%,transparent)}
 .compact-rule-row:hover{background:var(--raised)}
 .compact-rule-row>input{margin:0;width:14px;height:14px}
 .compact-rule-detail{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:8px;min-width:0;height:100%;min-height:32px;padding:0 6px;text-align:left;background:transparent;border:0}
@@ -43,3 +43,56 @@ dialog:has(.compact-rule-list){width:640px}
 .compact-rule-fallback{color:var(--muted);font-weight:500}
 .compact-rule-line{display:flex;align-items:center;gap:8px;min-width:0}
 .compact-rule-line .compact-rule-target code{color:var(--muted)}
+
+/* Rule table: folders and rules as rows of one compact table (Breakpoints and Scripts windows). */
+.rule-browser{grid-template-columns:minmax(0,1fr)!important;grid-template-rows:minmax(0,1fr)!important}
+.rule-table-toolbar{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line)}
+.rule-name-cell>input[type=checkbox]{width:13px;height:13px;min-width:13px}
+.rule-table-toolbar>.list-search-bar{flex:1;min-width:0;padding:0}
+.rule-table-toolbar>button{flex:none;display:inline-flex;align-items:center;gap:6px;padding:5px 10px;font-size:11px;white-space:nowrap}
+.rule-table-wrap{flex:1;min-height:0;overflow:auto}
+.rule-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}
+.rule-table th{position:sticky;top:0;z-index:1;height:26px;padding:0 8px;text-align:left;font-size:11px;font-weight:400;color:var(--muted);background:var(--bg);border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rule-table col.rule-colw-name{width:32%}.rule-table col.rule-colw-method{width:72px}.rule-table col.rule-colw-stage{width:72px}.rule-table col.rule-colw-actions{width:60px}
+.rule-table th{width:auto!important}
+.rule-table :is(th,td).rule-col-stage{text-align:center}
+.rule-table td{height:26px;padding:0 8px;border-bottom:1px solid color-mix(in srgb,var(--line-subtle) 70%,transparent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+.rule-table tbody tr{cursor:default;outline-offset:-2px}
+.rule-table tbody tr:nth-child(even){background:var(--row-b)}
+.rule-table tbody tr:hover{background:var(--row-hover)}
+.rule-table tbody tr[draggable=true]{cursor:grab}
+.rule-table tbody tr.dragging{opacity:.4}
+.rule-name-cell{display:flex;align-items:center;gap:6px;min-width:0}
+.rule-name-cell>input{flex:none;margin:0;width:13px;height:13px}
+.rule-name-cell>svg{flex:none;color:var(--muted)}
+.rule-name-cell>strong{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.rule-name-cell>small{flex:none;color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums}
+.rule-twisty,.rule-twisty-space{flex:none;width:16px;height:16px}
+.rule-twisty{display:grid;place-items:center;padding:0;border:0;background:transparent;color:var(--muted);border-radius:4px}
+.rule-twisty:hover{background:var(--hover);color:var(--text)}
+.rule-twisty svg{transition:transform .12s}
+.rule-twisty.open svg{transform:rotate(90deg)}
+.rule-name{min-width:0;padding:0;border:0;background:transparent;color:var(--text);font:inherit;text-align:left;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.rule-name.fallback{color:var(--text-secondary)}
+.rule-method{font:600 10px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
+.rule-table td code{font-size:11px;color:var(--text-secondary)}
+.rule-stage{display:inline-block;width:7px;height:7px;border-radius:50%;border:1px solid var(--line-strong);box-sizing:border-box;vertical-align:middle}
+.rule-stage.on{background:var(--accent);border-color:var(--accent)}
+.rule-table td.rule-actions{padding:0 4px;text-align:right;overflow:visible}
+.rule-actions .icon-button{width:22px;height:22px;padding:4px;color:var(--muted);opacity:0}
+.rule-actions .icon-button>svg{width:14px;height:14px}
+.rule-table tr:is(:hover,:focus-within) .rule-actions .icon-button{opacity:1}
+.rule-actions .rule-delete:hover{color:var(--danger)}
+/* Where a dragged row will land: a line above or below, or the whole folder when it goes inside. */
+.rule-table tr.drop-before>td{box-shadow:inset 0 2px var(--accent)}
+.rule-table tr.drop-after>td{box-shadow:inset 0 -2px var(--accent)}
+.rule-table tr.drop-inside{background:color-mix(in srgb,var(--accent) 16%,transparent)!important;outline:1px dashed var(--accent)}
+.rule-folder-inline{display:flex;align-items:center;gap:6px;padding:3px 0}
+.rule-folder-inline>svg{flex:none;color:var(--muted);margin-left:22px}
+.rule-folder-inline input{flex:1;min-width:0;max-width:260px;padding:3px 7px;font-size:12px}
+.rule-folder-inline button{padding:3px 9px;font-size:11px}
+.rule-table tr.rule-folder-form-row>td{height:auto;overflow:visible}
+@media(prefers-reduced-motion:reduce){.rule-twisty svg{transition:none}}
+@media(max-width:640px){.rule-table col.rule-colw-method{width:54px}.rule-table col.rule-colw-stage{width:22px}.rule-table th.rule-col-stage{font-size:0}.rule-table col.rule-colw-name{width:42%}}
+/* Other data tables share the same alternating rows. */
+:is(.daily-table,.sse-events,.structured-table,.timeline-scroll table) tbody tr:nth-child(even){background:var(--row-b)}

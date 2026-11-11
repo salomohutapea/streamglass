@@ -4,7 +4,7 @@
 .connect-steps li.current{color:var(--text);border-bottom-color:var(--accent)}.connect-steps li.current span{background:var(--accent);border-color:var(--accent);color:#fff}
 .connect-steps li.done{color:var(--text)}.connect-steps li.done span{border-color:var(--accent);color:var(--accent)}
 .connect-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
-.connect-card{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:14px;text-align:left;height:auto;border:1px solid var(--line);border-radius:8px;background:var(--input)}
+.connect-card{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:14px;text-align:left;height:auto;border:1px solid var(--line-strong);border-radius:8px;background:var(--input)}
 .connect-card strong{font-size:12px}.connect-card small{color:var(--muted);font-size:10px}
 .connect-card.selected{border-color:var(--accent);background:var(--selection)}
 .connect-body h3{margin:0;font-size:13px}
@@ -33,17 +33,31 @@
 .connect-body details>p{margin:8px 0 10px}
 .connect-body details>button,.connect-body details>.setup-actions{margin-top:4px}
 
-.setup-step-required{background:color-mix(in srgb,#e8a23d 16%,transparent);border:1px solid color-mix(in srgb,#e8a23d 55%,transparent);border-radius:7px;padding:8px 10px;line-height:1.5}
+.setup-step-required{background:color-mix(in srgb,var(--q-warn) 16%,transparent);border:1px solid color-mix(in srgb,var(--q-warn) 55%,transparent);border-radius:7px;padding:8px 10px;line-height:1.5}
 ol.setup-steps li.setup-step-required{margin:4px 0}
 
 /* Wider dialog so the QR card, proxy address and helpers fit without scrolling */
-dialog[aria-label="Connect a device"]{width:min(780px,calc(100vw - 40px))}
+dialog.modal-setup{width:min(780px,calc(100vw - 40px))}
 .connect-body>.connect-qr{margin-bottom:4px}
 .connect-qr .qr-code{width:120px;height:120px}
 .connect-qr strong{font:600 13px ui-monospace,SFMono-Regular,Menlo,monospace}
-dialog[aria-label="Connect a device"] .proxy-address-values input,dialog[aria-label="Connect a device"] .proxy-address-values select{font-size:15px;padding:7px 9px}
-dialog[aria-label="Connect a device"] .proxy-address{padding:12px 14px}
+dialog.modal-setup .proxy-address-values input,dialog.modal-setup .proxy-address-values select{font-size:15px;padding:7px 9px}
+dialog.modal-setup .proxy-address{padding:12px 14px}
 .connect-qr .ca-fingerprint code{display:block;font-size:10px;overflow-wrap:anywhere;margin-top:3px}
 
 .connect-qr .ca-fingerprint{margin:6px 0}
 .connect-qr .inline button svg{flex:none}
+
+.connect-approval{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--input)}
+.connect-approval h4{display:flex;align-items:center;gap:6px;margin:0;font-size:12px}.connect-approval>p{margin:0}
+.connect-asking{display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px 20px;border:1px solid color-mix(in srgb,var(--q-warn) 45%,transparent);border-radius:8px;background:color-mix(in srgb,var(--q-warn) 10%,transparent)}
+.connect-asking>svg{color:var(--q-warn)}.connect-asking strong{font-size:13px}.connect-asking .inline{gap:8px}
+.connect-wait .connect-hint{font-size:11px}
+
+.connect-step-label{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600}
+.connect-step-label i{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--accent);color:var(--q-on-accent);font-style:normal;font-size:10px;font-weight:700;flex:none}
+.connect-qr .connect-qr-help{margin:6px 0 8px;font-size:11px;line-height:1.5;color:var(--muted)}
+.connect-qr .connect-qr-url{display:flex;flex-direction:column;gap:2px;margin:0 0 8px;font-size:10px}
+.connect-qr .connect-qr-url code{font-size:11px;color:var(--text-secondary)}
+.proxy-address-help{margin:0;font-size:11px;line-height:1.5;color:var(--muted)}
+.proxy-address-heading .connect-step-label{font-size:13px}

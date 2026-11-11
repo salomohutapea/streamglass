@@ -1,0 +1,9 @@
+dialog.confirm-dialog{width:400px;max-width:calc(100vw - 40px);padding:0}
+.confirm-body{display:flex;gap:12px;align-items:flex-start;padding:18px 20px 16px}
+.confirm-body h2{margin:0;font-size:13px;font-weight:600;line-height:1.4}
+.confirm-body p{margin:5px 0 0;font-size:12px;line-height:1.55;color:var(--muted)}
+.confirm-icon{flex:none;margin-top:1px;color:var(--danger)}
+.confirm-foot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;background:var(--sidebar);border-top:1px solid var(--line)}
+/* Destructive confirm: tinted rather than a solid red block, so it reads as serious without shouting. */
+.danger-button{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 45%,var(--line-strong));background:color-mix(in srgb,var(--danger) 10%,transparent)}
+.danger-button:hover{background:color-mix(in srgb,var(--danger) 18%,transparent)}

@@ -31,6 +31,7 @@ MAX_RECORDS = 1000
 MAX_INSPECTED_RECORDS = 5000
 DEFAULT_INSPECTED_MIB = 1024
 INSPECTED_MIB_RANGE = (256, 4096)
+from .lan_guard import DEVICE_TTL_SECONDS
 SSL_INTERRUPTION_REASON = "Encrypted tunnel interrupted to enable SSL inspection; reconnecting requests will be inspected."
 
 
@@ -204,7 +205,7 @@ class Service:
         config = dict(self.db.execute("SELECT key,value FROM config"))
         # LAN access is off until the user enables it; approved devices and destinations apply only while it is on.
         self.settings = {"capturePaused": False, "proxyEnabled": True, "proxyPort": default_proxy_port, "listenHost": "127.0.0.1", "tlsDomains": [],
-                         "lanDevices": [], "lanAllowedDestinations": [], "inspectedStorageMiB": DEFAULT_INSPECTED_MIB}
+                         "lanDevices": [], "lanDeviceApprovals": {}, "lanDeviceExpiry": True, "lanAllowedDestinations": [], "inspectedStorageMiB": DEFAULT_INSPECTED_MIB}
         self.settings.update(json.loads(config.get("settings", "{}")))
         from .lan_guard import LanGuard
         self.lan_guard = LanGuard(self)
@@ -459,7 +460,7 @@ class Service:
 
     def state_summary(self):
         """Everything in the state snapshot except the rows: small enough to rebuild on every poll."""
-        return {"settings": {**self.settings, "proxyRunning": bool(self.master), "proxyError": self.proxy_error}, "lanRequests": self.lan_guard.summary(), "rules": self.rules, "rulesRevision": self.rules_revision, "folders": self.folders, "trafficTools": traffic_summary(self.traffic_tools), "trafficToolsRevision": self.traffic_tools_revision, "pending": self.pending_summary(),
+        return {"settings": {**self.settings, "proxyRunning": bool(self.master), "proxyError": self.proxy_error}, "lanRequests": self.lan_guard.summary(), "lanDeviceTtlSeconds": DEVICE_TTL_SECONDS, "rules": self.rules, "rulesRevision": self.rules_revision, "folders": self.folders, "trafficTools": traffic_summary(self.traffic_tools), "trafficToolsRevision": self.traffic_tools_revision, "pending": self.pending_summary(),
                 "productivity": {"revision": self.productivity_revision, "fields": len(self.productivity["fields"]), "assertions": sum(r["enabled"] for r in self.productivity["assertions"]),
                                  "replayRunning": any(job["state"] == "running" for job in getattr(self, "replay_jobs", {}).values())}}
 

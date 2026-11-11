@@ -501,6 +501,14 @@ async function start() {
   });
   // Device names for the traffic table: this Mac's name for loopback, otherwise the system resolver's reverse lookup
   // (DNS or Bonjour .local names). Results, including misses, are cached for ten minutes.
+  // A LAN device is waiting for approval: bring the main window forward the same way an MCP approval does, so the
+  // prompt is seen while another window or app is in front. Takes no input and only shows this app's own window.
+  handle('lan-approval-attention', () => {
+    if (shuttingDown || !mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    app.dock?.bounce('critical');
+  });
   handle('device-names', async (_event, addresses) => {
     if (!Array.isArray(addresses) || addresses.length > 128 || addresses.some(item => typeof item !== 'string' || !isIP(item))) throw new Error('Invalid addresses');
     return Object.fromEntries(await Promise.all(addresses.map(async address => [address, await deviceName(address)])));

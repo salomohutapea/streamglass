@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, CirclePause, Lock, Pause, Radio } from 'lucide-react';
+import Banner from './Banner';
+import { ArrowDownLeft, ArrowUpRight, CirclePause, Lock, Pause, Radio, Unplug } from 'lucide-react';
 import JsonViewer from './JsonViewer';
 import JsonBodyEditor from './JsonBodyEditor';
 import type { DecodedBody } from './CodecPanel';
 import { prepareJson } from './json-viewer.mjs';
 import { editableBody, resolvedBody } from './editor-draft.mjs';
-import { endedGates, isDisconnect, type EndedGate } from './paused-gates.mjs';
+import { endedConsequence, endedGates, isDisconnect, pausedEntries, type EndedGate } from './paused-gates.mjs';
 import './editor-window.css';
 
 type Gate = { token: string; recordId: string; stage: string; url?: string; method?: string; pausedAt?: number; value: Record<string, any> };
@@ -42,9 +43,10 @@ const draftFor = (gate: Gate): Draft => {
   return { url: value.url ?? gate.url ?? '', method: value.method ?? gate.method ?? '', headers: JSON.stringify(value.headers ?? [], null, 2), body: editableBody(gate.stage === 'event' ? value.data : value.body), status: String(value.statusCode ?? 200), event: value.event ?? 'message' };
 };
 
-type EditorProps = { gate: Gate; draft: Draft; setDraft(draft: Draft): void; api(path: string, method?: string, body?: unknown): Promise<any>; onResolved(token: string, message: string): void; setError(message: string): void };
+type EditorProps = { gate: Gate; draft: Draft; setDraft(draft: Draft): void; api(path: string, method?: string, body?: unknown): Promise<any>; onResolved(token: string, message: string): void; setError(message: string): void; ended?: Lost | null; onDismiss?(): void };
 
-function GateEditor({ gate, draft, setDraft, api, onResolved, setError }: EditorProps) {
+// `ended`: the connection closed while this was paused. The editor stays with its draft, read-only, and nothing is sent.
+function GateEditor({ gate, draft, setDraft, api, onResolved, setError, ended, onDismiss }: EditorProps) {
   const [busy, setBusy] = useState(false);
   const [replacingBody, setReplacingBody] = useState(false);
   const [history, setHistory] = useState<EventHistory | null>(null);
@@ -67,7 +69,7 @@ function GateEditor({ gate, draft, setDraft, api, onResolved, setError }: Editor
   }, [api, gate.recordId, gate.stage, gate.value.sequence]);
 
   async function resolveGate(action: 'continue' | 'drop') {
-    if (working.current || replacingBody) return;
+    if (working.current || replacingBody || ended) return;
     working.current = true; setBusy(true); setError('');
     try {
       let value = gate.value;
@@ -95,7 +97,7 @@ function GateEditor({ gate, draft, setDraft, api, onResolved, setError }: Editor
 
   useEffect(() => {
     const continueOnShortcut = (event: KeyboardEvent) => {
-      if (!busy && !replacingBody && event.metaKey && event.key === 'Enter' && !event.repeat && !event.isComposing) {
+      if (!ended && !busy && !replacingBody && event.metaKey && event.key === 'Enter' && !event.repeat && !event.isComposing) {
         event.preventDefault();
         void resolveGate('continue');
       }
@@ -106,27 +108,28 @@ function GateEditor({ gate, draft, setDraft, api, onResolved, setError }: Editor
 
   return <>
     <div className="editor-window-content is-gate">
-      <div className="editor-flow-context"><div className="editor-flow-meta"><span className="editor-method">{gate.method ?? gate.value.method ?? 'HTTP'}</span><StageBadge stage={gate.stage}/><span className="editor-held" role="status" title="Live traffic is held until you continue or drop it"><Pause size={10} aria-hidden="true"/>Held</span><span className="editor-flow-id" title={`Flow ${gate.recordId}`}>{gate.recordId}</span></div><p>{gate.url ?? gate.value.url ?? draft.url}</p></div>
+      <div className="editor-flow-context"><div className="editor-flow-meta"><span className="editor-method">{gate.method ?? gate.value.method ?? 'HTTP'}</span><StageBadge stage={gate.stage}/>{ended ? <span className="editor-held ended" role="status"><Unplug size={10} aria-hidden="true"/>Disconnected</span> : <span className="editor-held" role="status" title="Live traffic is held until you continue or drop it"><Pause size={10} aria-hidden="true"/>Held</span>}<span className="editor-flow-id" title={`Flow ${gate.recordId}`}>{gate.recordId}</span></div><p>{gate.url ?? gate.value.url ?? draft.url}</p></div>
+      {ended && <div className="paused-ended" role="alert"><Unplug size={15} aria-hidden="true"/><div><strong>Connection closed after {formatWait(ended.pausedMs)} paused. {endedConsequence(gate.stage)}</strong><p>{ended.reason}.{isDisconnect(ended.reason) ? ' Usually the app’s or server’s own timeout: continue sooner, or raise the app timeout while debugging.' : ''} Your edits are kept below, read-only, and were not sent.</p></div></div>}
       <div className="editor-paused-panes">
         {gate.stage !== 'request' && <section className="editor-request-pane" aria-label="Request context"><div className="editor-section-heading"><h2>Request</h2><span title="Read only" aria-label="Read only" role="img"><Lock size={11}/></span></div>{historyError ? <p className="muted">{historyError}</p> : history ? <><h3>Body</h3><JsonViewer value={history.request?.body} unavailable={history.request?.bodyUnavailable}/><details className="headers-disclosure"><summary>Headers ({history.request?.headers?.length ?? 0})</summary><dl className="editor-request-headers">{history.request?.headers?.map(([name, value], index) => <div key={index}><dt>{name}</dt><dd>{value}</dd></div>)}</dl></details></> : <p className="muted">Loading…</p>}</section>}
         <section className="editor-edit-pane" aria-label="Paused traffic editor">
           {gate.stage === 'event' && <section className="editor-event-history sse-history" aria-label="Previous SSE events"><div className="editor-section-heading"><h2>Previous SSE events</h2><span title="Read only. Retained events">{history?.events?.length ?? 0}{history?.eventCount != null && history.eventCount !== history.events?.length ? `/${history.eventCount}` : ''}</span></div>{history?.captureWarning && <p className="editor-history-warning" role="status">{history.captureWarning}</p>}{historyError ? <p className="muted">{historyError}</p> : history ? history.events?.length ? <div className="editor-history-list">{history.events.map((event, index) => <details className="editor-history-event" key={index}><summary><span className="editor-event-number">{String(event.sequence ?? index + 1).padStart(3, '0')}</span><strong>{event.event ?? event.type ?? 'message'}</strong>{event.id && <span>ID {event.id}</span>}<time>{event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : ''}</time></summary><JsonViewer value={event.data}/></details>)}</div> : <p className="muted">None</p> : <p className="muted">Loading…</p>}</section>}
-          <div className="editor-section-heading editor-current-heading"><h2>{gate.stage === 'event' ? 'Paused event' : `Paused ${gate.stage}`}</h2></div>
+          <div className="editor-section-heading editor-current-heading"><h2>{ended ? 'Unsent ' : 'Paused '}{gate.stage}</h2></div>
           <fieldset className="editor-fields form" disabled={busy}>
-            {gate.stage === 'request' && <><label>URL<input value={draft.url} onChange={event => setDraft({ ...draft, url: event.target.value })}/></label><label>Method<input value={draft.method} onChange={event => setDraft({ ...draft, method: event.target.value })}/></label></>}
-            {gate.stage === 'response' && <label>Status code<input type="number" value={draft.status} onChange={event => setDraft({ ...draft, status: event.target.value })}/></label>}
-            {gate.stage === 'event' && <label>Event type<input value={draft.event} onChange={event => setDraft({ ...draft, event: event.target.value })}/></label>}
-            {gate.stage === 'response' && <div><button type="button" onClick={() => setBodyMode('raw')}>Raw body</button><button type="button" onClick={async () => { try { if (!decoded) { const result = await api(`/api/pending/${encodeURIComponent(gate.token)}/decode`, 'POST', {}) as DecodedBody; setDecoded(result); setDecodedText(result.body); } setBodyMode('decoded'); setError(''); } catch (e) { setError(errorMessage(e)); } }}>Decoded body</button>{decoded && <button type="button" onClick={() => { setDecoded(null); setDecodedText(''); setBodyMode('raw'); }}>Discard decoded</button>}{decoded && <p className="muted" title="Decoded edits are re-encoded on Continue">{decoded.warning}{decodedText !== decoded.body ? ' · edited' : ''}</p>}</div>}
-            {bodyMode === 'decoded' && decoded ? <JsonBodyEditor label="Decoded response body" value={decodedText} disabled={!decoded.editable} onChange={setDecodedText} onReplacingChange={setReplacingBody}/> : <div className="editor-body-field"><span className="editor-body-heading"><span>{gate.stage === 'event' ? 'Event data' : 'Body'}</span><button type="button" title="Unchanged JSON keeps its original bytes" disabled={Boolean(gate.value.bodyUnavailable) || replacingBody || Boolean(decoded)} onClick={() => { const formatted = prepareJson(draft.body); if (!formatted.isJson) { setError('Not valid JSON'); return; } setDraft({ ...draft, body: formatted.text }); setError(''); }}>Format JSON</button></span><JsonBodyEditor key={gate.token} label={gate.stage === 'event' ? 'Event data' : 'Body'} disabled={Boolean(gate.value.bodyUnavailable) || Boolean(decoded)} value={draft.body} onChange={body => setDraft({ ...draft, body })} onReplacingChange={setReplacingBody}/>{Boolean(gate.value.bodyUnavailable) && <small>{gate.value.bodyUnavailableReason || 'Body unavailable'}</small>}</div>}
-            {gate.stage !== 'event' && <details key={gate.token} className="headers-disclosure"><summary>Headers ({gate.value.headers?.length ?? 0})</summary><label className="editor-headers-field">Headers (JSON pairs)<textarea className="mono" rows={7} spellCheck={false} value={draft.headers} onChange={event => setDraft({ ...draft, headers: event.target.value })}/></label></details>}
+            {gate.stage === 'request' && <><label>URL<input readOnly={!!ended} value={draft.url} onChange={event => setDraft({ ...draft, url: event.target.value })}/></label><label>Method<input readOnly={!!ended} value={draft.method} onChange={event => setDraft({ ...draft, method: event.target.value })}/></label></>}
+            {gate.stage === 'response' && <label>Status code<input type="number" readOnly={!!ended} value={draft.status} onChange={event => setDraft({ ...draft, status: event.target.value })}/></label>}
+            {gate.stage === 'event' && <label>Event type<input readOnly={!!ended} value={draft.event} onChange={event => setDraft({ ...draft, event: event.target.value })}/></label>}
+            {gate.stage === 'response' && !(ended && !decoded) && <div><button type="button" onClick={() => setBodyMode('raw')}>Raw body</button><button type="button" onClick={async () => { try { if (!decoded) { const result = await api(`/api/pending/${encodeURIComponent(gate.token)}/decode`, 'POST', {}) as DecodedBody; setDecoded(result); setDecodedText(result.body); } setBodyMode('decoded'); setError(''); } catch (e) { setError(errorMessage(e)); } }}>Decoded body</button>{decoded && <button type="button" onClick={() => { setDecoded(null); setDecodedText(''); setBodyMode('raw'); }}>Discard decoded</button>}{decoded && <p className="muted" title="Decoded edits are re-encoded on Continue">{decoded.warning}{decodedText !== decoded.body ? ' · edited' : ''}</p>}</div>}
+            {bodyMode === 'decoded' && decoded ? <JsonBodyEditor label="Decoded response body" value={decodedText} disabled={!decoded.editable || !!ended} onChange={setDecodedText} onReplacingChange={setReplacingBody}/> : <div className="editor-body-field"><span className="editor-body-heading"><span>{gate.stage === 'event' ? 'Event data' : 'Body'}</span><button type="button" title="Unchanged JSON keeps its original bytes" disabled={Boolean(gate.value.bodyUnavailable) || replacingBody || Boolean(decoded) || !!ended} onClick={() => { const formatted = prepareJson(draft.body); if (!formatted.isJson) { setError('Not valid JSON'); return; } setDraft({ ...draft, body: formatted.text }); setError(''); }}>Format JSON</button></span><JsonBodyEditor key={gate.token} label={gate.stage === 'event' ? 'Event data' : 'Body'} disabled={Boolean(gate.value.bodyUnavailable) || Boolean(decoded) || !!ended} value={draft.body} onChange={body => setDraft({ ...draft, body })} onReplacingChange={setReplacingBody}/>{Boolean(gate.value.bodyUnavailable) && <small>{gate.value.bodyUnavailableReason || 'Body unavailable'}</small>}</div>}
+            {gate.stage !== 'event' && <details key={gate.token} className="headers-disclosure"><summary>Headers ({gate.value.headers?.length ?? 0})</summary><label className="editor-headers-field">Headers (JSON pairs)<textarea className="mono" rows={7} spellCheck={false} readOnly={!!ended} value={draft.headers} onChange={event => setDraft({ ...draft, headers: event.target.value })}/></label></details>}
           </fieldset>
         </section>
       </div>
     </div>
-    <footer className="editor-window-footer">
+    {ended ? <footer className="editor-window-footer"><span className="muted">Nothing to continue or drop.</span><button className="primary" onClick={onDismiss}>Dismiss</button></footer> : <footer className="editor-window-footer">
       <button className="error-text" disabled={busy || replacingBody} onClick={() => void resolveGate('drop')}>Drop connection</button>
       <button className="primary" aria-label="Continue" aria-keyshortcuts="Meta+Enter" disabled={busy || replacingBody} onClick={() => void resolveGate('continue')}>Continue <span aria-hidden="true">⌘↵</span></button>
-    </footer>
+    </footer>}
   </>;
 }
 
@@ -142,6 +145,8 @@ export default function PausedWindow() {
   const [lost, setLost] = useState<Lost[]>([]);
   const previousOrder = useRef<string[]>([]);
   const seenGates = useRef(new Map<string, Gate>());
+  // Tokens of ended gates still shown, readable by the cleanup effect in the same commit that detects them.
+  const lostTokens = useRef(new Set<string>());
 
   useEffect(() => {
     document.title = 'Breakpoints — Streamglass';
@@ -189,7 +194,11 @@ export default function PausedWindow() {
   const gates = useMemo(() => (data?.pending ?? []).map((gate, index) => ({ gate, index })).filter(({ gate }) => !resolved.has(gate.token))
     .sort((a, b) => (a.gate.pausedAt ?? 0) - (b.gate.pausedAt ?? 0) || a.index - b.index).map(({ gate }) => gate), [data, resolved]);
   const devices = useMemo(() => new Map((data?.records ?? []).map(record => [record.id, record.device])), [data]);
-  const current = gates.find(gate => gate.token === selected) ?? null;
+  // Gates whose connection closed while paused stay in the list, in place, until dismissed.
+  const entries = useMemo(() => pausedEntries(gates, lost), [gates, lost]);
+  const currentEntry = entries.find(entry => entry.gate.token === selected) ?? null;
+  const current = currentEntry?.gate ?? null;
+  const dismissLost = useCallback((token: string) => { lostTokens.current.delete(token); setLost(old => old.filter(item => item.gate.token !== token)); }, []);
 
   // A gate that vanishes without being resolved here and whose flow ended in an error was cut off: usually the
   // app (or the server) stopped waiting on its own timeout. Keep the window open and say so instead of closing.
@@ -198,20 +207,21 @@ export default function PausedWindow() {
     const live = new Map(data.pending.map(gate => [gate.token, gate]));
     const ended = endedGates(seenGates.current, live, resolved, data.records);
     seenGates.current = live;
-    if (ended.length) setLost(old => [...old, ...ended]);
+    if (ended.length) { for (const item of ended) lostTokens.current.add(item.gate.token); setLost(old => [...old, ...ended]); }
   }, [data, resolved]);
 
   useEffect(() => {
     if (!data) return;
     const live = new Set(data.pending.map(gate => gate.token));
     setResolved(old => old.size && [...old].some(token => !live.has(token)) ? new Set([...old].filter(token => live.has(token))) : old);
-    setDrafts(old => Object.keys(old).some(token => !live.has(token)) ? Object.fromEntries(Object.entries(old).filter(([token]) => live.has(token))) : old);
+    const kept = (token: string) => live.has(token) || lostTokens.current.has(token);
+    setDrafts(old => Object.keys(old).some(token => !kept(token)) ? Object.fromEntries(Object.entries(old).filter(([token]) => kept(token))) : old);
   }, [data]);
 
   // When the selected gate is gone (resolved here, by MCP, or released by pause), move to the next oldest.
   useEffect(() => {
     if (!data) return;
-    const order = gates.map(gate => gate.token);
+    const order = entries.map(entry => entry.gate.token);
     if (!current) {
       const before = previousOrder.current;
       const position = selected ? before.indexOf(selected) : -1;
@@ -220,7 +230,7 @@ export default function PausedWindow() {
       if (target !== selected) setSelected(target);
     }
     previousOrder.current = order;
-  }, [data, gates, current, selected]);
+  }, [data, entries, current, selected]);
 
   // Close once the last paused request is handled; a window opened with nothing paused stays open. No grace
   // period: the list is empty only after a fresh /api/pending read agrees, so a transient empty state (load,
@@ -248,28 +258,21 @@ export default function PausedWindow() {
   }, []);
 
   return <main className="editor-window paused-window">
-    <header className="editor-window-heading window-header"><h1>Breakpoints</h1><span>{gates.length ? `${gates.length} paused` : 'Nothing paused'}</span></header>
-    {error && <div className="editor-error" role="alert"><span>{error}</span><button onClick={() => setError('')}>Dismiss</button></div>}
-    {lost.map(({ gate, reason, pausedMs }) => {
-      const { path } = splitUrl(gate.url ?? gate.value.url);
-      return <div key={gate.token} className="editor-error paused-lost" role="alert">
-        <span title={isDisconnect(reason) ? 'The app or the server stopped waiting, usually on its own timeout. Continue sooner, or raise the app timeout while debugging.' : undefined}><strong>{gate.method ?? gate.value.method ?? 'HTTP'} {path || '/'}</strong> ended after {formatWait(pausedMs)} at {stageLabel(gate.stage).toLowerCase()}: {reason}. Edits not sent.</span>
-        <button onClick={() => setLost(old => old.filter(item => item.gate.token !== gate.token))}>Dismiss</button>
-      </div>;
-    })}
+    <header className="editor-window-heading window-header"><h1>Breakpoints</h1><span>{[gates.length ? `${gates.length} paused` : lost.length ? '' : 'Nothing paused', lost.length ? `${lost.length} disconnected` : ''].filter(Boolean).join(' · ')}</span></header>
+    {error && <Banner tone="error" className="editor-error" actions={<button onClick={() => setError('')}>Dismiss</button>}>{error}</Banner>}
     <div className="paused-layout">
       <nav className="paused-list" aria-label="Paused requests">
-        {gates.map(gate => {
+        {entries.map(({ gate, ended }) => {
           const { host, path } = splitUrl(gate.url ?? gate.value.url);
           const device = devices.get(gate.recordId);
           const method = gate.method ?? gate.value.method ?? 'HTTP';
-          return <button key={gate.token} className={`paused-item${gate.token === selected ? ' selected' : ''}`} title={[`${host}${path}`, device].filter(Boolean).join(' · ')} aria-current={gate.token === selected ? 'true' : undefined} onClick={() => setSelected(gate.token)}>
-            <span className="editor-method">{method}</span><span className="paused-url"><b>{path || '/'}</b></span><StageBadge stage={gate.stage} compact/><time className="paused-wait">{formatWait(now - (gate.pausedAt ?? now))}</time>
+          return <button key={gate.token} className={`paused-item${gate.token === selected ? ' selected' : ''}${ended ? ' ended' : ''}`} title={[`${host}${path}`, device, ended ? `Disconnected: ${ended.reason}` : ''].filter(Boolean).join(' · ')} aria-current={gate.token === selected ? 'true' : undefined} onClick={() => setSelected(gate.token)}>
+            <span className="editor-method">{method}</span><span className="paused-url"><b>{path || '/'}</b></span><StageBadge stage={gate.stage} compact/>{ended ? <span className="paused-wait ended"><Unplug size={11} aria-hidden="true"/>Disconnected</span> : <time className="paused-wait">{formatWait(now - (gate.pausedAt ?? now))}</time>}
           </button>;
         })}
       </nav>
       <section className="paused-detail">
-        {!data ? <p className="muted paused-empty">Connecting…</p> : current && draft ? <GateEditor key={current.token} gate={current} draft={draft} setDraft={next => setDrafts(old => ({ ...old, [current.token]: next }))} api={api} onResolved={onResolved} setError={setError}/>
+        {!data ? <p className="muted paused-empty">Connecting…</p> : current && draft ? <GateEditor key={current.token} gate={current} draft={draft} setDraft={next => setDrafts(old => ({ ...old, [current.token]: next }))} api={api} onResolved={onResolved} setError={setError} ended={currentEntry?.ended} onDismiss={() => dismissLost(current.token)}/>
           : <div className="paused-empty"><CirclePause aria-hidden="true"/><h2>Nothing paused</h2>{notice && <p className="muted">{notice}</p>}</div>}
       </section>
     </div>

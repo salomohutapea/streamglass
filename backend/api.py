@@ -116,7 +116,7 @@ def create_app(service):
         changes = await request.json()
         if isinstance(changes, dict) and "running" in changes:
             changes["proxyEnabled"] = changes.pop("running")
-        if not isinstance(changes, dict) or set(changes) - {"capturePaused", "proxyEnabled", "proxyPort", "listenHost", "tlsDomains", "lanDevices", "lanAllowedDestinations", "inspectedStorageMiB"}:
+        if not isinstance(changes, dict) or set(changes) - {"capturePaused", "proxyEnabled", "proxyPort", "listenHost", "tlsDomains", "lanDevices", "lanDeviceExpiry", "lanAllowedDestinations", "inspectedStorageMiB"}:
             raise ValueError("Unknown settings")
         from .lan_guard import validate_devices, validate_destinations
         if "lanDevices" in changes:
@@ -128,6 +128,12 @@ def create_app(service):
             low, high = INSPECTED_MIB_RANGE
             if type(changes["inspectedStorageMiB"]) is not int or not low <= changes["inspectedStorageMiB"] <= high:
                 raise ValueError(f"inspectedStorageMiB must be an integer from {low} to {high}")
+        if "lanDeviceExpiry" in changes:
+            if type(changes["lanDeviceExpiry"]) is not bool:
+                raise ValueError("lanDeviceExpiry must be boolean")
+            # Turning expiry back on gives every approved device a fresh seven days instead of dropping old ones at once.
+            if changes["lanDeviceExpiry"] and not service.settings.get("lanDeviceExpiry", True):
+                service.settings["lanDeviceApprovals"] = {}
         if "proxyEnabled" in changes and type(changes["proxyEnabled"]) is not bool:
             raise ValueError("proxyEnabled must be boolean")
         if "capturePaused" in changes and type(changes["capturePaused"]) is not bool:
@@ -200,6 +206,10 @@ def create_app(service):
             for key in ("breakpoint", "enabled"):
                 if key in rule and type(rule[key]) is not bool:
                     raise ValueError(f"{key} must be boolean")
+            if "order" in rule:
+                from .rule_folders import valid_order
+                if not valid_order(rule["order"]):
+                    raise ValueError("Rule order must be a finite number")
             if "folderId" in rule:
                 kind = "scripts" if rule.get("breakpoint") is False else "breakpoints"
                 if not isinstance(rule["folderId"], str) or not any(folder["id"] == rule["folderId"] and folder["kind"] == kind for folder in folders):
@@ -214,8 +224,10 @@ def create_app(service):
             raise ValueError("Expected rules and a nonnegative integer revision")
         if value["revision"] != service.rules_revision:
             return web.json_response({"error": {"code": "revision_conflict", "message": "Rules changed in another window or MCP client. Reload rules before saving."}, "rulesRevision": service.rules_revision}, status=409)
+        from .rule_folders import ordered_rules
         rules = validate_rules(value["rules"], service.folders)
-        service.persist_config(rules=rules)
+        # Kept in the order the folder tree shows, which is the order rules are tried in.
+        service.persist_config(rules=ordered_rules(rules, service.folders))
         return web.json_response({"rules": service.rules, "revision": service.rules_revision})
 
     async def workspace_config(request):
@@ -234,20 +246,8 @@ def create_app(service):
         folders = value["folders"]
         if not isinstance(folders, list) or len(folders) > 500:
             raise ValueError("Expected at most 500 folders")
-        ids, names = set(), set()
-        for item in folders:
-            if not isinstance(item, dict) or set(item) != {"id", "name", "kind"}:
-                raise ValueError("Expected folder id, name and kind")
-            if not isinstance(item["id"], str) or not item["id"] or len(item["id"]) > 256 or item["id"] in ids:
-                raise ValueError("Folder IDs must be unique strings")
-            if item["kind"] not in ("breakpoints", "scripts") or not isinstance(item["name"], str) or not item["name"].strip() or len(item["name"].strip()) > 128:
-                raise ValueError("Invalid folder name or kind")
-            item["name"] = item["name"].strip()
-            key = (item["kind"], item["name"].casefold())
-            if key in names:
-                raise ValueError("Folder name already exists")
-            ids.add(item["id"])
-            names.add(key)
+        from .rule_folders import validate_folders
+        folders = validate_folders(folders)
         rules = validate_rules(value["rules"], folders)
         from .traffic_tools import validate
         from .lab import validate_scenarios
@@ -293,30 +293,60 @@ def create_app(service):
         return web.json_response({"id": record_id, "rev": service.record_revs.get(record_id, 0), "fields": evaluate_fields(service, value, full=True)})
 
     async def folder(request):
+        """Create, change or delete a rule folder. PATCH takes any of name, parentId (null for the top level), enabled,
+        expanded and order. Turning a folder on or off also sets every rule and folder below it, in the same write."""
+        from .rule_folders import descendants, ordered_rules, validate_folders, valid_order
         folder_id = request.match_info.get("id")
         existing = next((item for item in service.folders if item["id"] == folder_id), None)
         if folder_id and existing is None:
             raise web.HTTPNotFound(text="Folder not found")
         if request.method == "DELETE":
-            rules = [{key: value for key, value in rule.items() if key != "folderId"} if rule.get("folderId") == folder_id else rule for rule in service.rules]
-            service.persist_config(rules=rules, folders=[item for item in service.folders if item["id"] != folder_id])
+            # Contents move up one level; nothing inside is deleted or disabled.
+            parent = existing.get("parentId")
+            def lifted(item, key):
+                if item.get(key) != folder_id:
+                    return item
+                rest = {name: value for name, value in item.items() if name != key}
+                return {**rest, key: parent} if parent else rest
+            folders = [lifted(item, "parentId") for item in service.folders if item["id"] != folder_id]
+            rules = [lifted(rule, "folderId") for rule in service.rules]
+            service.persist_config(rules=ordered_rules(rules, folders), folders=folders)
             return web.json_response({"ok": True})
         value = await request.json()
-        allowed = {"name"} if existing else {"name", "kind"}
-        if not isinstance(value, dict) or set(value) != allowed:
+        allowed = {"name", "parentId", "enabled", "expanded", "order"} if existing else {"name", "kind", "parentId", "enabled", "expanded", "order"}
+        required = set() if existing else {"name", "kind"}
+        if not isinstance(value, dict) or not value or set(value) - allowed or not required <= set(value):
             raise ValueError("Expected folder name" if existing else "Expected folder name and kind")
-        name = value["name"]
-        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 128:
-            raise ValueError("Folder name must contain 1..128 characters")
-        name = name.strip()
-        kind = existing["kind"] if existing else value["kind"]
-        if kind not in ("breakpoints", "scripts"):
+        result = dict(existing) if existing else {"id": str(uuid.uuid4()), "kind": value["kind"]}
+        if "name" in value:
+            if not isinstance(value["name"], str) or not value["name"].strip() or len(value["name"].strip()) > 128:
+                raise ValueError("Folder name must contain 1..128 characters")
+            result["name"] = value["name"].strip()
+        if result["kind"] not in ("breakpoints", "scripts"):
             raise ValueError("Folder kind must be breakpoints or scripts")
-        if any(item["id"] != folder_id and item["kind"] == kind and item["name"].casefold() == name.casefold() for item in service.folders):
-            raise ValueError("Folder name already exists")
-        result = {"id": folder_id or str(uuid.uuid4()), "name": name, "kind": kind}
+        if "parentId" in value:
+            if value["parentId"] is None:
+                result.pop("parentId", None)
+            else:
+                result["parentId"] = value["parentId"]
+        for key in ("enabled", "expanded"):
+            if key in value:
+                if type(value[key]) is not bool:
+                    raise ValueError(f"Folder {key} must be boolean")
+                result[key] = value[key]
+        if "order" in value:
+            if not valid_order(value["order"]):
+                raise ValueError("Folder order must be a finite number")
+            result["order"] = value["order"]
         folders = [result if item["id"] == folder_id else item for item in service.folders] if existing else [*service.folders, result]
-        service.persist_config(folders=folders)
+        rules = service.rules
+        if "enabled" in value and existing:
+            below = descendants(folders, folder_id)
+            folders = [{**item, "enabled": value["enabled"]} if item["id"] in below else item for item in folders]
+            rules = [{**rule, "enabled": value["enabled"]} if rule.get("folderId") in below | {folder_id} else rule for rule in rules]
+        folders = validate_folders([dict(item) for item in folders])
+        result = next(item for item in folders if item["id"] == result["id"])
+        service.persist_config(rules=ordered_rules(rules, folders), folders=folders)
         return web.json_response(result, status=200 if existing else 201)
 
     async def resume(request):

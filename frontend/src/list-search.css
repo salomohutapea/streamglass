@@ -1,5 +1,5 @@
 .list-search-bar{display:flex;align-items:center;gap:7px;flex-shrink:0;min-width:0;padding:8px 10px}
-.list-search{display:flex;align-items:center;gap:6px;min-width:0;flex:1;background:var(--input);border:1px solid var(--line);border-radius:6px;padding:5px 7px;color:var(--muted)}
+.list-search{display:flex;align-items:center;gap:6px;min-width:0;flex:1;background:var(--input);border:1px solid var(--line-strong);border-radius:6px;padding:5px 7px;color:var(--muted)}
 .list-search:focus-within{border-color:var(--accent)}
 .list-search input{border:0;background:transparent;outline:0;min-width:0;width:100%;padding:0;font:inherit;font-size:11px;color:var(--text)}
 .list-search input:focus{outline:0;border:0;box-shadow:none}

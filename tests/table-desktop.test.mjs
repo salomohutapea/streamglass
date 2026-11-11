@@ -312,28 +312,67 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await clickMenu('breakpoints');
     editor = await opened;
     await editor.getByRole('button', { name: 'Add rule', exact: true }).waitFor();
-    assert.equal(await editor.locator('.compact-rule-target code').count(), 1);
-    assert.equal(await editor.locator('.compact-rule-name').count(), 0);
-    assert.equal(await editor.locator('.compact-rule-detail').evaluate(element => getComputedStyle(element).textAlign), 'left');
+    // Rules and folders share one compact table: folders are rows that expand in place.
+    const ruleRow = editor.locator('.rule-table tbody tr.rule-item-row');
+    const folderRow = name => editor.locator('.rule-table tbody tr.rule-folder-row').filter({ has: editor.getByText(name, { exact: true }) });
+    const tableShape = () => editor.locator('.rule-table tbody tr').evaluateAll(rows => rows.map(row => `${row.getAttribute('aria-level')}:${row.classList.contains('rule-folder-row') ? 'F ' + row.querySelector('strong').textContent : row.querySelector('code').textContent}`));
+    assert.equal(await ruleRow.count(), 1);
+    assert.equal(await ruleRow.locator('code').textContent(), 'https://example.test/z-search/sse');
     await editor.getByRole('button', { name: 'New folder', exact: true }).click();
     await editor.getByRole('textbox', { name: 'Folder name', exact: true }).fill('Flight search');
     await editor.getByRole('button', { name: 'Create folder', exact: true }).click();
-    await editor.getByRole('button', { name: 'Flight search', exact: true }).waitFor();
-    await editor.getByRole('button', { name: 'All rules', exact: true }).click();
+    await folderRow('Flight search').waitFor();
     await editor.getByRole('button', { name: 'Edit POST https://example.test/z-search/sse', exact: true }).click();
     await editor.getByRole('combobox', { name: 'Folder', exact: true }).selectOption({ label: 'Flight search' });
     await editor.getByRole('button', { name: 'Save rule', exact: true }).click();
-    await editor.getByRole('button', { name: 'Flight search', exact: true }).click();
-    await editor.locator('.compact-rule-target code').waitFor();
-    await editor.getByRole('button', { name: 'Rename folder', exact: true }).click();
+    await editor.waitForFunction(() => document.querySelector('.rule-table tr.rule-item-row')?.getAttribute('aria-level') === '2');
+    assert.deepEqual(await tableShape(), ['1:F Flight search', '2:https://example.test/z-search/sse']);
+    // A folder inside a folder, created from the folder's menu.
+    await editor.getByRole('button', { name: 'Folder actions for Flight search', exact: true }).click();
+    await editor.getByRole('menuitem', { name: 'New folder inside…', exact: true }).click();
+    await editor.getByRole('textbox', { name: 'Folder name', exact: true }).fill('SSE');
+    await editor.getByRole('button', { name: 'Create folder', exact: true }).click();
+    await folderRow('SSE').waitFor();
+    assert.equal(await folderRow('SSE').getAttribute('aria-level'), '2');
+    // Rename from the menu.
+    await editor.getByRole('button', { name: 'Folder actions for Flight search', exact: true }).click();
+    await editor.getByRole('menuitem', { name: 'Rename…', exact: true }).click();
     await editor.getByRole('textbox', { name: 'Folder name', exact: true }).fill('Flight SSE');
     await editor.getByRole('button', { name: 'Save folder', exact: true }).click();
-    await editor.getByRole('button', { name: 'Flight SSE', exact: true }).waitFor();
+    await folderRow('Flight SSE').waitFor();
+    // Keyboard sort: Option+Down moves the rule below its sibling folder, and the engine stores that order.
+    assert.deepEqual(await tableShape(), ['1:F Flight SSE', '2:F SSE', '2:https://example.test/z-search/sse']);
+    await editor.getByRole('button', { name: 'New folder', exact: true }).click();
+    await editor.getByRole('textbox', { name: 'Folder name', exact: true }).fill('Later');
+    await editor.getByRole('button', { name: 'Create folder', exact: true }).click();
+    await folderRow('Later').waitFor();
+    const before = await tableShape();
+    await folderRow('Later').focus();
+    await editor.keyboard.press(before[0] === '1:F Later' ? 'Alt+ArrowDown' : 'Alt+ArrowUp');
+    await editor.waitForFunction(first => document.querySelector('.rule-table tbody tr strong')?.textContent !== first, before[0].slice(4));
+    assert.notDeepEqual(await tableShape(), before, 'Option+Arrow reorders a folder among its siblings');
+    // Drag the rule into the nested folder.
+    await ruleRow.dragTo(folderRow('SSE'));
+    await editor.waitForFunction(() => document.querySelector('.rule-table tr.rule-item-row')?.getAttribute('aria-level') === '3');
+    // Turning the outer folder off turns off the rule inside it; collapsing hides its contents and is remembered.
+    await editor.getByRole('checkbox', { name: 'Enable folder Flight SSE', exact: true }).click();
+    await editor.waitForFunction(() => document.querySelector('.rule-table tr.rule-item-row input')?.checked === false);
+    await editor.getByRole('checkbox', { name: 'Enable folder Flight SSE', exact: true }).click();
+    await editor.waitForFunction(() => document.querySelector('.rule-table tr.rule-item-row input')?.checked === true);
     if (process.env.STREAMGLASS_TEST_RULES_SCREENSHOT) await editor.screenshot({ path: process.env.STREAMGLASS_TEST_RULES_SCREENSHOT });
-    await editor.getByRole('button', { name: 'Delete folder', exact: true }).click();
-    await editor.getByRole('button', { name: 'Keep rules and delete folder', exact: true }).click();
-    await editor.getByRole('button', { name: 'Ungrouped', exact: true }).click();
-    assert.equal(await editor.locator('.compact-rule-target code').count(), 1);
+    await editor.getByRole('button', { name: 'Collapse Flight SSE', exact: true }).click();
+    await editor.waitForFunction(() => !document.querySelector('.rule-table tr.rule-item-row'));
+    assert.equal(await folderRow('Flight SSE').locator('small').textContent(), '1', 'A collapsed folder still shows how many rules it holds');
+    await editor.getByRole('button', { name: 'Expand Flight SSE', exact: true }).click();
+    await ruleRow.waitFor();
+    // Deleting a folder keeps what was inside it, one level up.
+    await editor.getByRole('button', { name: 'Folder actions for Flight SSE', exact: true }).click();
+    await editor.getByRole('menuitem', { name: 'Delete folder…', exact: true }).click();
+    await editor.getByRole('alertdialog').getByRole('button', { name: 'Delete folder', exact: true }).click();
+    await editor.waitForFunction(() => ![...document.querySelectorAll('.rule-table tr.rule-folder-row strong')].some(element => element.textContent === 'Flight SSE'));
+    assert.equal(await ruleRow.count(), 1);
+    assert.equal(await folderRow('SSE').getAttribute('aria-level'), '1');
+    assert.equal(await ruleRow.getAttribute('aria-level'), '2');
     await editor.close();
     await target.click({ button: 'right' });
     opened = app.waitForEvent('window');
@@ -482,12 +521,14 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
       await page.screenshot({ path: process.env.STREAMGLASS_TEST_HEADER_SCREENSHOT });
     }
     async function dismissBulk(trigger) {
-      const dialogOpened = page.waitForEvent('dialog');
-      await Promise.all([trigger(), dialogOpened.then(async confirmation => {
-        assert.equal(confirmation.type(), 'confirm');
-        assert.match(confirmation.message(), /cannot be undone/i);
-        await confirmation.dismiss();
-      })]);
+      // Bulk deletes ask in an in-app dialog: Cancel is focused, and nothing is deleted until Delete is clicked.
+      await trigger();
+      const confirmation = page.getByRole('alertdialog');
+      await confirmation.waitFor();
+      assert.match(await confirmation.innerText(), /cannot be undone/i);
+      assert.equal(await confirmation.getByRole('button', { name: 'Cancel', exact: true }).evaluate(element => element === document.activeElement), true, 'Cancel is the default action');
+      await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await confirmation.waitFor({ state: 'detached' });
       assert.equal(await rows.count(), 3, 'Canceling bulk delete keeps every capture');
     }
     await dismissBulk(() => page.getByRole('button', { name: 'Delete all records', exact: true }).click());
@@ -510,8 +551,8 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 1);
     assert.equal(unexpectedDialog, false, 'Native single capture delete is immediate');
     page.off('dialog', rejectUnexpectedDialog);
-    const bulkOpened = page.waitForEvent('dialog');
-    await Promise.all([page.getByRole('button', { name: 'Delete all records', exact: true }).click(), bulkOpened.then(confirmation => confirmation.accept())]);
+    await page.getByRole('button', { name: 'Delete all records', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
     await page.getByRole('heading', { name: 'Ready when you are', exact: true }).waitFor();
     assert.equal(await rows.count(), 0);
     assert.deepEqual(errors, []);

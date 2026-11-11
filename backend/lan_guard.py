@@ -10,6 +10,9 @@ import time
 MAX_DEVICES = 64
 MAX_DESTINATIONS = 100
 MAX_REQUESTS = 32
+# An approval lasts this long from the moment it is given. Addresses on shared networks are reassigned, so an old
+# approval would otherwise pass to whichever device takes over the address.
+DEVICE_TTL_SECONDS = 7 * 24 * 60 * 60
 DEVICE_REFUSED = "Device is not approved to use this proxy. Approve it in Streamglass."
 
 
@@ -96,13 +99,39 @@ class LanGuard:
         self.requests = {}
 
     def summary(self):
+        self.prune()
         return [{"address": address, **entry} for address, entry in self.requests.items()]
+
+    def prune(self, now=None):
+        """Drops approvals older than DEVICE_TTL_SECONDS and keeps settings.lanDeviceApprovals (address -> approval
+        time) in step with lanDevices. Nothing expires while settings.lanDeviceExpiry is off. A device approved before expiry existed, or added through settings, starts its
+        seven days when first seen here. Returns the addresses that expired."""
+        now = time.time() if now is None else now
+        settings = self.service.settings
+        devices = list(settings.get("lanDevices", []))
+        stored = settings.get("lanDeviceApprovals")
+        stored = stored if isinstance(stored, dict) else {}
+        approvals, expired = {}, []
+        for address in devices:
+            approved = stored.get(address)
+            approved = approved if isinstance(approved, (int, float)) and not isinstance(approved, bool) and approved <= now else now
+            if settings.get("lanDeviceExpiry", True) and now - approved >= DEVICE_TTL_SECONDS:
+                expired.append(address)
+            else:
+                approvals[address] = approved
+        if expired or approvals != settings.get("lanDeviceApprovals"):
+            settings["lanDevices"] = [address for address in devices if address in approvals]
+            settings["lanDeviceApprovals"] = approvals
+            self.service.persist_config()
+            self.service.changed()
+        return expired
 
     def client_connected(self, client):
         """Returns False after refusing a LAN client that is not an approved device."""
         if not is_lan_client(client):
             return True
         address = client_ip(client)
+        self.prune()
         if address in self.service.settings.get("lanDevices", []):
             return True
         entry = self.requests.pop(address, None) or {"firstSeen": time.time(), "attempts": 0, "denied": False}
@@ -117,15 +146,21 @@ class LanGuard:
     def decide(self, address, allow):
         """Approve or refuse a device address; approval persists in lanDevices."""
         address = validate_devices([address])[0]
+        self.prune()
         devices = list(self.service.settings.get("lanDevices", []))
+        approvals = dict(self.service.settings.get("lanDeviceApprovals", {}))
         if allow:
             self.requests.pop(address, None)
             if address not in devices:
                 devices = validate_devices([*devices, address])
+            # Allowing again renews the seven days.
+            approvals[address] = time.time()
         else:
             devices = [item for item in devices if item != address]
             entry = self.requests.setdefault(address, {"firstSeen": time.time(), "lastSeen": time.time(), "attempts": 0})
             entry["denied"] = True
+            approvals.pop(address, None)
+        self.service.settings["lanDeviceApprovals"] = approvals
         self.service.settings["lanDevices"] = devices
         self.service.persist_config()
 

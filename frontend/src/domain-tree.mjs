@@ -44,12 +44,14 @@ export function buildDomainTree(records, { depth = 2, hidden = new Set() } = {})
   }
   const finish = node => {
     const sorted = [...node.kids.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-    const children = sorted.slice(0, MAX_CHILDREN).map(finish);
+    // The busiest paths are kept, then shown by name: positions must not move while traffic arrives.
+    const children = sorted.slice(0, MAX_CHILDREN).sort((a, b) => a.label.localeCompare(b.label)).map(finish);
     const out = { host: node.host, path: node.path, label: node.label, count: node.count, children, more: Math.max(0, sorted.length - children.length) };
     if (node.encrypted !== undefined) out.encrypted = node.encrypted;
     return out;
   };
-  return [...hosts.values()].map(finish).sort((a, b) => b.count - a.count || a.host.localeCompare(b.host));
+  // Hosts by name, not by count, so a row never jumps under the pointer as counts change.
+  return [...hosts.values()].map(finish).sort((a, b) => a.host.localeCompare(b.host));
 }
 
 export function matchesDomain(record, filter) {

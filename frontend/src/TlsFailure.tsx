@@ -14,7 +14,7 @@ const CAUSES: Record<TlsFailure['likelyCause'], string> = {
 /** Explains a failed TLS handshake and offers to stop inspecting the host. Read-only apart from the allowlist action. */
 export function TlsFailureCallout({failure, host, busy, onRemove}: {failure: TlsFailure; host: string; busy?: boolean; onRemove: (host: string) => void}) {
   const server = failure.side === 'server';
-  return <div className="tls-failure-callout" role="alert">
+  return <div className="tls-failure-callout" role="note">
     <h3><AlertTriangle size={16} /> TLS failed ({server ? 'server' : 'client'})</h3>
     <p>{server ? 'Origin TLS failed.' : CAUSES[failure.likelyCause]} <code>{failure.reason}</code></p>
     {!server && <ul>

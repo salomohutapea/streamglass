@@ -12,14 +12,19 @@ export default function SseTimeline({record}:{record:any}) {
   const retained=gapSummary(events.map((e:any)=>e.gapMs).filter((g:unknown)=>typeof g==='number'));
   const stats=d.gapStats?.count?d.gapStats:retained;
   const status=sseStatus(record), info=SSE_STATUS[status], live=info.tone==='pending'||info.tone==='live', detail=d.endDetail||(d.endReason in SSE_STATUS?'':d.endReason);
+  const count=d.eventCount??record.eventCount??events.length, ended=startedAtMs(d.endedAt??record.endedAt);
+  const tiles:[string,string][]=[['Headers',elapsed(headers)],['First event',elapsed(first)],['Events',String(count)],['Bytes',d.eventBytes?.toLocaleString()??'—'],['Total',live?'—':elapsed(ended)]];
   return <details className="sse-timeline" open><summary>SSE timeline</summary>
+    <div className="sse-head"><span className={`sse-pill sse-${info.tone}`}><SseStatusDot status={status}/>{info.label}</span>{detail&&<span className="muted sse-detail">{detail}</span>}</div>
     <SseStatusStrip record={record} status={status} live={live}/>
-    <dl><dt>Headers</dt><dd>{elapsed(headers)}</dd><dt>First event</dt><dd>{elapsed(first)}</dd><dt>Events</dt><dd>{d.eventCount??record.eventCount??events.length}</dd><dt>Bytes</dt><dd>{d.eventBytes?.toLocaleString()??'—'}</dd><dt>Gap</dt><dd>{stats?`min ${formatMs(stats.minMs)} · avg ${formatMs(stats.avgMs)} · p95 ${formatMs(stats.p95Ms)} · max ${formatMs(stats.maxMs)}`:'—'}</dd><dt>Connection</dt><dd>{info.label}{detail&&<span className="muted"> · {detail}</span>}</dd></dl>
+    <dl className="sse-tiles">{tiles.map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+    {stats&&<dl className="sse-gaps" aria-label="Gap between events"><dt>Gap between events</dt>{([['min',stats.minMs],['avg',stats.avgMs],['p95',stats.p95Ms],['max',stats.maxMs]] as [string,number][]).map(([label,value])=><dd key={label}><small>{label}</small>{formatMs(value)}</dd>)}</dl>}
     {record.captureWarning&&<p className="muted">{record.captureWarning}</p>}
-    <div className="timeline-scroll"><table><thead><tr><th>Event</th><th>Type</th><th>Received</th><th>Gap</th><th>Delivery</th></tr></thead><tbody>{events.slice(-100).map((event:any,index:number)=>{
+    {events.length?<div className="timeline-scroll"><table className="sse-events"><thead><tr><th>#</th><th>Type</th><th className="sse-col-received">Received</th><th>Gap</th><th className="sse-col-delivery">Delivery</th></tr></thead><tbody>{events.slice(-100).map((event:any,index:number)=>{
       const absolute=Math.max(0,events.length-100)+index, received=startedAtMs(event.receivedAt), previous=absolute?startedAtMs(events[absolute-1].receivedAt):undefined;
-      return <tr key={event.sequence??absolute}><td>{event.sequence??absolute+1}</td><td>{event.event??'message'}</td><td>{requestTime(event.receivedAt)}</td><td>{typeof event.gapMs==='number'?formatMs(event.gapMs):received!==undefined&&previous!==undefined?formatMs(Math.max(0,received-previous)):'—'}</td><td>{event.forwarded===false?'Suppressed':event.forwarded===true?'Forwarded':'Unknown'}</td></tr>;
-    })}</tbody></table></div>{events.length>100&&<small>Latest 100 shown</small>}
+      const delivery=event.forwarded===false?'Suppressed':event.forwarded===true?'Forwarded':'Unknown';
+      return <tr key={event.sequence??absolute}><td>{event.sequence??absolute+1}</td><td>{event.event??'message'}</td><td className="sse-col-received">{requestTime(event.receivedAt)}</td><td>{typeof event.gapMs==='number'?formatMs(event.gapMs):received!==undefined&&previous!==undefined?formatMs(Math.max(0,received-previous)):'—'}</td><td className="sse-col-delivery"><span className={`sse-delivery ${delivery.toLowerCase()}`} title={delivery}><i aria-hidden="true"/><span>{delivery}</span></span></td></tr>;
+    })}</tbody></table></div>:<p className="muted sse-empty">{live?'No events yet.':'The stream ended without sending an event.'}</p>}{events.length>100&&<small>Latest 100 shown</small>}
   </details>;
 }
 
@@ -39,8 +44,8 @@ function SseStatusStrip({record, status, live}: {record:any; status:keyof typeof
   const offset = (time?: number) => time !== undefined && start !== undefined ? `+${formatMs(Math.max(0, time - start))}` : '';
   const last = at(d.lastEventAt) ?? at(d.headersAt);
   return <div className="sse-status" role="status" aria-label={`Stream ${info.label}`} title={info.description}>
-    <ol>{steps.map((step, index) => <li key={step.key} className={index < current ? (step.time === undefined ? 'skipped' : 'done') : index === current ? `current sse-${info.tone}` : 'future'}>
-      {index === current ? <SseStatusDot status={status}/> : <i/>}<span>{step.label}</span><small>{index <= current ? offset(step.time) : ''}</small></li>)}</ol>
+    <ol>{steps.map((step, index) => { const skipped = index < current && step.time === undefined; return <li key={step.key} className={index < current ? (skipped ? 'skipped' : 'done') : index === current ? `current sse-${info.tone}` : 'future'} aria-current={index === current ? 'step' : undefined}>
+      <i aria-hidden="true"/><span>{step.label}</span><small>{skipped ? 'not reached' : index <= current ? offset(step.time) : ''}</small></li>; })}</ol>
     {live && status !== 'connecting' && last !== undefined && <p className="muted" title={info.description}>Idle {formatMs(Math.max(0, now - last))}</p>}
   </div>;
 }

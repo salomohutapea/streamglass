@@ -121,6 +121,46 @@ class FolderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(persisted['rules']), [rule])
         self.assertEqual(json.loads(persisted['folders']), [folder])
 
+    async def test_nested_folders_order_and_enable_state(self):
+        rule = lambda rule_id, **extra: {'id': rule_id, 'pattern': f'*/{rule_id}', 'method': '*', 'stages': ['request'], 'enabled': True, **extra}
+        outer = await self.create('Outer')
+        response = await self.client.post('/api/folders', json={'name': 'Inner', 'kind': 'breakpoints', 'parentId': outer['id']})
+        self.assertEqual(response.status, 201)
+        inner = await response.json()
+        self.assertEqual(inner['parentId'], outer['id'])
+        # The same name is allowed in a different parent, not beside a sibling.
+        self.assertEqual((await self.client.post('/api/folders', json={'name': 'Inner', 'kind': 'breakpoints'})).status, 201)
+        self.assertEqual((await self.client.post('/api/folders', json={'name': 'inner', 'kind': 'breakpoints', 'parentId': outer['id']})).status, 400)
+        # A folder cannot move into its own descendant, or under a folder of the other kind.
+        self.assertEqual((await self.client.patch(f"/api/folders/{outer['id']}", json={'parentId': inner['id']})).status, 400)
+        scripts = await self.create('Scripts', 'scripts')
+        self.assertEqual((await self.client.patch(f"/api/folders/{inner['id']}", json={'parentId': scripts['id']})).status, 400)
+        self.assertEqual((await self.client.patch(f"/api/folders/{inner['id']}", json={'order': 'first'})).status, 400)
+
+        # Stored rule order follows the tree: the folder (order 1.5) sits between the two top-level rules.
+        self.assertEqual((await self.client.patch(f"/api/folders/{outer['id']}", json={'order': 1.5, 'expanded': False})).status, 200)
+        saved = await self.save_rules([rule('deep', folderId=inner['id']), rule('b', order=2), rule('in-outer', folderId=outer['id']), rule('a', order=1)])
+        self.assertEqual(saved.status, 200)
+        self.assertEqual([item['id'] for item in (await saved.json())['rules']], ['a', 'deep', 'in-outer', 'b'])
+
+        # Turning the outer folder off turns off every rule and folder below it, and nothing outside it.
+        self.assertEqual((await self.client.patch(f"/api/folders/{outer['id']}", json={'enabled': False})).status, 200)
+        state = await (await self.client.get('/api/state')).json()
+        self.assertEqual({item['id']: item['enabled'] for item in state['rules']}, {'a': True, 'deep': False, 'in-outer': False, 'b': True})
+        folders = {item['id']: item for item in state['folders']}
+        self.assertIs(folders[outer['id']]['enabled'], False)
+        self.assertIs(folders[inner['id']]['enabled'], False)
+        self.assertIs(folders[outer['id']]['expanded'], False)
+
+        # Deleting the outer folder lifts its contents one level instead of deleting them.
+        self.assertEqual((await self.client.delete(f"/api/folders/{outer['id']}")).status, 200)
+        state = await (await self.client.get('/api/state')).json()
+        self.assertNotIn('parentId', next(item for item in state['folders'] if item['id'] == inner['id']))
+        by_id = {item['id']: item for item in state['rules']}
+        self.assertNotIn('folderId', by_id['in-outer'])
+        self.assertEqual(by_id['deep']['folderId'], inner['id'])
+        self.assertEqual(len(state['rules']), 4)
+
     async def test_legacy_configuration_defaults_to_empty_folders(self):
         rule = {'id': 'old', 'pattern': '*', 'stages': ['response'], 'extra': 'keep'}
         self.service.persist_config(rules=[rule])

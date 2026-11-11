@@ -40,7 +40,7 @@ export default function Toolbar(p: Props) {
   const playing = p.status === 'recording';
   return <header className="toolbar">
     <div className="toolbar-group">
-      <button type="button" className={`capture-button${playing ? ' playing' : ''}`} disabled={p.busy || p.status === 'disconnected'} onClick={p.onToggleCapture}
+      <button type="button" className={`capture-button${playing ? ' playing' : ''}`} data-tour="capture" disabled={p.busy || p.status === 'disconnected'} onClick={p.onToggleCapture}
         aria-label={p.status === 'stopped' ? 'Start capture and rules' : playing ? 'Pause capture and rules' : 'Resume capture and rules'}
         title={'\u2318\u21e7P'}>
         {playing ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}<span className="tool-label" aria-hidden="true">{p.status === 'stopped' ? 'Start' : playing ? 'Pause' : 'Resume'}</span>
@@ -50,11 +50,11 @@ export default function Toolbar(p: Props) {
         <ToolButton label="Delete all records" text="Clear" onClick={p.onDeleteAll} disabled={p.busy || !p.hasRecords}><Trash2 /></ToolButton>
       </div>
     </div>
-    <div className={`status-capsule status-${p.status}`} role="status" aria-label={`Streamglass, ${statusText[p.status]}${p.address ? `, listening on ${p.address}` : ''}${p.offline ? ', no network' : ''}`}>
+    <div className={`status-capsule status-${p.status}`} data-tour="address" role="status" aria-label={`Streamglass, ${statusText[p.status]}${p.address ? `, listening on ${p.address}` : ''}${p.offline ? ', no network' : ''}`}>
       <i className="status-dot" aria-hidden="true" />
       <img className="brand-logo" src={streamglassLogo} alt="Streamglass logo" />
       <strong>Streamglass</strong>
-      {p.address && <><span className="status-sep" aria-hidden="true">|</span><span className="status-address" title="Proxy address"><b>{p.address}</b></span></>}
+      {p.address && <><span className="status-sep" aria-hidden="true">|</span><button type="button" className="status-address" title="Proxy address. Open Proxy settings" aria-label={`Proxy address ${p.address}. Open Proxy settings`} onClick={p.onSettings}><b>{p.address}</b></button></>}
       <span className="status-sep" aria-hidden="true">|</span>
       <button type="button" className="status-state" disabled={p.busy || p.status === 'disconnected'} onClick={p.onToggleCapture}>{statusText[p.status]}</button>
       <span className="status-badges">
@@ -68,12 +68,12 @@ export default function Toolbar(p: Props) {
         <ToolButton label="Filter requests" text="Filter" shortcut="⌘F" active={p.filterOpen || p.filterActive} onClick={p.onToggleFilter}><Search />{p.filterActive && <i className="tool-dot" aria-hidden="true" />}</ToolButton>
         <ToolButton label="Command palette" text="Commands" shortcut="⌘K" onClick={p.onPalette}><Command /></ToolButton>
       </div>
-      <div className="tool-capsule">
+      <div className="tool-capsule" data-tour="rules">
         <ToolButton label="Breakpoint rules" text="Breakpoints" onClick={p.onBreakpoints}><ListFilter /></ToolButton>
         <ToolButton label="JavaScript hooks" text="Scripts" onClick={p.onScripts}><Code2 /></ToolButton>
         <ToolButton label="Tools" text="Tools" onClick={p.onTools}><Toolbox /></ToolButton>
       </div>
-      <div className="tool-capsule">
+      <div className="tool-capsule" data-tour="more">
         <ToolButton label="Settings" text="Settings" onClick={p.onSettings}><Settings /></ToolButton>
         <ToolButton label="Welcome tour" text="Tour" onClick={p.onHelp}><HelpCircle /></ToolButton>
         <ToolButton label={`Use ${p.theme === 'dark' ? 'light' : 'dark'} theme`} text={p.theme === 'dark' ? 'Light' : 'Dark'} onClick={p.onTheme}>{p.theme === 'dark' ? <Sun /> : <Moon />}</ToolButton>

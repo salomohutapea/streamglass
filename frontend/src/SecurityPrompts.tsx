@@ -53,28 +53,89 @@ export function AiApprovalPrompt() {
   </dialog>;
 }
 
-/** Devices on the local network that tried to use the proxy before being approved. */
-export function LanDeviceRequests({ requests, busy, onDecide }: { requests: LanRequest[]; busy: boolean; onDecide(address: string, allow: boolean): void }) {
-  const waiting = requests.filter(item => !item.denied);
-  if (!waiting.length) return null;
-  return <div className="lan-requests" role="region" aria-label="Device approval requests">{waiting.slice(-3).map(item => <div className="lan-request" key={item.address} role="alert">
-    <Smartphone size={14} aria-hidden="true"/><span title={`${item.attempts} connection${item.attempts === 1 ? '' : 's'} refused. Allow only your own test device.`}><strong className="mono">{item.address}</strong> wants to use this proxy</span>
-    <button disabled={busy} onClick={() => onDecide(item.address, false)}>Deny</button><button className="primary" disabled={busy} onClick={() => onDecide(item.address, true)}>Allow device</button>
-  </div>)}</div>;
+const refusals = (count: number) => `${count} connection${count === 1 ? '' : 's'} refused so far`;
+type DeviceNames = { deviceNames?(addresses: string[]): Promise<Record<string, string>>; lanApprovalAttention?(): Promise<void> };
+/** Names the Mac already knows for LAN addresses (the same lookup the sidebar uses); empty until resolved. */
+function useDeviceNames(addresses: string[]) {
+  const [names, setNames] = useState<Record<string, string>>({});
+  const key = addresses.join(',');
+  useEffect(() => {
+    const lookup = (window as unknown as { streamglass?: DeviceNames }).streamglass?.deviceNames;
+    if (!key || !lookup) return;
+    let live = true;
+    void lookup(key.split(',')).then(found => { if (live) setNames(current => ({ ...current, ...found })); }).catch(() => {});
+    return () => { live = false; };
+  }, [key]);
+  return names;
+}
+
+/** A device on the local network tried to use the proxy before being approved. One at a time, oldest first; Deny is
+ *  the default. Hidden while another dialog is open (`suppressed`): Connect a device shows the request inline instead. */
+export function LanDevicePrompt({ requests, busy, suppressed, expiry, onDecide }: { requests: LanRequest[]; busy: boolean; suppressed?: boolean; expiry?: LanExpiry; onDecide(address: string, allow: boolean): void }) {
+  const waiting = requests.filter(item => !item.denied).sort((a, b) => a.firstSeen - b.firstSeen);
+  const current = suppressed ? undefined : waiting[0];
+  const dialog = useRef<HTMLDialogElement>(null);
+  const deny = useRef<HTMLButtonElement>(null);
+  const names = useDeviceNames(current ? [current.address] : []);
+  useEffect(() => {
+    if (!current) return;
+    if (!dialog.current?.open) dialog.current?.showModal();
+    deny.current?.focus();
+    // Bring the main window forward: the user may be in the Tools or Breakpoints window, or in another app.
+    void (window as unknown as { streamglass?: DeviceNames }).streamglass?.lanApprovalAttention?.().catch(() => {});
+  }, [current?.address]);
+  if (!current) return null;
+  const name = names[current.address];
+  return <dialog ref={dialog} className="approval-dialog lan-prompt" aria-label="Device approval" onCancel={event => { event.preventDefault(); if (!busy) onDecide(current.address, false); }}>
+    <div className="approval-head"><Smartphone aria-hidden="true"/><div><span className="approval-kind">New device</span><h2>A device wants to use this proxy</h2></div></div>
+    <div className="approval-body">
+      <div className="lan-prompt-device"><strong className="mono">{current.address}</strong>{name && name !== current.address && <span>{name}</span>}<small className="muted">{refusals(current.attempts)}</small></div>
+      <p className="approval-warn"><ShieldAlert size={12} aria-hidden="true"/>Allow only your own test device. It will be able to send traffic through this Mac.</p>
+      <p>Denied devices stay refused until you allow them in Settings → Proxy.{expiry?.enabled ? ' An approval lasts 7 days.' : ''}</p>
+      {waiting.length > 1 && <p className="muted">+{waiting.length - 1} waiting</p>}
+    </div>
+    <div className="approval-foot"><span className="muted">Refused until you decide</span><button ref={deny} disabled={busy} onClick={() => onDecide(current.address, false)}>Deny</button><button className="primary" disabled={busy} onClick={() => onDecide(current.address, true)}>Allow device</button></div>
+  </dialog>;
+}
+
+/** Approved, waiting and refused LAN devices with their actions. Shared by Settings and Connect a device. */
+/** "expires in 6 days" from an approval time; empty when expiry is off or the time is unknown. */
+export function expiryLabel(approvedAt: number | undefined, ttlSeconds: number | undefined, now = Date.now() / 1000) {
+  if (!approvedAt || !ttlSeconds) return '';
+  const left = approvedAt + ttlSeconds - now;
+  if (left <= 0) return 'expiring';
+  if (left < 3600) return 'expires in under an hour';
+  if (left < 86400) { const hours = Math.round(left / 3600); return `expires in ${hours} hour${hours === 1 ? '' : 's'}`; }
+  const days = Math.round(left / 86400);
+  return `expires in ${days} day${days === 1 ? '' : 's'}`;
+}
+export type LanExpiry = { enabled: boolean; ttlSeconds?: number; approvals?: Record<string, number> };
+
+export function LanDeviceList({ devices, requests, busy, expiry, onRemoveDevice, onDecide }: {
+  devices: string[]; requests: LanRequest[]; busy: boolean; expiry?: LanExpiry; onRemoveDevice(address: string): void; onDecide(address: string, allow: boolean): void;
+}) {
+  const waiting = requests.filter(item => !item.denied), refused = requests.filter(item => item.denied);
+  const names = useDeviceNames([...devices, ...requests.map(item => item.address)]);
+  const label = (address: string) => <span className="lan-device"><span className="mono">{address}</span>{names[address] && names[address] !== address && <small className="muted">{names[address]}</small>}</span>;
+  return <div className="lan-devices">
+    {!!waiting.length && <><p className="lan-list-title waiting">Waiting for approval</p><ul className="lan-list waiting" aria-label="Devices waiting for approval">{waiting.map(item => <li key={item.address}>{label(item.address)}<span className="lan-actions"><button disabled={busy} onClick={() => onDecide(item.address, false)}>Deny</button><button className="primary" disabled={busy} aria-label={`Allow device ${item.address}`} onClick={() => onDecide(item.address, true)}>Allow device</button></span></li>)}</ul></>}
+    {devices.length ? <ul className="lan-list" aria-label="Approved devices">{devices.map(address => <li key={address}>{label(address)}{expiry?.enabled && <small className="muted lan-expiry">{expiryLabel(expiry.approvals?.[address], expiry.ttlSeconds)}</small>}<button className="icon-button" aria-label={`Remove device ${address}`} title="Remove device" disabled={busy} onClick={() => onRemoveDevice(address)}><X size={13}/></button></li>)}</ul> : <p className="muted">No approved devices yet.</p>}
+    {!!refused.length && <><p className="lan-list-title">Refused</p><ul className="lan-list" aria-label="Refused devices">{refused.map(item => <li key={item.address}>{label(item.address)}<button disabled={busy} aria-label={`Allow device ${item.address}`} onClick={() => onDecide(item.address, true)}>Allow</button></li>)}</ul></>}
+  </div>;
 }
 
 /** Proxy settings for LAN access: approved devices and private destinations LAN devices may reach. */
-export function LanAccessSettings({ devices, requests, destinations, busy, onDestinations, onRemoveDevice, onDecide }: {
-  devices: string[]; requests: LanRequest[]; destinations: string; busy: boolean;
+export function LanAccessSettings({ devices, requests, destinations, busy, expiry, onExpiry, onDestinations, onRemoveDevice, onDecide }: {
+  devices: string[]; requests: LanRequest[]; destinations: string; busy: boolean; expiry: LanExpiry; onExpiry(enabled: boolean): void;
   onDestinations(value: string): void; onRemoveDevice(address: string): void; onDecide(address: string, allow: boolean): void;
 }) {
-  const refused = requests.filter(item => item.denied);
   return <div className="lan-access">
-    <div className="setting-summary"><ShieldAlert/><div><strong title="Only these devices can use the proxy over the network. New ones are refused until you allow them.">Approved devices</strong></div></div>
-    {devices.length ? <ul className="lan-list">{devices.map(address => <li key={address}><span className="mono">{address}</span><button className="icon-button" aria-label={`Remove device ${address}`} title="Remove device" disabled={busy} onClick={() => onRemoveDevice(address)}><X size={13}/></button></li>)}</ul> : <p className="muted">None yet.</p>}
-    {!!refused.length && <><p className="muted">Refused</p><ul className="lan-list">{refused.map(item => <li key={item.address}><span className="mono">{item.address}</span><button disabled={busy} onClick={() => onDecide(item.address, true)}>Allow</button></li>)}</ul></>}
-    <label title="Hosts, IPs or CIDR ranges LAN devices may reach. Loopback devices (simulators, adb reverse) are not restricted.">LAN destinations<textarea className="mono" rows={3} value={destinations} placeholder={'staging.example.internal\n10.20.0.0/16'} onChange={event => onDestinations(event.target.value)}/>
-      <small>Blocked by default: this Mac, private and VPN ranges. One per line.</small></label>
+    <div className="setting-summary"><ShieldAlert/><div><strong>Approved devices</strong><p>Only these devices can use the proxy over the network. A new one is refused until you allow it.</p></div></div>
+    <LanDeviceList devices={devices} requests={requests} busy={busy} expiry={expiry} onRemoveDevice={onRemoveDevice} onDecide={onDecide}/>
+    <label className="check lan-expiry-toggle"><input type="checkbox" checked={expiry.enabled} disabled={busy} onChange={event => onExpiry(event.target.checked)}/>Forget approved devices after 7 days</label>
+    <small className="muted">Office and shared Wi-Fi reassign addresses, so an old approval could pass to another device. Applies immediately; allowing a device again renews its 7 days.</small>
+    <label>LAN destinations<textarea className="mono" rows={3} value={destinations} placeholder={'staging.example.internal\n10.20.0.0/16'} onChange={event => onDestinations(event.target.value)}/>
+      <small>Private hosts, IPs or CIDR ranges that approved devices may reach, one per line. Blocked by default: this Mac, private and VPN ranges. Simulators and adb reverse are not restricted.</small></label>
   </div>;
 }
 
@@ -87,6 +148,6 @@ export function StorageSettings({ inspectedMiB, onInspectedMiB }: { inspectedMiB
   return <div className="form"><h3>Storage</h3>
     <div className="setting-summary"><HardDrive/><div><strong>Inspected HTTPS captures</strong><p>Up to 5000 captures. Oldest unpinned are dropped when full.</p></div></div>
     <label>Keep up to<select value={inspectedMiB} onChange={event => onInspectedMiB(Number(event.target.value))}>{storageChoices.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-      <small title="Captures live in memory and contain secrets. Lowering the limit drops the oldest on save. Other traffic has its own 256 MiB budget.">About {large} large (5 MB) responses</small></label>
+      <small>About {large} large (5 MB) responses. Lowering the limit drops the oldest captures on save; other traffic has its own 256 MiB budget.</small></label>
   </div>;
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { endedGates, isDisconnect } from './paused-gates.mjs';
+import { endedGates, isDisconnect, pausedEntries, endedConsequence } from './paused-gates.mjs';
 
 const gate = (token, recordId, pausedAt = 1000) => [token, { token, recordId, pausedAt }];
 
@@ -21,4 +21,17 @@ test('gates resolved elsewhere or released by pause are not reported', () => {
 test('only disconnects get the timeout hint', () => {
   assert.equal(isDisconnect('Peer disconnected while paused'), true);
   assert.equal(isDisconnect('Dropped by user'), false);
+});
+
+test('an ended gate keeps its place among live gates, oldest pause first', () => {
+  const g = (token, pausedAt) => ({ token, pausedAt });
+  const entries = pausedEntries([g('a', 1000), g('c', 3000)], [{ gate: g('b', 2000), reason: 'Peer disconnected', pausedMs: 5000 }]);
+  assert.deepEqual(entries.map(entry => [entry.gate.token, Boolean(entry.ended)]), [['a', false], ['b', true], ['c', false]]);
+  assert.deepEqual(pausedEntries([], []), []);
+});
+
+test('the ended warning names what the device misses for each stage', () => {
+  assert.match(endedConsequence('request'), /request can no longer be sent/);
+  assert.match(endedConsequence('response'), /no longer receive this response/);
+  assert.match(endedConsequence('event'), /no longer receive this event/);
 });
