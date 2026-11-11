@@ -100,7 +100,8 @@ const appStart = async gap => {
 
 // --- Frame capture -------------------------------------------------------------------------------------------
 // CDP screencast gives full-resolution frames with timestamps; ffmpeg turns them into an H.264 clip.
-async function record(page, name, run) {
+// posterAt picks the poster frame in seconds from the start; by default it is the last frame.
+async function record(page, name, run, posterAt) {
   const dir = await mkdtemp(path.join(tmpdir(), `sg-${name}-`));
   const cdp = await page.context().newCDPSession(page);
   const frames = [];
@@ -111,7 +112,8 @@ async function record(page, name, run) {
   await cdp.send('Page.startScreencast', { format: 'png', everyNthFrame: 1 });
   await run();
   await sleep(400);
-  await cdp.send('Page.stopScreencast');
+  // The paused window closes itself once its last flow continues; the frames are already collected.
+  await cdp.send('Page.stopScreencast').catch(() => {});
   // Screencast only sends frames when the page changes; hold each frame until the next one at 30 fps.
   const fps = 30, start = frames[0].time, end = frames.at(-1).time + 0.6;
   let list = '';
@@ -126,7 +128,7 @@ async function record(page, name, run) {
   const output = path.join(outDir, `${name}.mp4`);
   execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'frames.txt'), '-vf', `fps=${fps},scale=1600:-2:flags=lanczos,format=yuv420p`,
     '-c:v', 'libx264', '-preset', 'slow', '-crf', '24', '-movflags', '+faststart', '-an', output]);
-  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-sseof', '-0.1', '-i', output, '-frames:v', '1', '-q:v', '3', path.join(outDir, `${name}-poster.jpg`)]);
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...(posterAt === undefined ? ['-sseof', '-0.1'] : ['-ss', String(posterAt)]), '-i', output, '-frames:v', '1', '-q:v', '3', path.join(outDir, `${name}-poster.jpg`)]);
   await rm(dir, { recursive: true, force: true });
   console.log(`${name}.mp4: ${frames.length} frames, ${(end - start).toFixed(1)}s`);
 }
@@ -266,7 +268,7 @@ try {
       await sleep(500);
       await editor.getByRole('button', { name: 'Continue', exact: true }).click();
       await sleep(1600);
-    });
+    }, 3.2);
     await request;
     await api('/api/rules', 'PUT', { revision: (await api('/api/state')).rulesRevision, rules: [] });
   }
@@ -275,12 +277,12 @@ try {
   if (wanted('connect')) {
     await page.locator('.connect-button').click();
     await page.getByRole('radio', { name: /iOS Device/ }).click();
-    const section = page.getByRole('region', { name: 'Phone setup page QR code' });
+    const section = page.getByRole('region', { name: 'Certificate setup page' });
     await section.waitFor();
     await sleep(800);
-    const lan = section.getByRole('button', { name: 'Turn on local network access', exact: true });
+    const lan = section.getByRole('button', { name: 'Turn on local network', exact: true });
     if (await lan.isVisible()) await lan.click();
-    await section.getByRole('button', { name: 'Copy setup URL' }).waitFor();
+    await section.getByRole('button', { name: 'Copy URL', exact: true }).waitFor();
     await sleep(600);
     // Show a placeholder LAN address instead of this Mac's, with a QR code that matches it.
     const lanIps = Object.values(networkInterfaces()).flat().filter(item => item?.family === 'IPv4' && !item.internal).map(item => item.address);
@@ -320,6 +322,9 @@ try {
     await sleep(700);
     await still(toolsWindow, 'tools-map-remote');
     await toolsWindow.getByRole('navigation', { name: 'Tools navigation' }).getByRole('button', { name: 'Agent (MCP)', exact: true }).click();
+    // MCP is off in a new profile; show it running on its local address.
+    await toolsWindow.getByRole('button', { name: 'Enable MCP server', exact: true }).click();
+    await toolsWindow.getByRole('button', { name: 'Disable MCP server', exact: true }).waitFor();
     await sleep(700);
     await still(toolsWindow, 'tools-mcp');
   }
