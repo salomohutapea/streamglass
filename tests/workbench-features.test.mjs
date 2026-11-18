@@ -115,23 +115,36 @@ c.commit()`, path.join(directory, 'captures.sqlite3')], { input: JSON.stringify(
         if (!item?.enabled) throw new Error(`Disabled platform setup ${id}`);
         item.click(item, win, {});
       }, `setup-${platform}`);
-      const dialog = await opened;
-      await dialog.getByRole('main', { name: 'Connect a device' }).waitFor();
+      const setup = await opened;
+      setup.on('pageerror', error => errors.push(error.message));
+      const setupRoot = setup.getByRole('main', { name: 'Connect a device' });
+      await setupRoot.waitFor();
+      assert.equal(await page.getByRole('dialog', { name: 'Connect a device', exact: true }).count(), 0);
+      const platforms = setupRoot.getByRole('group', { name: 'Platform' });
       const [selectedPlatform, selectedPage] = { macos: ['This Mac', null], 'ios-simulator': ['iOS', 'Simulator'], 'ios-device': ['iOS', 'Real device'], 'android-emulator': ['Android', 'Emulator'], 'android-device': ['Android', 'Real device'] }[platform];
-      assert.equal(await dialog.getByRole('group', { name: 'Platform' }).getByRole('button', { name: selectedPlatform, exact: true }).getAttribute('aria-pressed'), 'true', label);
-      if (selectedPage) assert.equal(await dialog.getByRole('tab', { name: new RegExp(`^${selectedPage}`) }).getAttribute('aria-selected'), 'true', label);
+      assert.equal(await platforms.getByRole('button', { name: selectedPlatform, exact: true }).getAttribute('aria-pressed'), 'true', label);
+      if (selectedPage) assert.equal(await setupRoot.getByRole('tab', { name: selectedPage, exact: true }).getAttribute('aria-selected'), 'true', label);
       if (platform === 'android-device') {
-        assert.equal(await dialog.getByText('No developer options, cables or debug tools needed.', {exact:false}).isVisible(), true);
-        const shortcuts = dialog.locator('details.ds-sec', { hasText: 'Developer shortcuts' });
+        await setupRoot.getByText('Set the Wi-Fi proxy', { exact: true }).waitFor();
+        const shortcuts = setupRoot.locator('details.ds-sec', { hasText: 'Developer shortcuts' });
+        const wireless = shortcuts.getByText('Wireless debugging', { exact: true });
         assert.equal(await shortcuts.getAttribute('open'), null);
-        assert.equal(await dialog.getByText('Set proxy and certificate in one click over Wi-Fi', {exact:true}).isVisible(), false);
         await shortcuts.locator('summary').click();
-        // Collapsibles animate open, so wait for the content rather than checking at once.
-        await dialog.getByText('Set proxy and certificate in one click over Wi-Fi', {exact:true}).waitFor({state:'visible'});
+        await wireless.waitFor({ state: 'visible' });
+        assert.notEqual(await shortcuts.getAttribute('open'), null);
+
+        await page.evaluate(() => window.streamglass.openDeviceSetup({ platform: 'ios-simulator' }));
+        await setupRoot.getByRole('tab', { name: 'Simulator', selected: true, exact: true }).waitFor();
+        assert.equal(app.windows().filter(window => new URL(window.url()).searchParams.get('editor') === 'setup').length, 1);
+        await platforms.getByRole('button', { name: 'Android', exact: true }).click();
+        await setupRoot.getByRole('tab', { name: 'Real device', selected: true, exact: true }).waitFor();
+        assert.equal(await shortcuts.getAttribute('open'), null, 'Developer shortcuts start collapsed when the guide is reopened');
       }
-      const closed = dialog.waitForEvent('close');
-      await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+      await setupRoot.getByRole('button', { name: 'Revert all proxies', exact: true }).waitFor();
+      const closed = setup.waitForEvent('close');
+      await setupRoot.getByRole('button', { name: 'Done', exact: true }).click();
       await closed;
+      assert.equal(page.isClosed(), false, 'Closing device setup leaves the main workbench open');
     }
     assert.deepEqual(errors, []);
   } finally {
