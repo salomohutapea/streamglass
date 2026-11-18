@@ -59,6 +59,8 @@ For an emulator, the proxy is `10.0.2.2:<proxy-port>`. An attributed Android emu
 | Device lost internet | Select **Revert** for an automated setup, or turn off the phone's manual Wi-Fi proxy. |
 | Live checks remain pending | Resume capture and make a new request; proxy settings and certificate installation alone do not prove app traffic. |
 
+If you use an MCP agent, it can inspect recent captures, device approval requests, and TLS errors. See [Troubleshooting with an agent](MCP.md#troubleshooting-with-an-agent).
+
 ## Phone setup page, PAC and QR code
 
 While LAN access is enabled (it is off by default), Streamglass runs a small read-only HTTP setup site on the proxy port plus one (for example `9091` for proxy `9090`). It skips ports that dev servers commonly use, such as Metro's 8081, so proxy `8080` gets setup port `8082`. Set `STREAMGLASS_SETUP_PORT` to choose another port. It starts only while LAN access is on and stops when it is turned off or the app quits. If the port is in use, Connect device shows the error instead of the QR code.

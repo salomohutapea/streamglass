@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { troubleshootingInstructions } from './mcp-diagnostics.mjs';
 import { registerTools } from './mcp-tools.mjs';
 
 const { version } = createRequire(import.meta.url)('../package.json');
@@ -49,7 +50,7 @@ export async function startMcpServer({ port = 48722, authToken, bootstrap, works
     if (closing) throw Object.assign(new Error('MCP listener is shutting down'), { status: 503 });
     const session = { transport, id, lastActive: Date.now(), pending: new Set() };
     sessions.set(id, session);
-    const server = new McpServer({ name: 'streamglass', version }, { capabilities: { logging: {} } });
+    const server = new McpServer({ name: 'streamglass', version }, { capabilities: { logging: {} }, instructions: troubleshootingInstructions });
     transport.onclose = () => { sessions.delete(session.id); };
     try { registerTools(server, { ...bootstrap, workspaces, confirm, signApproval }); await server.connect(transport); }
     catch (error) { sessions.delete(id); await transport.close(); throw error; }

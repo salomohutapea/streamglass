@@ -23,11 +23,20 @@ console.log(JSON.parse(status.content[0].text));
 
 Use the panel's URL if the port differs. Close the client when finished.
 
+## Troubleshooting with an agent
+
+Ask your agent “Why isn’t this device showing traffic?” or “Check the TLS error for `api.example.com`.” Give it the device ID from captures or the LAN client IP if available. The MCP server sends troubleshooting instructions during initialization.
+
+Start with `diagnose_connection`. By default it reads retained evidence from the last 15 minutes, including client- and server-side TLS errors, encrypted tunnels, HTTP responses, and paused breakpoints. It also reports proxy status and recent device approval requests. Set `device` and `host` to narrow the evidence. Use `since` in Unix seconds to look further back. Without device attribution, evidence on shared loopback cannot identify a specific simulator or emulator.
+
+If there is no matching evidence, make a fresh request from the affected device and check again. Use `list_captures` for more history, `get_capture_timing` for timing, or `get_capture` to inspect an exact request or response when relevant. A recent HTTP response confirms that traffic reached Streamglass. Check its status, payload, and any applied rules before deciding what failed. Diagnostics do not probe the network or inspect certificate trust on the device. See [device troubleshooting](DEVICES.md#troubleshooting) for the local setup checks.
+
 ## Available tools
 
 | Tools | Purpose |
 | --- | --- |
 | `get_status`, `get_settings` | Proxy/capture status and counts; paginated complete settings including TLS patterns |
+| `diagnose_connection` | Read-only proxy status, recent request and TLS evidence, LAN approval, and pending breakpoint checks |
 | `list_capture_sessions`, `save_capture_session`, `delete_capture_session` | Manage immutable local capture archives, separately from configuration workspaces |
 | `list_session_captures`, `get_session_capture` | Browse archived metadata and paginated retained content without changing live traffic |
 | `get_capture_analysis` | Read correlation values, custom field values and pass/fail/pending/unknown assertion results |
@@ -36,7 +45,7 @@ Use the panel's URL if the port differs. Close the client when finished.
 | `get_capture_fields` | One capture's custom field values in full (up to 64 KiB each); `list_captures` rows carry them cut at 256 characters |
 | `annotate_capture` | Set a capture note and subtle row highlight |
 | `list_replay_jobs`, `start_replay_job`, `cancel_replay_job` | Run explicit bounded sequential replay and page progress/cancel its own connection; starting requires `confirmSend:true` and your approval in the app |
-| `list_captures`, `search_captures` | Page metadata or search retained URL/request/response/event text. `list_captures` items include `durationMs` and `serverMs`; filter with `minServerMs`/`minDurationMs` and sort with `sortBy` (`newest`, `serverMs`, `durationMs`) to find slow requests. SSE items include `sseStatus`; filter with `sseStatus` (for example `client-closed`) |
+| `list_captures`, `search_captures` | Page metadata or search retained URL/request/response/event text. Scope `list_captures` by `device`, exact `host`, or activity time `since` (Unix seconds). Items include `durationMs` and `serverMs`; filter with `minServerMs`/`minDurationMs` and sort with `sortBy` (`newest`, `serverMs`, `durationMs`) to find slow requests. SSE items include `sseStatus`; filter with `sseStatus` (for example `client-closed`) |
 | `get_capture_timing` | Timing breakdown for one capture: connect, TLS, request, server time (request sent to response headers), download and breakpoint pause in ms, epoch-ms timestamps, body sizes, and for SSE the connection status with the original end message and phase times, plus the gap statistics and slowest gaps between events |
 | `get_capture` | Metadata, request or response content |
 | `get_capture_events`, `get_event_content` | Page retained SSE events by sequence; read full individual event text |

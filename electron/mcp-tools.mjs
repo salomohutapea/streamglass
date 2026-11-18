@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isDeepStrictEqual } from 'node:util';
+import { diagnoseConnection, matchesCaptureScope } from './mcp-diagnostics.mjs';
 import { APPROVAL, registerTrafficRuleTools } from './mcp-traffic-rules.mjs';
 
 // All MCP sessions share this queue because the HTTP rule API replaces the list.
@@ -9,6 +10,11 @@ const mutations = new Map();
 const id = z.string().min(1).max(256);
 const offset = z.number().int().min(0).default(0);
 const limit = z.number().int().min(1).max(100).default(25);
+const captureScope = {
+  device: z.string().max(256).optional().describe('Exact capture deviceId, or the client address for captures without a deviceId'),
+  host: z.string().trim().min(1).max(255).optional().describe('Exact destination hostname or IP, without scheme, port, or path'),
+  since: z.number().finite().nonnegative().optional().describe('Earliest capture activity as Unix seconds'),
+};
 const maxChars = z.number().int().min(256).max(32768).default(8192);
 const textPage = (text, start = 0, size = 8192) => ({ text: text.slice(start, start + size), offset: start,
   totalChars: text.length, nextOffset: start + size < text.length ? start + size : null, truncated: start > 0 || start + size < text.length });
@@ -293,13 +299,15 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
     return { settings: { ...settings, tlsDomainsCount: tlsDomains.length }, captures: s.records.length, pending: s.pending.length, rules: s.rules.length, folders: s.folders.length,
       limits: { pageItems: 100, contentChars: 32768, watchDurationMs: 30000 } };
   });
+  tool('diagnose_connection', 'Troubleshoot device connectivity, LAN approval, TLS, and paused traffic. Returns current proxy state and bounded metadata from retained captures, defaulting to the last 15 minutes. Use an exact capture device ID or client IP; without either, evidence may come from other devices. No headers, bodies, or active probes.', captureScope, true,
+    async scope => diagnoseConnection(await state(), scope));
   tool('get_settings', 'Read complete proxy and capture settings, including TLS domain patterns, as paginated JSON text.', { offset, maxChars }, true,
     async a => textPage(JSON.stringify((await state()).settings), a.offset, a.maxChars));
-  tool('list_captures', `List retained capture metadata, newest first. Filters are optional. Each item includes durationMs (total) and serverMs (request sent to response headers received, i.e. backend time). Use minServerMs/minDurationMs and sortBy to find slow requests. SSE items include sseStatus (${SSE_STATUSES.join(', ')}); filter with sseStatus, e.g. client-closed for streams the client disconnected.`, { offset, limit, device: z.string().max(256).optional().describe('Device id: the capture deviceId when present (ios-simulator:…, android-emulator:…, android-device:…), otherwise its client address'), state: z.string().max(64).optional(), sseOnly: z.boolean().default(false),
+  tool('list_captures', `List retained capture metadata, newest first. Filters are optional. Each item includes durationMs (total) and serverMs (request sent to response headers received, i.e. backend time). Use minServerMs/minDurationMs and sortBy to find slow requests. SSE items include sseStatus (${SSE_STATUSES.join(', ')}); filter with sseStatus, e.g. client-closed for streams the client disconnected.`, { offset, limit, ...captureScope, state: z.string().max(64).optional(), sseOnly: z.boolean().default(false),
     sseStatus: z.enum(SSE_STATUSES).optional(),
     minServerMs: z.number().min(0).max(86400000).optional(), minDurationMs: z.number().min(0).max(86400000).optional(), sortBy: z.enum(['newest', 'serverMs', 'durationMs']).default('newest') }, true,
     async a => {
-      const records = (await state()).records.filter(r => (!a.device || (r.deviceId ?? r.device) === a.device) && (!a.state || r.state === a.state) && (!a.sseOnly || r.isSSE) && (!a.sseStatus || r.sseStatus === a.sseStatus)
+      const records = (await state()).records.filter(r => matchesCaptureScope(r, a) && (!a.state || r.state === a.state) && (!a.sseOnly || r.isSSE) && (!a.sseStatus || r.sseStatus === a.sseStatus)
         && (a.minServerMs === undefined || (r.serverMs ?? -1) >= a.minServerMs) && (a.minDurationMs === undefined || (r.durationMs ?? -1) >= a.minDurationMs));
       if (a.sortBy !== 'newest') records.sort((x, y) => (y[a.sortBy] ?? -1) - (x[a.sortBy] ?? -1));
       return page(records.map(withoutApplicationIcon), a.offset, a.limit);
