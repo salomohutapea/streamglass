@@ -338,7 +338,7 @@ export default function EditorWindow() {
     <footer className="editor-window-footer">
       {editing ? <><button disabled={busy} onClick={() => { if (recordId) { window.close(); return; } setEditing(null); setError(''); }}>Cancel</button><button className="primary" disabled={busy} onClick={() => void saveRule()}>Save rule</button></> : <>{!recordId && window.streamglass && <div className="rule-file-actions">
         <button disabled={busy || !data} title="Choose or drop Streamglass rule files" onClick={() => void importRules()}>Import…</button>
-        <button disabled={busy || !data?.rules.length} onClick={() => { if (data) setShare({ rules: data.rules, folders: data.folders }); }}>Share…</button>
+        <button disabled={busy || !rules.length} onClick={() => setShare({ rules, folders })}>Share…</button>
       </div>}<button onClick={() => window.close()}>Close</button><button className="primary" disabled={busy || !data || seedLoading} onClick={() => { setEditing(newRule()); setFolderForm(null); setError(''); }}><Plus size={14}/>Add rule</button></>}
     </footer>
   </main>;
