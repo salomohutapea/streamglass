@@ -10,7 +10,7 @@ export default function DeviceOptions({ inventory, metro, disabled, onChange, on
     <Section title="Options"><div className="ds-opts">
       <div className="ds-opt-row"><span>React Native / Metro</span>
         <Segmented label="Metro mode" value={inventory?.metro.mode ?? 'auto'} disabled={off} items={[{ id: 'auto', label: 'Auto' }, { id: 'always', label: 'Always' }, { id: 'off', label: 'Off' }]} onChange={metroMode => onChange({ metroMode })}/>
-        <span className="ds-hint-text">Auto: Metro steps appear only while something listens on <code>:8081</code>.</span></div>
+        <span className="ds-hint-text">Wi-Fi guidance appears only while Metro runs on <code>:8081</code>. Always also shows Metro on automated setup cards.</span></div>
       {checks.map(([key, text]) => <label className="ds-check" key={key}><input type="checkbox" checked={inventory?.options[key] ?? key !== 'autoConnect'} disabled={off} onChange={event => onChange({ [key]: event.target.checked })}/>{text}</label>)}
     </div></Section>
     <Section title="Troubleshooting"><ul className="ds-trouble">

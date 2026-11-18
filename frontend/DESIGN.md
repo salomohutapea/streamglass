@@ -191,7 +191,7 @@ Connect a device has This Mac, iOS and Android tabs. Mobile platforms open on Re
 Emulator. Wi-Fi guides show the LAN address/port separately from the certificate-page QR and reuse inline LAN
 approval. Automated device cards report proxy, certificate, optional Metro and attributed traffic separately;
 certificate installation alone does not verify application trust. Inventory is watched only while the dialog is
-open. Metro rows appear only for Always mode or Auto with Metro running. Options persist through the desktop
+open. The manual Wi-Fi Metro row requires a running Metro server. Automated cards show Metro in Always mode or in Auto while Metro is running. Options persist through the desktop
 bridge. Older bridges keep the manual guide available and explain unavailable automation. Manual Wi-Fi proxy
 settings must be switched off on the phone; automated Revert restores saved settings. Runtime and device
 verification of this redesign have not been performed.

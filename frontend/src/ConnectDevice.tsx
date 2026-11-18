@@ -52,6 +52,7 @@ export default function ConnectDevice({ onDone, platform, onPlatform, lanAddress
   // Each platform opens on its real-device guide; explicit simulator/emulator links still work.
   const real = platform === 'iosDevice' || platform === 'androidDevice';
   const metro = !!inventory && (inventory.metro.mode === 'always' || (inventory.metro.mode === 'auto' && inventory.metro.running));
+  const wifiMetro = metro && inventory?.metro.running === true;
   const ip = inventory?.lan.address ?? lanAddresses[0] ?? '';
   const proxyPort = inventory?.lan.proxyPort ?? port;
   const lanOn = inventory?.lan.enabled ?? site?.lanEnabled ?? lanEnabled;
@@ -157,7 +158,7 @@ export default function ConnectDevice({ onDone, platform, onPlatform, lanAddress
         {!inventory && <p className="muted" role="status">{loading ? 'Checking connected devices…' : unavailable}</p>}
         {partial && <p className="muted" role="status">Some device automation is unavailable in this desktop version. The Wi-Fi guide remains available.</p>}
         {real
-          ? <>{lanBar}<RealDevicePage key={top} os={top as 'ios' | 'android'} inventory={inventory} ip={ip} proxyPort={proxyPort} lanOn={lanOn} setupUrl={setupUrl} fingerprint={site?.fingerprint} siteError={site?.error} records={records} baseline={baseline} metro={metro} lan={lan} onFilterDevice={onFilterDevice}
+          ? <>{lanBar}<RealDevicePage key={top} os={top as 'ios' | 'android'} inventory={inventory} ip={ip} proxyPort={proxyPort} lanOn={lanOn} setupUrl={setupUrl} fingerprint={site?.fingerprint} siteError={site?.error} records={records} baseline={baseline} metro={wifiMetro} lan={lan} onFilterDevice={onFilterDevice}
             renderCard={card as (device: AndroidDevice) => ReactNode} pairingQr={pairingQr} canPair={!!api?.startAdbPairing} busy={busy} onPair={startPairing} onCancelPair={() => void run(async () => { await api?.cancelAdbPairing?.(); pairingActive.current = false; setPairingQr(''); })} onShortcutsToggle={open => { if (!open) stopPairing(); }}/></>
           : <><AutomatedPage metroCallout={metroCallout} os={top as 'ios' | 'android'} inventory={inventory} devices={automated} busy={busy} working={!!connectingId} metro={metro} canConnect={!!api?.connectDevice} onConnectAll={connectAll} renderCard={card as (device: Device) => ReactNode}/></>}
         <DeviceOptions inventory={inventory} metro={metro} disabled={busy || !api?.setDeviceOptions} onChange={setOptions} onTlsSettings={onTlsSettings}/>

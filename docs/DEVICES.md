@@ -42,7 +42,7 @@ On **iOS → Simulator**, select **Connect** for a booted simulator, or **Connec
 
 ### React Native and Metro
 
-Under **Options**, set React Native / Metro to **Auto**, **Always**, or **Off**. Auto (default) shows Metro steps only when `http://127.0.0.1:8081/status` returns `packager-status:running`; Always shows them even while Metro is stopped, and Off hides them. A status response does not prove the bundle rendered.
+Under **Options**, set React Native / Metro to **Auto**, **Always**, or **Off**. Auto (default) uses `http://127.0.0.1:8081/status` to detect `packager-status:running`. The manual Wi-Fi Metro step appears only while Metro is running. Always can show Metro on automated setup cards while it is stopped. Off hides all Metro steps. A status response does not prove the bundle rendered.
 
 For an emulator, the proxy is `10.0.2.2:<proxy-port>`. An attributed Android emulator request through the proxy to `10.0.2.2:8081` is routed to Metro on this Mac; direct `localhost:8081` requests use an adb reverse when Metro is enabled. USB uses adb reverse as well. Wi-Fi phones can reach Metro through the proxy using `localhost:8081` or the Mac LAN address on port 8081, subject to device approval and the dev-server port allowlist below. iOS development builds may embed the Mac LAN address. If an Android app skips its proxy for localhost, use the React Native Dev Menu → Change bundle location and enter the Mac LAN address and port 8081.
 
