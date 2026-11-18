@@ -86,7 +86,7 @@ Reads, capture deletion, ordinary breakpoint definitions, Block rules, pausing c
 
 Redirect approvals apply to the edit shown in the prompt. Previously remembered server approvals are retained for reference and no longer grant consent. In **Tools → Agent (MCP)**, **Rotate token** invalidates the old token and disconnects clients. Copy the new configuration to reconnect them.
 
-MCP requires TLS wildcard patterns to be scoped below a public suffix. For example, `*.co.id` is refused and `*.example.co.id` is allowed. Desktop Settings retain their existing pattern controls.
+MCP only accepts a wildcard as the leading `*.` label, followed by at least two literal labels. This check does not identify multi-label public suffixes. Adding any accepted TLS pattern still requires approval. Desktop Settings retain their existing pattern controls.
 
 Capture pause bypasses breakpoints and scripts while traffic continues. Waiting breakpoints continue with their original, unedited value, and unsent script results are discarded. Changes already sent cannot be undone. Requests started while paused and SSE streams already switched to pass-through stay in that mode until completion. Stopping the proxy interrupts active traffic, and the app then restores saved Mac system proxy settings that still point at Streamglass within about 3 seconds. TLS-domain changes can reconnect tunnels. Deleting a capture does not stop its connection or release its paused breakpoints. Pending gate tokens are local breakpoint identifiers, distinct from bearer credentials; stale gates fail instead of resuming another message. Edited message values retain the HTTP API's header/body/base64 and streaming restrictions.
 

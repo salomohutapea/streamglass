@@ -3,11 +3,9 @@ import copy
 import hashlib
 import hmac
 import json
-import re
 import shlex
 import uuid
 from datetime import datetime, timezone
-from functools import lru_cache
 from pathlib import Path
 
 from aiohttp import web
@@ -17,13 +15,6 @@ from .sse import exported
 from .sse_status import sse_status
 from .search import search as search_records
 from .custom_fields import evaluate as evaluate_fields
-
-
-@lru_cache(maxsize=1)
-def public_suffix_list():
-    from publicsuffix2 import PublicSuffixList
-    with (Path(__file__).resolve().parent / "data" / "public_suffix_list.dat").open(encoding="utf-8") as source:
-        return PublicSuffixList(source)
 
 
 def create_app(service, *, allow_dev_origin=False, mcp_approval_key=None):
@@ -193,33 +184,6 @@ def create_app(service, *, allow_dev_origin=False, mcp_approval_key=None):
         if "lanDevices" in changes:
             service.lan_guard.close_devices(set(previous["lanDevices"]) - set(service.settings["lanDevices"]))
         return web.json_response({**service.state()["settings"], "interruptedConnections": interrupted})
-
-    async def mcp_tls_patterns(request):
-        patterns = await request.json()
-        if not isinstance(patterns, list) or len(patterns) > 1000 or any(
-                not isinstance(pattern, str) or not 0 < len(pattern) <= 255 for pattern in patterns):
-            raise ValueError("Expected TLS domain patterns")
-        for pattern in patterns:
-            if "*" not in pattern:
-                continue
-            parsed = re.fullmatch(r"\*\.([a-z0-9_-]+(?:\.[a-z0-9_-]+)+)(?::([0-9]{1,5}))?", pattern.lower())
-            if not parsed or (parsed[2] and not 1 <= int(parsed[2]) <= 65535):
-                raise ValueError("MCP TLS wildcards must use one leading '*.' label and an optional numeric port.")
-            suffix = parsed[1]
-            last_label = suffix.rsplit(".", 1)[-1]
-            if last_label in {"test", "example", "invalid", "localhost", "internal"}:
-                public_suffix = last_label
-            else:
-                try:
-                    public_suffix = public_suffix_list().get_tld(suffix, strict=True)
-                except (ImportError, OSError, UnicodeError):
-                    return web.json_response({"error": {
-                        "code": "tls_suffix_data_unavailable",
-                        "message": "TLS wildcard validation needs the bundled Public Suffix List. Reinstall Streamglass or use an exact hostname.",
-                    }}, status=503)
-            if not public_suffix or suffix == public_suffix:
-                raise ValueError("MCP TLS wildcards must be scoped to a named site. Use desktop Settings for broader patterns.")
-        return web.json_response({"ok": True})
 
     async def wake(request):
         # Called by the desktop app when the Mac resumes from sleep.
@@ -595,7 +559,7 @@ def create_app(service, *, allow_dev_origin=False, mcp_approval_key=None):
         return socket
 
     app.add_routes([web.get("/api/state", state), web.get("/api/pending", pending), web.get("/api/workspace-config", workspace_config), web.put("/api/workspace-config", workspace_config), web.get("/api/traffic-tools", traffic_tools), web.put("/api/traffic-tools", traffic_tools), web.post("/api/records/{id}/pin", pin), web.get("/api/search", search), web.get("/api/records/{id}", record), web.get("/api/records/{id}/fields", record_fields),
-                    web.put("/api/settings", settings), web.post("/api/mcp/tls-patterns", mcp_tls_patterns), web.post("/api/wake", wake), web.post("/api/lan-devices", lan_device), web.put("/api/rules", rules),
+                    web.put("/api/settings", settings), web.post("/api/wake", wake), web.post("/api/lan-devices", lan_device), web.put("/api/rules", rules),
                     web.post("/api/folders", folder), web.patch("/api/folders/{id}", folder), web.delete("/api/folders/{id}", folder),
                     web.post("/api/pending/{token}/approval", pending_approval),
                     web.post("/api/pending/{token}", resume), web.delete("/api/records", delete),

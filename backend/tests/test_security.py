@@ -5,7 +5,6 @@ import hmac
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from aiohttp.test_utils import TestClient, TestServer
 from mitmproxy import http
@@ -84,27 +83,12 @@ class ManagementSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, 200)
         self.assertEqual(future.result(), value)
 
-    async def test_mcp_tls_patterns_distinguish_sites_from_public_suffixes(self):
-        for pattern, status in (('*.co.id', 400), ('*.pages.dev', 400), ('*example.com', 400),
-                                ('example.com:*', 400), ('*.example.co.id', 200),
-                                ('*.example.test', 200), ('api.example.test', 200)):
-            result = await self.client.post('/api/mcp/tls-patterns', headers=self.auth, json=[pattern])
-            self.assertEqual(result.status, status, pattern)
-
     async def test_tls_baseline_conflict_preserves_desktop_changes(self):
         self.service.settings['tlsDomains'] = ['desktop.example.test']
         result = await self.client.put('/api/settings', headers=self.auth,
             json={'tlsDomains': ['agent.example.test'], 'mcpTlsBaseline': []})
         self.assertEqual(result.status, 409)
         self.assertEqual(self.service.settings['tlsDomains'], ['desktop.example.test'])
-
-    async def test_missing_suffix_data_keeps_wildcards_disabled(self):
-        with patch('backend.api.public_suffix_list', side_effect=FileNotFoundError):
-            wildcard = await self.client.post('/api/mcp/tls-patterns', headers=self.auth, json=['*.example.com'])
-            self.assertEqual(wildcard.status, 503)
-            self.assertEqual((await wildcard.json())['error']['code'], 'tls_suffix_data_unavailable')
-            exact = await self.client.post('/api/mcp/tls-patterns', headers=self.auth, json=['api.example.com'])
-            self.assertEqual(exact.status, 200)
 
     async def test_response_preview_contains_status_changed_headers_and_body_summary(self):
         future = asyncio.get_running_loop().create_future()

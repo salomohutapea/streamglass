@@ -49,8 +49,6 @@ The release build is unsigned and not notarized; its checksum file is distribute
 
 The macOS packaging hook sets Electron fuses before either signature is applied. Packaged builds disable Run as Node, Node environment options and Node inspector arguments. They load the app from the integrity-checked ASAR. The hook applies an ad-hoc signature after the fuse changes. Electron-builder replaces it for Developer ID builds.
 
-MCP wildcard validation uses the pinned [Public Suffix List snapshot](../backend/data/public_suffix_list.dat), including its private suffix section. Refresh it from the [official list](https://publicsuffix.org/list/public_suffix_list.dat) during dependency maintenance and retain its version, upstream commit and MPL-2.0 license headers. Packaged builds use the bundled snapshot and do not fetch it at runtime. If the list is unavailable, MCP refuses wildcard patterns that depend on it. Exact hostnames remain available.
-
 ## Local releases
 
 ```sh

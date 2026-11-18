@@ -38,7 +38,7 @@ async function fixture(t) {
     if (req.url.startsWith('/api/export/')) return res.end(JSON.stringify(record.request));
     if (req.method === 'DELETE' && req.url.startsWith('/api/records')) return res.end(JSON.stringify({ deleted: 1 }));
     if (req.url.endsWith('/approval')) return res.end(JSON.stringify({ approval: controls.gateApproval?.(body) ?? null }));
-    if (req.url.startsWith('/api/pending/') || req.url === '/api/mcp/tls-patterns') return res.end(JSON.stringify({ ok: true }));
+    if (req.url.startsWith('/api/pending/')) return res.end(JSON.stringify({ ok: true }));
     if (req.url === '/api/settings') {
       const { mcpTlsBaseline, ...settings } = body;
       Object.assign(state.settings, settings);
@@ -323,7 +323,7 @@ test('unlocking HTTPS sites needs approval and refuses broad patterns', async t 
   assert.equal(f.approvals.at(-1).source, 'api.example.test');
   assert.equal(f.approvals.at(-1).kind, 'unlock');
   const c = f.client();
-  for (const pattern of ['*', '*.com', '*.*', 'api.*', '*:443', 'localhost']) {
+  for (const pattern of ['*', '*.com', '*.*', 'api.*', '*:443', '*example.com', 'example.com:*', '*.example.com:0', 'localhost']) {
     const result = await c.call('update_settings', { tlsDomains: ['old.example.test', pattern] });
     assert.equal(result.isError, true, pattern);
     assert.match(result.value, /broad TLS pattern/, pattern);

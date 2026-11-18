@@ -61,7 +61,7 @@ Actions that send data elsewhere or widen what Streamglass can read wait for you
 | Run JavaScript on traffic (`upsert_rule`) | The script is new or changed, or its execution scope changes. The prompt shows all of the script |
 | Load a configuration workspace | Every time |
 
-MCP rejects public-suffix TLS wildcards, including `*.com` and `*.co.id`. Desktop Settings retain their existing pattern controls. Reading and deleting captures, editing ordinary breakpoint definitions and pausing or stopping the proxy need no prompt. **Rotate token** in Tools → Agent (MCP) disconnects clients and requires them to update their configuration. See [MCP](docs/MCP.md) for authentication and tool limits.
+MCP refuses patterns such as `*`, `*.com` and `*example.com`. Accepted TLS patterns still require approval. Desktop Settings retain their existing pattern controls. Reading and deleting captures, editing ordinary breakpoint definitions and pausing or stopping the proxy need no prompt. **Rotate token** in Tools → Agent (MCP) disconnects clients and requires them to update their configuration. See [MCP](docs/MCP.md) for authentication and tool limits.
 
 ## Certificates and system settings
 

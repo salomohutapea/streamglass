@@ -41,6 +41,10 @@ const SSE_STATUSES = ['connecting', 'open', 'streaming', 'server-closed', 'clien
 // An AI client may unlock (TLS-inspect) named sites only: the last two labels of the host must be literal, so "*",
 // "*.com" and "*.*" are refused. The desktop settings still accept any pattern the user types.
 export function broadTlsPattern(pattern) {
+  if (pattern.includes('*')) {
+    const match = /^\*\.[a-z0-9_-]+(?:\.[a-z0-9_-]+)+(?::([0-9]{1,5}))?$/i.exec(pattern);
+    return !match || (!!match[1] && (Number(match[1]) < 1 || Number(match[1]) > 65535));
+  }
   const labels = pattern.replace(/:[^.]*$/, '').split('.');
   return labels.length < 2 || labels.slice(-2).some(label => !label || label.includes('*'));
 }
@@ -390,7 +394,6 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
       const broad = added.filter(broadTlsPattern);
       if (broad.length) throw new Error(`Refused broad TLS pattern ${broad.join(', ')}: AI clients may only unlock named sites such as api.example.com or *.example.com. The user can add other patterns in Settings.`);
       if (added.length) {
-        await api('/api/mcp/tls-patterns', 'POST', added);
         const source = added.join('\n');
         if (source.length > 100000) throw new Error('Approval details are too large. Add fewer TLS patterns at once.');
         await approve({ kind: 'unlock', title: 'Decrypt HTTPS traffic for more sites', detail: ['Requests, responses, cookies and tokens for the sites below become readable to Streamglass and connected AI clients:'], source });
