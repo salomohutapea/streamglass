@@ -33,9 +33,22 @@ const shareLimit = 16 * 1024 * 1024;
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
 const newRule = (): Rule => ({ id: crypto.randomUUID(), name: '', enabled: true, pattern: '*', method: '*', stages: mode === 'scripts' ? ['request'] : ['request', 'response'], breakpoint: mode !== 'scripts', ...(mode === 'scripts' ? { script: scriptTemplate } : {}) });
 
-function ShareRules({ rules, folders, initialId, onClose }: { rules: Rule[]; folders: RuleFolder[]; initialId?: string; onClose: () => void }) {
+async function exportRules(rules: Rule[]) {
+  const desktop = window.streamglass;
+  if (!desktop) throw new Error('Open Streamglass to share rules.');
+  const entries = rules.map(rule => ({
+    name: typeof rule.name === 'string' ? rule.name : '', pattern: rule.pattern, method: rule.method || '*', stages: rule.stages,
+    breakpoint: rule.breakpoint !== false, script: rule.script ?? '',
+  }));
+  const content = JSON.stringify({ format: 'streamglass-rules', version: 1, rules: entries });
+  if (new TextEncoder().encode(content).length > shareLimit) throw new Error('Selection exceeds 16 MiB. Share fewer rules at a time.');
+  const name = rules.length === 1 ? 'streamglass-rule.sgrules' : 'streamglass-rules.sgrules';
+  return (await desktop.exportFile({ name, content })).saved;
+}
+
+function ShareRules({ rules, folders, onClose }: { rules: Rule[]; folders: RuleFolder[]; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [selected, setSelected] = useState(() => new Set(initialId ? [initialId] : []));
+  const [selected, setSelected] = useState(() => new Set<string>());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => { dialog.current?.showModal(); }, []);
@@ -45,14 +58,7 @@ function ShareRules({ rules, folders, initialId, onClose }: { rules: Rule[]; fol
     setSaving(true);
     setError('');
     try {
-      const entries = rules.filter(rule => selected.has(rule.id)).map(rule => ({
-        name: typeof rule.name === 'string' ? rule.name : '', pattern: rule.pattern, method: rule.method || '*', stages: rule.stages,
-        breakpoint: rule.breakpoint !== false, script: rule.script ?? '',
-      }));
-      const content = JSON.stringify({ format: 'streamglass-rules', version: 1, rules: entries });
-      if (new TextEncoder().encode(content).length > shareLimit) throw new Error('Selection exceeds 16 MiB. Share fewer rules at a time.');
-      const result = await window.streamglass.exportFile({ name: 'streamglass.sgrules', content });
-      if (result.saved) onClose();
+      if (await exportRules(rules.filter(rule => selected.has(rule.id)))) onClose();
     } catch (error) { setError(errorMessage(error)); }
     finally { setSaving(false); }
   }
@@ -61,10 +67,12 @@ function ShareRules({ rules, folders, initialId, onClose }: { rules: Rule[]; fol
     onCancel={event => { event.preventDefault(); if (!saving) onClose(); }}>
     <div className="modal-head"><h2 id="rule-share-title">Share rules</h2></div>
     <div className="modal-body">
-      <p>Choose the rules to share. The file includes URL patterns and script source.</p>
-      <button type="button" disabled={saving} onClick={() => setSelected(selected.size === rules.length ? new Set() : new Set(rules.map(rule => rule.id)))}>
-        {selected.size === rules.length ? 'Clear selection' : 'Select all'}
-      </button>
+      <div className="rule-share-toolbar">
+        <p className="muted">The file includes URL patterns and JavaScript source.</p>
+        <button type="button" disabled={saving} onClick={() => setSelected(selected.size === rules.length ? new Set() : new Set(rules.map(rule => rule.id)))}>
+          {selected.size === rules.length ? 'Clear selection' : 'Select all'}
+        </button>
+      </div>
       <div className="rule-share-list">
         {[true, false].map(breakpoint => {
           const entries = rules.filter(rule => (rule.breakpoint !== false) === breakpoint);
@@ -88,7 +96,7 @@ function ShareRules({ rules, folders, initialId, onClose }: { rules: Rule[]; fol
     </div>
     <div className="modal-foot">
       <button disabled={saving} onClick={onClose}>Cancel</button>
-      <button className="primary" disabled={saving || !selected.size} onClick={() => void save()}>Save {selected.size || ''} {selected.size === 1 ? 'rule' : 'rules'}…</button>
+      <button className="primary" disabled={saving || !selected.size} onClick={() => void save()}>{selected.size ? `Save ${selected.size} ${selected.size === 1 ? 'rule' : 'rules'}…` : 'Save rules…'}</button>
     </div>
   </dialog>;
 }
@@ -100,7 +108,7 @@ export default function EditorWindow() {
   const [editingRevision, setEditingRevision] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [folderForm, setFolderForm] = useState<{ id?: string; parentId?: string | null; name: string } | null>(null);
-  const [share, setShare] = useState<{ rules: Rule[]; folders: RuleFolder[]; initialId?: string } | null>(null);
+  const [share, setShare] = useState<{ rules: Rule[]; folders: RuleFolder[] } | null>(null);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -117,8 +125,15 @@ export default function EditorWindow() {
   const shownRules = rows.filter(row => row.type === 'rule').length;
   const showScript = editing && (mode === 'scripts' || editing.script || rules.find(rule => rule.id === editing.id)?.script);
 
-  function openShare(initialId?: string) {
-    if (data && !working.current) setShare({ rules: data.rules, folders: data.folders, initialId });
+  async function shareRule(id: string) {
+    const rule = rules.find(rule => rule.id === id);
+    if (!rule || working.current) return;
+    working.current = true;
+    setBusy(true);
+    setError('');
+    try { await exportRules([rule]); }
+    catch (error) { setError(errorMessage(error)); }
+    finally { working.current = false; setBusy(false); }
   }
 
   useEffect(() => {
@@ -264,7 +279,7 @@ export default function EditorWindow() {
             onToggleFolder={(folder, enabled) => void patchFolder(folder.id, { enabled })}
             onExpand={(folder, expanded) => expandFolder(folder as RuleFolder, expanded)}
             onEdit={rule => { setEditing(rule as Rule); setEditingRevision(data?.rulesRevision ?? null); setError(''); }}
-            onShare={!recordId && window.streamglass ? rule => openShare(rule.id) : undefined}
+            onShare={!recordId && window.streamglass ? rule => void shareRule(rule.id) : undefined}
             onDeleteRule={rule => void mutateRules(list => list.filter(item => item.id !== rule.id))}
             onDeleteFolder={folder => void deleteFolder(folder as RuleFolder)}
             onAddRule={folderId => { setEditing({ ...newRule(), ...(folderId ? { folderId } : {}) }); setFolderForm(null); setError(''); }}
@@ -275,7 +290,7 @@ export default function EditorWindow() {
     <footer className="editor-window-footer">
       {editing ? <><button disabled={busy} onClick={() => { if (recordId) { window.close(); return; } setEditing(null); setError(''); }}>Cancel</button><button className="primary" disabled={busy} onClick={() => void saveRule()}>Save rule</button></> : <>{!recordId && window.streamglass && <div className="rule-file-actions">
         <button disabled={busy || !data} onClick={() => void importRules()}>Import…</button>
-        <button disabled={busy || !data?.rules.length} onClick={() => openShare()}>Share…</button>
+        <button disabled={busy || !data?.rules.length} onClick={() => { if (data) setShare({ rules: data.rules, folders: data.folders }); }}>Share…</button>
       </div>}<button onClick={() => window.close()}>Close</button><button className="primary" disabled={busy || !data || seedLoading} onClick={() => { setEditing(newRule()); setFolderForm(null); setError(''); }}><Plus size={14}/>Add rule</button></>}
     </footer>
   </main>;

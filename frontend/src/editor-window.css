@@ -91,8 +91,17 @@
 .rule-share-dialog {
   width: min(520px, calc(100vw - 24px));
 }
-.rule-share-dialog .modal-body > p:first-child {
-  margin-top: 0;
+.rule-share-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.rule-share-toolbar p {
+  margin: 0;
+}
+.rule-share-toolbar button {
+  flex-shrink: 0;
 }
 .rule-share-list {
   margin-top: 12px;
@@ -101,10 +110,23 @@
 }
 .rule-share-list fieldset {
   min-width: 0;
-  margin: 0 0 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.rule-share-list fieldset + fieldset {
+  margin-top: 12px;
+}
+.rule-share-list legend {
+  padding: 0 0 4px;
+  color: var(--muted);
+  font-weight: 600;
 }
 .rule-share-list .check {
-  padding: 4px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
   overflow-wrap: anywhere;
 }
 .rule-share-list .check small {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
-import { ChevronRight, Folder, FolderOpen, FolderPlus, ListFilter, MoreHorizontal, Pencil, Plus, Share2, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronRight, Folder, FolderOpen, FolderPlus, ListFilter, MoreHorizontal, Pencil, Plus, Share2, Trash2 } from 'lucide-react';
 import { PopupMenu } from './RuleList';
 import { folderPath, type RuleRow, type TreeRef } from './rule-tree.mjs';
 import './rule-list.css';
@@ -100,14 +100,14 @@ export default function RuleTable({ rows, folders, searching, emptyMessage, fold
         <button role="menuitem" onClick={() => { onFolderForm({ id: menu.row.id, name: (menu.row.item as TableFolder).name }); close(); }}><Pencil size={13}/>Rename…</button>
       </> : <>
         <button role="menuitem" onClick={() => { onEdit(menu.row.item as TableRule); close(); }}><Pencil size={13}/>Edit…</button>
-        {onShare && <button role="menuitem" onClick={() => { onShare(menu.row.item as TableRule); close(); }}><Share2 size={13}/>Share…</button>}
+        {onShare && <button role="menuitem" onClick={() => { close(); onShare(menu.row.item as TableRule); }}><Share2 size={13}/>Share…</button>}
       </>}
       <button role="menuitem" aria-haspopup="menu" aria-expanded={moving} onClick={() => setMoving(!moving)}><Folder size={13}/>Move to<span aria-hidden="true">{moving ? '▾' : '▸'}</span></button>
       {moving && <div className="rule-menu-sub" role="group" aria-label="Destinations">
         <button role="menuitemradio" aria-checked={menu.row.parentId === null} onClick={() => { onPlace({ type: menu.row.type, id: menu.row.id }, { type: 'folder', id: '' }, 'inside'); close(); }}><span>Top level</span>{menu.row.parentId === null && <span aria-hidden="true">✓</span>}</button>
         {folders.filter(folder => !(menu.row.type === 'folder' && folder.id === menu.row.id)).map(folder => <button key={folder.id} role="menuitemradio" aria-checked={menu.row.parentId === folder.id} onClick={() => { onPlace({ type: menu.row.type, id: menu.row.id }, { type: 'folder', id: folder.id }, 'inside'); close(); }}><span title={folderPath(folders, folder.id)}>{folderPath(folders, folder.id)}</span>{menu.row.parentId === folder.id && <span aria-hidden="true">✓</span>}</button>)}
       </div>}
-      {sortable && <><button role="menuitem" onClick={() => { onStep({ type: menu.row.type, id: menu.row.id }, -1); close(); }}>Move up<span aria-hidden="true">⌥↑</span></button><button role="menuitem" onClick={() => { onStep({ type: menu.row.type, id: menu.row.id }, 1); close(); }}>Move down<span aria-hidden="true">⌥↓</span></button></>}
+      {sortable && <><button role="menuitem" onClick={() => { onStep({ type: menu.row.type, id: menu.row.id }, -1); close(); }}><ArrowUp size={13}/>Move up<span aria-hidden="true">⌥↑</span></button><button role="menuitem" onClick={() => { onStep({ type: menu.row.type, id: menu.row.id }, 1); close(); }}><ArrowDown size={13}/>Move down<span aria-hidden="true">⌥↓</span></button></>}
       {menu.row.type === 'folder' ? <button role="menuitem" className="error-text" onClick={() => { onDeleteFolder(menu.row.item as TableFolder); close(); }}><Trash2 size={13}/>Delete folder…</button> : <button role="menuitem" className="error-text" onClick={() => { onDeleteRule(menu.row.item as TableRule); close(); }}><Trash2 size={13}/>Delete rule</button>}
     </PopupMenu>}
   </div>;
