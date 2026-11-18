@@ -58,7 +58,7 @@ class MessageTests(unittest.TestCase):
             service.master = SimpleNamespace(addons=SimpleNamespace(get=lambda _: SimpleNamespace(connections=connections)))
             def tunnel(host, port=443, inspected=False):
                 # Connection objects are identity-hashable in mitmproxy.
-                client = Mock(id=host, tls=inspected, sni=None)
+                client = Mock(id=host, tls=inspected, sni=None, peername=("127.0.0.1", 51000))
                 flow = SimpleNamespace(id=host, client_conn=client, request=SimpleNamespace(host=host, port=port),
                                        server_conn=SimpleNamespace(address=(host, port), peername=None))
                 handler = Mock(client=client, transports={client: SimpleNamespace(handler=Mock())})
