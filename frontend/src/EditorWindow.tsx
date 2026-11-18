@@ -3,7 +3,7 @@ import Banner from './Banner';
 import { FolderPlus, Globe, Plus } from 'lucide-react';
 import ListSearch from './ListSearch';
 import {matchesRuleSearch} from './list-search.mjs';
-import RuleTable from './RuleTable';
+import RuleTable, { ruleLabel } from './RuleTable';
 import { dropPlacement, folderPath, ruleRows, stepPlacement, type TreeRef } from './rule-tree.mjs';
 import { confirmAction } from './confirm-dialog';
 import ScriptEditor from './ScriptEditor';
@@ -29,8 +29,69 @@ async function onEvent(context, url, request, event) {
   return event;
 }`;
 const scriptLimit = 100000;
+const shareLimit = 16 * 1024 * 1024;
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
 const newRule = (): Rule => ({ id: crypto.randomUUID(), name: '', enabled: true, pattern: '*', method: '*', stages: mode === 'scripts' ? ['request'] : ['request', 'response'], breakpoint: mode !== 'scripts', ...(mode === 'scripts' ? { script: scriptTemplate } : {}) });
+
+function ShareRules({ rules, folders, initialId, onClose }: { rules: Rule[]; folders: RuleFolder[]; initialId?: string; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [selected, setSelected] = useState(() => new Set(initialId ? [initialId] : []));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { dialog.current?.showModal(); }, []);
+
+  async function save() {
+    if (!window.streamglass || saving || !selected.size) return;
+    setSaving(true);
+    setError('');
+    try {
+      const entries = rules.filter(rule => selected.has(rule.id)).map(rule => ({
+        name: typeof rule.name === 'string' ? rule.name : '', pattern: rule.pattern, method: rule.method || '*', stages: rule.stages,
+        breakpoint: rule.breakpoint !== false, script: rule.script ?? '',
+      }));
+      const content = JSON.stringify({ format: 'streamglass-rules', version: 1, rules: entries });
+      if (new TextEncoder().encode(content).length > shareLimit) throw new Error('Selection exceeds 16 MiB. Share fewer rules at a time.');
+      const result = await window.streamglass.exportFile({ name: 'streamglass.sgrules', content });
+      if (result.saved) onClose();
+    } catch (error) { setError(errorMessage(error)); }
+    finally { setSaving(false); }
+  }
+
+  return <dialog ref={dialog} className="modal rule-share-dialog" aria-labelledby="rule-share-title"
+    onCancel={event => { event.preventDefault(); if (!saving) onClose(); }}>
+    <div className="modal-head"><h2 id="rule-share-title">Share rules</h2></div>
+    <div className="modal-body">
+      <p>Choose the rules to share. The file includes URL patterns and script source.</p>
+      <button type="button" disabled={saving} onClick={() => setSelected(selected.size === rules.length ? new Set() : new Set(rules.map(rule => rule.id)))}>
+        {selected.size === rules.length ? 'Clear selection' : 'Select all'}
+      </button>
+      <div className="rule-share-list">
+        {[true, false].map(breakpoint => {
+          const entries = rules.filter(rule => (rule.breakpoint !== false) === breakpoint);
+          return entries.length > 0 && <fieldset key={String(breakpoint)} disabled={saving}>
+            <legend>{breakpoint ? 'Breakpoints' : 'Scripts'}</legend>
+            {entries.map(rule => <label className="check" key={rule.id}>
+              <input type="checkbox" checked={selected.has(rule.id)} onChange={event => {
+                const next = new Set(selected);
+                if (event.target.checked) next.add(rule.id);
+                else next.delete(rule.id);
+                setSelected(next);
+              }}/>
+              <span>{ruleLabel(rule).label}
+                {rule.folderId && <small>{folderPath(folders, rule.folderId)}</small>}
+              </span>
+            </label>)}
+          </fieldset>;
+        })}
+      </div>
+      {error && <p className="error-text" role="alert">{error}</p>}
+    </div>
+    <div className="modal-foot">
+      <button disabled={saving} onClick={onClose}>Cancel</button>
+      <button className="primary" disabled={saving || !selected.size} onClick={() => void save()}>Save {selected.size || ''} {selected.size === 1 ? 'rule' : 'rules'}…</button>
+    </div>
+  </dialog>;
+}
 
 export default function EditorWindow() {
   const [connection, setConnection] = useState<Connection | null>(null);
@@ -39,6 +100,8 @@ export default function EditorWindow() {
   const [editingRevision, setEditingRevision] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [folderForm, setFolderForm] = useState<{ id?: string; parentId?: string | null; name: string } | null>(null);
+  const [share, setShare] = useState<{ rules: Rule[]; folders: RuleFolder[]; initialId?: string } | null>(null);
+  const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [seedLoading, setSeedLoading] = useState(Boolean(recordId));
@@ -52,6 +115,11 @@ export default function EditorWindow() {
   const searching = Boolean(query.trim());
   const rows = ruleRows(rules, folders, searching ? rule => matchesRuleSearch(rule, query, folders) : undefined);
   const shownRules = rows.filter(row => row.type === 'rule').length;
+  const showScript = editing && (mode === 'scripts' || editing.script || rules.find(rule => rule.id === editing.id)?.script);
+
+  function openShare(initialId?: string) {
+    if (data && !working.current) setShare({ rules: data.rules, folders: data.folders, initialId });
+  }
 
   useEffect(() => {
     document.title = `${title} — Streamglass`;
@@ -123,15 +191,30 @@ export default function EditorWindow() {
     if (!editing.pattern.trim() || !editing.stages.length) { setError('Enter a URL wildcard and select at least one stage.'); return; }
     if (await mutateRules(rules => upsertRule(rules, editing), editingRevision)) { if (recordId) { window.close(); return; } setEditing(null); setEditingRevision(null); }
   }
-  // Folder writes go through the folder route; the engine re-sorts the stored rules to match the tree in the same write.
-  async function folderRequest(run: () => Promise<unknown>) {
+  async function configRequest(run: () => Promise<unknown>) {
     if (working.current) return false;
     working.current = true; revision.current++; setBusy(true); setError('');
     try { await run(); setData(await api('/api/state') as State); return true; }
     catch (error) { setError(errorMessage(error)); return false; }
     finally { revision.current++; working.current = false; setBusy(false); }
   }
-  const patchFolder = (id: string, body: Record<string, unknown>) => folderRequest(() => api(`/api/folders/${encodeURIComponent(id)}`, 'PATCH', body));
+  async function importRules() {
+    const desktop = window.streamglass;
+    if (!desktop) return;
+    setNotice('');
+    await configRequest(async () => {
+      const result = await desktop.importRuleFiles();
+      if (!result) return;
+      const count = [
+        result.breakpoints && `${result.breakpoints} breakpoint${result.breakpoints === 1 ? '' : 's'}`,
+        result.scripts && `${result.scripts} script${result.scripts === 1 ? '' : 's'}`,
+      ].filter(Boolean).join(' and ');
+      setQuery('');
+      setNotice(`Imported ${count}. Review and enable them in Breakpoint rules or JavaScript rules.`);
+    });
+  }
+  // The folder route re-sorts the stored rules in the same write.
+  const patchFolder = (id: string, body: Record<string, unknown>) => configRequest(() => api(`/api/folders/${encodeURIComponent(id)}`, 'PATCH', body));
   async function applyPlacement(item: TreeRef, place: { parentId: string | null; order: number } | null) {
     if (!place) return;
     if (item.type === 'folder') { await patchFolder(item.id, { parentId: place.parentId, order: place.order }); return; }
@@ -146,12 +229,12 @@ export default function EditorWindow() {
     if (!folderForm) return;
     const name = folderForm.name.trim();
     if (!name) { setError('Enter a folder name.'); return; }
-    const done = folderForm.id ? await patchFolder(folderForm.id, { name }) : await folderRequest(() => api('/api/folders', 'POST', { name, kind, ...(folderForm.parentId ? { parentId: folderForm.parentId } : {}) }));
+    const done = folderForm.id ? await patchFolder(folderForm.id, { name }) : await configRequest(() => api('/api/folders', 'POST', { name, kind, ...(folderForm.parentId ? { parentId: folderForm.parentId } : {}) }));
     if (done) setFolderForm(null);
   }
   async function deleteFolder(folder: RuleFolder) {
     if (!await confirmAction({ title: `Delete the folder ${folder.name}?`, message: 'Its rules and folders move up one level. Nothing inside is deleted.', confirmLabel: 'Delete folder', danger: true })) return;
-    await folderRequest(() => api(`/api/folders/${encodeURIComponent(folder.id)}`, 'DELETE'));
+    await configRequest(() => api(`/api/folders/${encodeURIComponent(folder.id)}`, 'DELETE'));
   }
   function expandFolder(folder: RuleFolder, expanded: boolean) {
     // Shown at once; the saved state follows.
@@ -161,6 +244,8 @@ export default function EditorWindow() {
   return <main className="editor-window">
     <header className="editor-window-heading window-header"><h1>{title}</h1><span role="img" aria-label="Applies to all connected devices" title="Applies to all connected devices"><Globe size={14}/></span></header>
     {error && <Banner tone="error" className="editor-error" actions={<button onClick={() => setError('')}>Dismiss</button>}>{error}</Banner>}
+    {notice && <Banner tone="info" actions={<button onClick={() => setNotice('')}>Dismiss</button>}>{notice}</Banner>}
+    {share && <ShareRules {...share} onClose={() => setShare(null)}/>}
     <div className={`editor-window-content${!editing && !seedLoading ? ' is-browser' : ''}`}>
       {seedLoading ? <p className="muted">Loading…</p> : editing ? <fieldset className="editor-fields form" disabled={busy}>
         <label>Name<input value={editing.name ?? ''} onChange={event => setEditing({ ...editing, name: event.target.value })}/></label>
@@ -169,7 +254,7 @@ export default function EditorWindow() {
         <label>Method<input list="http-methods" placeholder="*" title="* matches any method" value={editing.method} onChange={event => setEditing({ ...editing, method: event.target.value })}/><datalist id="http-methods">{['*','GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].map(method => <option key={method} value={method}/>)}</datalist></label>
         <fieldset><legend>{mode === 'scripts' ? 'Run hooks at' : 'Pause at'}</legend>{['request','response','event'].map(stage => <label className="check" key={stage}><input type="checkbox" checked={editing.stages.includes(stage)} onChange={event => setEditing({ ...editing, stages: event.target.checked ? [...editing.stages, stage] : editing.stages.filter(value => value !== stage) })}/>{stage === 'event' ? 'Each SSE event' : stage === 'request' ? 'Request' : 'Response'}</label>)}</fieldset>
         <label className="check"><input type="checkbox" checked={editing.enabled} onChange={event => setEditing({ ...editing, enabled: event.target.checked })}/>Enabled</label>
-        {mode === 'scripts' && <div className="editor-body-field"><span className="editor-body-heading"><span>JavaScript</span></span><ScriptEditor label="JavaScript" disabled={busy} value={editing.script ?? ''} onChange={script => setEditing(current => current && { ...current, script })}/>{(editing.script ?? '').length > scriptLimit && <small className="error-text">Script is {(editing.script ?? '').length.toLocaleString()} characters; the limit is {scriptLimit.toLocaleString()}.</small>}</div>}
+        {showScript && <div className="editor-body-field"><span className="editor-body-heading"><span>JavaScript</span></span><ScriptEditor label="JavaScript" disabled={busy} value={editing.script ?? ''} onChange={script => setEditing(current => current && { ...current, script })}/>{(editing.script ?? '').length > scriptLimit && <small className="error-text">Script is {(editing.script ?? '').length.toLocaleString()} characters; the limit is {scriptLimit.toLocaleString()}.</small>}</div>}
       </fieldset> : <>{data ? <fieldset className="editor-fields rule-browser" disabled={busy}>
         <section className="rule-folder-content" aria-label="Rules">
           <div className="rule-table-toolbar"><ListSearch label={mode === 'scripts' ? 'Search scripts' : 'Search breakpoints'} placeholder={mode === 'scripts' ? 'Search name, URL, method or script…' : 'Search name, URL, method or stage…'} value={query} onChange={setQuery} matches={shownRules} total={rules.length}/><button type="button" aria-label="New folder" title="New folder" onClick={() => { setFolderForm({ parentId: null, name: '' }); setError(''); }}><FolderPlus size={14}/>New folder</button></div>
@@ -179,6 +264,7 @@ export default function EditorWindow() {
             onToggleFolder={(folder, enabled) => void patchFolder(folder.id, { enabled })}
             onExpand={(folder, expanded) => expandFolder(folder as RuleFolder, expanded)}
             onEdit={rule => { setEditing(rule as Rule); setEditingRevision(data?.rulesRevision ?? null); setError(''); }}
+            onShare={!recordId && window.streamglass ? rule => openShare(rule.id) : undefined}
             onDeleteRule={rule => void mutateRules(list => list.filter(item => item.id !== rule.id))}
             onDeleteFolder={folder => void deleteFolder(folder as RuleFolder)}
             onAddRule={folderId => { setEditing({ ...newRule(), ...(folderId ? { folderId } : {}) }); setFolderForm(null); setError(''); }}
@@ -187,7 +273,10 @@ export default function EditorWindow() {
       </fieldset> : <p className="muted">Connecting…</p>}</>}
     </div>
     <footer className="editor-window-footer">
-      {editing ? <><button disabled={busy} onClick={() => { if (recordId) { window.close(); return; } setEditing(null); setError(''); }}>Cancel</button><button className="primary" disabled={busy} onClick={() => void saveRule()}>Save rule</button></> : <><button onClick={() => window.close()}>Close</button><button className="primary" disabled={busy || !data || seedLoading} onClick={() => { setEditing(newRule()); setFolderForm(null); setError(''); }}><Plus size={14}/>Add rule</button></>}
+      {editing ? <><button disabled={busy} onClick={() => { if (recordId) { window.close(); return; } setEditing(null); setError(''); }}>Cancel</button><button className="primary" disabled={busy} onClick={() => void saveRule()}>Save rule</button></> : <>{!recordId && window.streamglass && <div className="rule-file-actions">
+        <button disabled={busy || !data} onClick={() => void importRules()}>Import…</button>
+        <button disabled={busy || !data?.rules.length} onClick={() => openShare()}>Share…</button>
+      </div>}<button onClick={() => window.close()}>Close</button><button className="primary" disabled={busy || !data || seedLoading} onClick={() => { setEditing(newRule()); setFolderForm(null); setError(''); }}><Plus size={14}/>Add rule</button></>}
     </footer>
   </main>;
 }

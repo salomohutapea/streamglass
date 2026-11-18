@@ -232,6 +232,41 @@ def create_app(service, *, allow_dev_origin=False, mcp_approval_key=None):
         service.persist_config(rules=ordered_rules(rules, service.folders))
         return web.json_response({"rules": service.rules, "revision": service.rules_revision})
 
+    async def import_rules(request):
+        bundles = await request.json()
+        if not isinstance(bundles, list) or not 1 <= len(bundles) <= 500:
+            raise ValueError("Choose one or more Streamglass rule files")
+        portable_keys = {"name", "pattern", "method", "stages", "breakpoint", "script"}
+        imported = []
+        order = max(
+            [len(service.rules) + 1]
+            + [folder.get("order", 0) for folder in service.folders if not folder.get("parentId")]
+            + [rule.get("order", 0) for rule in service.rules if not rule.get("folderId")]
+        )
+        for bundle in bundles:
+            if (not isinstance(bundle, dict) or set(bundle) != {"format", "version", "rules"}
+                    or bundle["format"] != "streamglass-rules"
+                    or type(bundle["version"]) is not int or bundle["version"] != 1
+                    or not isinstance(bundle["rules"], list) or not bundle["rules"]):
+                raise ValueError("Expected a Streamglass rule file (version 1)")
+            if len(service.rules) + len(imported) + len(bundle["rules"]) > 500:
+                raise ValueError("Import would exceed the profile limit of 500 rules")
+            for rule in bundle["rules"]:
+                if (not isinstance(rule, dict) or set(rule) - portable_keys
+                        or not isinstance(rule.get("name", ""), str)):
+                    raise ValueError("Invalid shared rule")
+                imported.append({
+                    "method": "*", "breakpoint": True, **rule,
+                    "id": str(uuid.uuid4()), "enabled": False, "order": order,
+                })
+
+        from .rule_folders import ordered_rules
+        rules = validate_rules(service.rules + imported, service.folders)
+        # Merge into the current state synchronously so a concurrent editor never loses its changes.
+        service.persist_config(rules=ordered_rules(rules, service.folders))
+        scripts = sum(rule["breakpoint"] is False for rule in imported)
+        return web.json_response({"breakpoints": len(imported) - scripts, "scripts": scripts})
+
     async def workspace_config(request):
         def snapshot():
             return {"tlsDomains": service.settings["tlsDomains"], "rules": service.rules,
@@ -560,7 +595,7 @@ def create_app(service, *, allow_dev_origin=False, mcp_approval_key=None):
         return socket
 
     app.add_routes([web.get("/api/state", state), web.get("/api/pending", pending), web.get("/api/workspace-config", workspace_config), web.put("/api/workspace-config", workspace_config), web.get("/api/traffic-tools", traffic_tools), web.put("/api/traffic-tools", traffic_tools), web.post("/api/records/{id}/pin", pin), web.get("/api/search", search), web.get("/api/records/{id}", record), web.get("/api/records/{id}/fields", record_fields),
-                    web.put("/api/settings", settings), web.post("/api/wake", wake), web.post("/api/lan-devices", lan_device), web.put("/api/rules", rules),
+                    web.put("/api/settings", settings), web.post("/api/wake", wake), web.post("/api/lan-devices", lan_device), web.put("/api/rules", rules), web.post("/api/rules/import", import_rules),
                     web.post("/api/folders", folder), web.patch("/api/folders/{id}", folder), web.delete("/api/folders/{id}", folder),
                     web.post("/api/pending/{token}/approval", pending_approval),
                     web.post("/api/pending/{token}", resume), web.delete("/api/records", delete),

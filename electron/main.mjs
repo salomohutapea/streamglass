@@ -1,7 +1,8 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, powerMonitor, protocol, session, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createServer, isIP } from 'node:net';
 import { hostname, networkInterfaces } from 'node:os';
 import { lookupService } from 'node:dns/promises';
@@ -625,6 +626,50 @@ async function start() {
     });
     if (canceled || !filePaths.length) return null;
     return readMapLocalFile(filePaths[0]);
+  });
+  handle('import-rule-files', async event => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!['breakpoints', 'scripts'].some(kind => editorWindows.get(`${kind}:`) === owner)) {
+      throw new Error('Rule import requires a rules window');
+    }
+    const { canceled, filePaths } = await dialog.showOpenDialog(owner, {
+      title: 'Import Streamglass rules', properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Streamglass rules', extensions: ['sgrules', 'json'] }],
+    });
+    if (canceled || !filePaths.length) return null;
+    if (filePaths.length > 500) throw new Error('Choose at most 500 rule files');
+    let remaining = 16 * 1024 * 1024;
+    const bundles = [];
+    for (const filePath of filePaths) {
+      const file = await open(filePath, constants.O_RDONLY | constants.O_NONBLOCK);
+      try {
+        const stat = await file.stat();
+        if (!stat.isFile() || stat.size > remaining) throw new Error('Choose regular files totaling at most 16 MiB');
+        const buffer = Buffer.alloc(stat.size + 1);
+        let size = 0;
+        while (size < buffer.length) {
+          const { bytesRead } = await file.read(buffer, size, buffer.length - size, null);
+          if (!bytesRead) break;
+          size += bytesRead;
+        }
+        if (size !== stat.size) throw new Error('A rule file changed while it was being read. Choose the files again.');
+        remaining -= size;
+        try {
+          const json = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, size));
+          bundles.push(JSON.parse(json));
+        } catch {
+          throw new Error(`Invalid JSON in "${path.basename(filePath)}"`);
+        }
+      } finally { await file.close(); }
+    }
+    const response = await fetch(`${bootstrap.baseUrl}/api/rules/import`, {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000),
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(bundles),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result) throw new Error(result?.error?.message || 'Could not import rules');
+    return result;
   });
   handle('export-file', async (event, file) => {
     if (!file || typeof file.name !== 'string' || typeof file.content !== 'string' || Buffer.byteLength(file.content) > 64 * 1024 * 1024) throw new Error('Invalid export');

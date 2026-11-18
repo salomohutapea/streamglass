@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
-import { ChevronRight, Folder, FolderOpen, FolderPlus, ListFilter, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ChevronRight, Folder, FolderOpen, FolderPlus, ListFilter, MoreHorizontal, Pencil, Plus, Share2, Trash2 } from 'lucide-react';
 import { PopupMenu } from './RuleList';
 import { folderPath, type RuleRow, type TreeRef } from './rule-tree.mjs';
 import './rule-list.css';
@@ -21,12 +21,12 @@ export function ruleLabel(rule: TableRule) {
 
 /** Rules and folders in one compact table. Folders are rows that expand in place; rows drag to reorder or to move into
  *  a folder (Option+Up/Down does the same from the keyboard). Sorting is off while a search is filtering the list. */
-export default function RuleTable({ rows, folders, searching, emptyMessage, folderForm, onFolderForm, onSaveFolder, onToggleRule, onToggleFolder, onExpand, onEdit, onDeleteRule, onDeleteFolder, onAddRule, onPlace, onStep }: {
+export default function RuleTable({ rows, folders, searching, emptyMessage, folderForm, onFolderForm, onSaveFolder, onToggleRule, onToggleFolder, onExpand, onEdit, onShare, onDeleteRule, onDeleteFolder, onAddRule, onPlace, onStep }: {
   rows: Row[]; folders: TableFolder[]; searching: boolean; emptyMessage: string;
   folderForm: { id?: string; parentId?: string | null; name: string } | null;
   onFolderForm(form: { id?: string; parentId?: string | null; name: string } | null): void; onSaveFolder(): void;
   onToggleRule(rule: TableRule, enabled: boolean): void; onToggleFolder(folder: TableFolder, enabled: boolean): void; onExpand(folder: TableFolder, expanded: boolean): void;
-  onEdit(rule: TableRule): void; onDeleteRule(rule: TableRule): void; onDeleteFolder(folder: TableFolder): void; onAddRule(folderId: string | null): void;
+  onEdit(rule: TableRule): void; onShare?(rule: TableRule): void; onDeleteRule(rule: TableRule): void; onDeleteFolder(folder: TableFolder): void; onAddRule(folderId: string | null): void;
   onPlace(dragged: TreeRef, target: TreeRef, zone: Zone): void; onStep(item: TreeRef, direction: 1 | -1): void;
 }) {
   const [drop, setDrop] = useState<{ id: string; zone: Zone } | null>(null);
@@ -98,7 +98,10 @@ export default function RuleTable({ rows, folders, searching, emptyMessage, fold
         <button role="menuitem" onClick={() => { onAddRule(menu.row.id); close(); }}><Plus size={13}/>Add rule here</button>
         <button role="menuitem" onClick={() => { if (menu.row.type === 'folder' && !menu.row.open) onExpand(menu.row.item, true); onFolderForm({ parentId: menu.row.id, name: '' }); close(); }}><FolderPlus size={13}/>New folder inside…</button>
         <button role="menuitem" onClick={() => { onFolderForm({ id: menu.row.id, name: (menu.row.item as TableFolder).name }); close(); }}><Pencil size={13}/>Rename…</button>
-      </> : <button role="menuitem" onClick={() => { onEdit(menu.row.item as TableRule); close(); }}><Pencil size={13}/>Edit…</button>}
+      </> : <>
+        <button role="menuitem" onClick={() => { onEdit(menu.row.item as TableRule); close(); }}><Pencil size={13}/>Edit…</button>
+        {onShare && <button role="menuitem" onClick={() => { onShare(menu.row.item as TableRule); close(); }}><Share2 size={13}/>Share…</button>}
+      </>}
       <button role="menuitem" aria-haspopup="menu" aria-expanded={moving} onClick={() => setMoving(!moving)}><Folder size={13}/>Move to<span aria-hidden="true">{moving ? '▾' : '▸'}</span></button>
       {moving && <div className="rule-menu-sub" role="group" aria-label="Destinations">
         <button role="menuitemradio" aria-checked={menu.row.parentId === null} onClick={() => { onPlace({ type: menu.row.type, id: menu.row.id }, { type: 'folder', id: '' }, 'inside'); close(); }}><span>Top level</span>{menu.row.parentId === null && <span aria-hidden="true">✓</span>}</button>

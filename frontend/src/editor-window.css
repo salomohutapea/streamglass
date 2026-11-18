@@ -82,3 +82,32 @@
   .editor-window-content{padding:10px}.editor-window-content.is-gate{padding:8px 10px}
   .rule-folder-content>.compact-rule-list{padding:0 2px}
 }
+
+.rule-file-actions {
+  display: flex;
+  gap: 8px;
+  margin-right: auto;
+}
+.rule-share-dialog {
+  width: min(520px, calc(100vw - 24px));
+}
+.rule-share-dialog .modal-body > p:first-child {
+  margin-top: 0;
+}
+.rule-share-list {
+  margin-top: 12px;
+  max-height: 38vh;
+  overflow: auto;
+}
+.rule-share-list fieldset {
+  min-width: 0;
+  margin: 0 0 8px;
+}
+.rule-share-list .check {
+  padding: 4px 0;
+  overflow-wrap: anywhere;
+}
+.rule-share-list .check small {
+  display: block;
+  color: var(--muted);
+}
