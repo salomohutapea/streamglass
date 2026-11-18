@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent } from 'react';
 import { ArrowDown, ArrowUp, ChevronRight, Folder, FolderOpen, FolderPlus, ListFilter, MoreHorizontal, Pencil, Plus, Share2, Trash2 } from 'lucide-react';
 import { PopupMenu } from './RuleList';
 import { folderPath, type RuleRow, type TreeRef } from './rule-tree.mjs';
@@ -9,6 +9,7 @@ export type TableFolder = { id: string; name: string; parentId?: string; enabled
 type Row = RuleRow<TableRule, TableFolder>;
 type Zone = 'before' | 'after' | 'inside';
 const dragType = 'application/x-streamglass-rule-row';
+const rowInset = (depth: number) => 8 + depth * 18;
 export const ruleKindDragType = {
   scripts: 'application/x-streamglass-script',
   breakpoints: 'application/x-streamglass-breakpoint',
@@ -47,6 +48,9 @@ export default function RuleTable({ kind, rows, folders, searching, emptyMessage
   };
   const dragProps = (row: Row) => sortable ? {
     draggable: true,
+    style: drop?.id === row.id
+      ? { '--rule-drop-inset': `${rowInset(row.depth + (drop.zone === 'inside' ? 1 : 0))}px` } as CSSProperties
+      : undefined,
     onDragStart: (event: DragEvent) => {
       dragging.current = { type: row.type, id: row.id };
       event.dataTransfer.setData(dragType, `${row.type}:${row.id}`);
@@ -68,7 +72,7 @@ export default function RuleTable({ kind, rows, folders, searching, emptyMessage
   };
   const openMenu = (row: Row, x: number, y: number, opener: HTMLElement | null) => { setMoving(false); setMenu({ x, y, row, opener }); };
   const close = () => setMenu(null);
-  const indent = (depth: number) => ({ paddingLeft: 8 + depth * 18 });
+  const indent = (depth: number) => ({ paddingLeft: rowInset(depth) });
   const form = (depth: number, key: string) => <tr key={key} className="rule-folder-form-row"><td colSpan={7} style={indent(depth)}><form className="rule-folder-inline" onSubmit={event => { event.preventDefault(); onSaveFolder(); }}><Folder size={13} aria-hidden="true"/><input aria-label="Folder name" placeholder="Folder name" autoFocus maxLength={128} value={folderForm?.name ?? ''} onChange={event => folderForm && onFolderForm({ ...folderForm, name: event.target.value })} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onFolderForm(null); } }}/><button type="button" onClick={() => onFolderForm(null)}>Cancel</button><button className="primary" type="submit" disabled={!folderForm?.name.trim()}>{folderForm?.id ? 'Save folder' : 'Create folder'}</button></form></td></tr>;
   const creatingIn = folderForm && !folderForm.id ? folderForm.parentId ?? null : undefined;
 
