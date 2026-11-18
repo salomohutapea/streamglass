@@ -30,7 +30,7 @@ Android apps must trust user-installed CAs. For a debuggable `com.example.app` b
 
 ### Android developer shortcuts
 
-Expand **Developer shortcuts** for an authorized USB phone or wireless debugging. Android 11 and later can pair using **Pair with QR code** and the phone's Wireless debugging settings. Once paired, select **Connect** on the phone. Streamglass uses the Mac LAN address for wireless debugging, or `127.0.0.1` and an adb reverse for USB. It copies the public certificate and opens Security settings; select the CA certificate and confirm installation on the device. Android platform-tools and device debugging authorization are required. Wireless connections also require LAN access and device approval.
+Expand **Developer shortcuts** for an authorized USB phone or wireless debugging. Android 11 and later can pair through the phone’s Wireless debugging settings. Select **Prepare certificate** to copy the public CA and open Security settings. Set the proxy for the current Wi-Fi network using the guide above. USB and wireless ADB assist with certificate setup, and USB can also set up a Metro tunnel. Physical-phone setup leaves Android’s global proxy untouched.
 
 ### Android Emulator
 
@@ -50,7 +50,7 @@ For an emulator, the proxy is `10.0.2.2:<proxy-port>`. An attributed Android emu
 
 **Re-apply when an emulator restarts or adb reconnects** is on by default for previously connected emulators and USB devices. **Revert proxies set by Streamglass when it quits** is also on by default. **Connect new emulators and simulators automatically** is off by default.
 
-**Revert** restores saved Android proxy settings if they still point to the value Streamglass set, removes its own adb reverses, temporary system CA mounts and copied certificate files, returns adbd to non-root if Streamglass rooted it, and keeps saved state if restoration fails. It does not overwrite a proxy changed since connection. **Revert all changes** applies this to managed devices and restores an owned simulator Mac proxy; user-installed Android certificates and simulator certificates remain installed. Manual Wi-Fi proxy settings must be turned off on the phone.
+**Revert all proxies** restores saved Mac and managed Android proxy settings in one action. **Revert** beside an Android device restores that device’s settings, including global settings saved by older versions. After switching networks, connect the phone by USB and retry. Streamglass keeps the restore record if the device is unavailable or Android still has a stale proxy cached. If Android reports a cached proxy after the saved values were cleared, restart the phone. Streamglass preserves independently changed proxies and installed certificates. Turn off any Wi-Fi proxy you entered manually in the phone’s Wi-Fi settings.
 
 ### Troubleshooting
 

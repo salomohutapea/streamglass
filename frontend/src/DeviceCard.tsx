@@ -27,9 +27,10 @@ export default function DeviceCard({ soleProxiedEmulator = false, device, record
   const emulator = android && device.kind === 'emulator';
   const quitNote = options?.revertOnQuit === false ? 'Revert restores it.' : 'Reverted when Streamglass quits.';
   const value = connection?.proxy.value;
-  const proxyText: ReactNode = !connection ? (android ? 'Setting the global proxy…' : 'Turning on this Mac’s proxy…')
+  const physical = android && device.kind === 'physical';
+  const proxyText: ReactNode = !connection ? (physical ? 'Preparing certificate setup…' : android ? 'Setting the emulator proxy…' : 'Turning on this Mac’s proxy…')
     : !android ? <>Mac proxy{value && <> <code>{value}</code></>}. Restored on quit.</>
-    : device.transport === 'usb' ? <>USB tunnel at <code>{value ?? '127.0.0.1'}</code>.</>
+    : physical && !value ? 'Set the proxy for the current Wi-Fi network on the phone.'
     : <>Global proxy <code>{value ?? 'set'}</code>. {quitNote}</>;
   const metroText: ReactNode = connection?.metro.detail && connection.metro.status !== 'ok' ? connection.metro.detail
     : !android ? <><code>localhost:8081</code> is this Mac; nothing to change.</>
@@ -66,9 +67,9 @@ export default function DeviceCard({ soleProxiedEmulator = false, device, record
       <span className="ds-dev-ico"><DeviceIcon kind={heading.icon}/></span>
       <div className="ds-dev-main"><div className="ds-dev-name">{heading.name}<Chips items={heading.chips}/></div><div className="ds-dev-sub">{heading.sub}</div></div>
       <Pills items={view.pills as [string, never][]}/>
-      <div>{connection && !connecting
+      <div>{(connection || android && device.savedProxyId) && !connecting
         ? <button type="button" className="ghost" disabled={busy || !canRevert} onClick={actions.revert}>Revert</button>
-        : <button type="button" className={connecting ? '' : 'primary'} disabled={busy || connecting || !ready || !canConnect} onClick={actions.connect}>{connecting ? 'Connecting…' : 'Connect'}</button>}</div>
+        : <button type="button" className={connecting ? '' : 'primary'} disabled={busy || connecting || !ready || !canConnect} onClick={actions.connect}>{connecting ? 'Connecting…' : physical ? 'Prepare certificate' : 'Connect'}</button>}</div>
     </div>
     {!ready && <p className="ds-note">{android && device.state === 'unauthorized' ? 'Unlock the phone and allow USB debugging, then reconnect.' : 'Start or reconnect the device to continue.'}</p>}
     {showSteps && <div className="ds-steps">

@@ -135,7 +135,7 @@ export default function ConnectDevice({ onDone, platform, onPlatform, lanAddress
   const connectAll = () => void run(async () => { for (const device of automated) if (!device.connection && online(device)) await connect(device); });
   const revertAll = () => void run(async () => {
     const result = await api?.revertAllDevices?.();
-    if (result) { setInventory(result.inventory); setMessage(`${result.message} Manual Wi-Fi proxies must be switched off on the phone.`); }
+    if (result) { setInventory(result.inventory); setMessage(result.message); }
   });
 
   const lanBar = <div className="ds-lan"><WifiIcon/>{lanOn
@@ -154,16 +154,17 @@ export default function ConnectDevice({ onDone, platform, onPlatform, lanAddress
     </div>
     <div id="ds-page" role={top === 'mac' ? undefined : 'tabpanel'} aria-labelledby={top === 'mac' ? undefined : `ds-tab-${platform}`} className="ds-body">
       {message && <p className="ds-message" role="status">{message}</p>}
+      {!!inventory?.pendingAndroidRestores && <Callout>Some Android settings are still saved. After changing networks, reconnect the phone over USB, then choose Revert all proxies.</Callout>}
       {top === 'mac' ? <>{details}<p role="status" className="ds-note">{thisMacSeen ? 'New traffic received from this Mac.' : 'Open an app or page on this Mac to verify capture. Paused capture or a missing proxy setting can hide requests.'}</p></> : <>
         {!inventory && <p className="muted" role="status">{loading ? 'Checking connected devices…' : unavailable}</p>}
         {partial && <p className="muted" role="status">Some device automation is unavailable in this desktop version. The Wi-Fi guide remains available.</p>}
         {real
-          ? <>{lanBar}<RealDevicePage key={top} os={top as 'ios' | 'android'} inventory={inventory} ip={ip} proxyPort={proxyPort} lanOn={lanOn} setupUrl={setupUrl} fingerprint={site?.fingerprint} siteError={site?.error} records={records} baseline={baseline} metro={wifiMetro} lan={lan} onFilterDevice={onFilterDevice}
+          ? <>{lanBar}<RealDevicePage key={top} os={top as 'ios' | 'android'} inventory={inventory} ip={ip} proxyPort={proxyPort} lanOn={lanOn} setupUrl={setupUrl} fingerprint={site?.fingerprint} siteError={site?.error} records={records} baseline={baseline} metro={wifiMetro} lan={lan} onFilterDevice={onFilterDevice} onRevert={api?.disconnectDevice ? device => void run(() => revert(device)) : undefined}
             renderCard={card as (device: AndroidDevice) => ReactNode} pairingQr={pairingQr} canPair={!!api?.startAdbPairing} busy={busy} onPair={startPairing} onCancelPair={() => void run(async () => { await api?.cancelAdbPairing?.(); pairingActive.current = false; setPairingQr(''); })} onShortcutsToggle={open => { if (!open) stopPairing(); }}/></>
           : <><AutomatedPage metroCallout={metroCallout} os={top as 'ios' | 'android'} inventory={inventory} devices={automated} busy={busy} working={!!connectingId} metro={metro} canConnect={!!api?.connectDevice} onConnectAll={connectAll} renderCard={card as (device: Device) => ReactNode}/></>}
         <DeviceOptions inventory={inventory} metro={metro} disabled={busy || !api?.setDeviceOptions} onChange={setOptions} onTlsSettings={onTlsSettings}/>
       </>}
     </div>
-    <div className="connect-nav">{top !== 'mac' && <button type="button" className="ghost" disabled={busy || !api?.revertAllDevices} onClick={revertAll}>Revert all changes</button>}<span className="ds-spacer"/><button type="button" onClick={onDone}>Done</button></div>
+    <div className="connect-nav"><button type="button" className="ghost" disabled={busy || !api?.revertAllDevices} onClick={revertAll}>Revert all proxies</button><span className="ds-spacer"/><button type="button" onClick={onDone}>Done</button></div>
   </div>;
 }

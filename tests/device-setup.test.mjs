@@ -84,9 +84,14 @@ async function fixture(t, deviceFixture = fixtures[0], { lan = true, metro = tru
 for (const f of fixtures) test(`connect/revert command sequence: ${f.transport} ${f.image}`, async t => {
   const x=await fixture(t,f); const original = new Map(x.settings);
   const result=await x.service.connect(x.req); assert.equal(result.ok,true,result.message);
-  assert.equal(result.connection.proxy.value,`${f.transport==='emulator'?'10.0.2.2':f.transport==='usb'?'127.0.0.1':'192.168.1.20'}:9090`);
+  assert.equal(result.connection.proxy.value, f.transport === 'emulator' ? '10.0.2.2:9090' : undefined);
+  if (f.transport !== 'emulator') {
+    assert.equal(result.connection.proxy.status, 'pending');
+    assert.deepEqual(x.settings, original);
+    assert.equal(x.commands.some(args => args.includes('settings') && args.includes('put')), false);
+  }
   assert.equal(result.connection.cert.mode,f.rootable?'system':'user');
-  assert.equal(x.reverses.has('tcp:8081'),f.transport!=='wifi'); assert.equal(x.reverses.has('tcp:9090'),f.transport==='usb');
+  assert.equal(x.reverses.has('tcp:8081'),f.transport!=='wifi'); assert.equal(x.reverses.has('tcp:9090'),false);
   if(f.rootable){ const script=x.commands.find(a=>a.includes('sh'))?.at(-1); assert.match(script,/nsenter/); assert.match(script,/pidof zygote zygote64/); assert.match(script,/mount -t tmpfs/); }
   else { const file=result.connection.cert.file; assert.match(file,/^streamglass-ca-[0-9a-f]{8}\.crt$/); assert.ok(x.commands.some(a=>a.includes(`/sdcard/Download/${file}`))); assert.equal(x.commands.some(a=>a.some(v=>String(v).endsWith('streamglass-ca.cer'))),false); }
   const before=x.commands.length;
@@ -104,7 +109,7 @@ test('API 33 uses system overlay without Conscrypt namespace changes', async t=>
   const x=await fixture(t,fixtures[0],{api:33}); assert.equal((await x.service.connect(x.req)).ok,true);
   const script=x.commands.find(a=>a.includes('sh')).at(-1); assert.match(script,/mount -t tmpfs/); assert.doesNotMatch(script,/nsenter|apex/);
 });
-test('wifi refuses LAN-disabled setup before device mutations',async t=>{const x=await fixture(t,fixtures[3],{lan:false});assert.match((await x.service.connect(x.req)).message,/Enable LAN/);assert.equal(x.commands.some(a=>a.includes('push')||a.includes('put')),false);});
+test('wifi refuses LAN-disabled setup before device mutations',async t=>{const x=await fixture(t,fixtures[3],{lan:false});assert.match((await x.service.connect(x.req)).message,/Enable local network access/);assert.equal(x.commands.some(a=>a.includes('push')||a.includes('put')),false);});
 test('Metro off leaves existing reverses intact and metadata cached',async t=>{
   const x=await fixture(t,fixtures[0],{metro:false,existingReverse:'tcp:8081'});
   await x.service.inventory();await x.service.inventory();assert.equal(x.commands.filter(a=>a.includes('getprop')).length,1);
@@ -126,11 +131,38 @@ test('a conflicting reverse is not overwritten',async t=>{
   const x=await fixture(t,fixtures[0],{existingReverse:'tcp:9999'});const result=await x.service.connect(x.req);assert.equal(result.ok,false);assert.match(result.message,/another tool/);await x.service.disconnect(x.req);assert.equal(x.reverses.get('tcp:8081'),'tcp:9999');
 });
 test('user confirmation and reopen maintain separate proxy and cert states',async t=>{
-  const x=await fixture(t,fixtures[2]);await x.service.connect(x.req);const inv=await x.service.confirm(x.req);assert.equal(inv.android[0].connection.cert.status,'ok');assert.equal(inv.android[0].connection.proxy.status,'ok');
+  const x=await fixture(t,fixtures[2]);await x.service.connect(x.req);const inv=await x.service.confirm(x.req);assert.equal(inv.android[0].connection.cert.status,'ok');assert.equal(inv.android[0].connection.proxy.status,'pending');
   await x.service.reopen(x.req);assert.equal(x.commands.filter(a=>a.includes('push')).length,2);
 });
 test('revertOnQuit false leaves saved proxy and reverse ownership intact',async t=>{
-  const x=await fixture(t,fixtures[2]);await x.service.setOptions({revertOnQuit:false});await x.service.connect(x.req);await x.service.prepareQuit();assert.equal(x.settings.get('http_proxy'),'127.0.0.1:9090');assert.ok(x.state()['android:R5CT1234ABC'].setup);
+  const x=await fixture(t,fixtures[0]);await x.service.setOptions({revertOnQuit:false});await x.service.connect(x.req);await x.service.prepareQuit();assert.equal(x.settings.get('http_proxy'),'10.0.2.2:9090');assert.ok(x.state()['android:emulator-5554'].setup);
+});
+
+test('Revert all finds an older Wi-Fi proxy on the same phone over USB', async t => {
+  const x = await fixture(t, fixtures[2]);
+  const old = 'android:192.0.2.40:43275';
+  x.state()[old] = {
+    http_proxy: ':0', global_http_proxy_host: '', global_http_proxy_port: '0', global_http_proxy_exclusion_list: '',
+    setup: { transport: 'wifi', proxyValue: '192.0.2.20:9090', reverses: [] }
+  };
+  x.settings.set('http_proxy', '192.0.2.20:9090');
+  const inventory = await x.service.inventory();
+  assert.equal(inventory.android[0].hasSavedGlobalProxy, true);
+  assert.equal((await x.service.revertAll()).ok, true);
+  assert.equal(x.settings.has('http_proxy'), false);
+  assert.deepEqual(x.state(), {});
+});
+
+test('Revert all never guesses between two old Wi-Fi snapshots for the same proxy', async t => {
+  const x = await fixture(t, fixtures[2]);
+  const proxyValue = '192.0.2.20:9090';
+  for (const id of ['192.0.2.40:43275', '192.0.2.41:49299']) {
+    x.state()[`android:${id}`] = { http_proxy: ':0', setup: { transport: 'wifi', proxyValue, reverses: [] } };
+  }
+  x.settings.set('http_proxy', proxyValue);
+  assert.equal((await x.service.revertAll()).ok, false);
+  assert.equal(x.settings.get('http_proxy'), proxyValue);
+  assert.equal(Object.keys(x.state()).length, 2);
 });
 
 test('reapply reconnects known devices and auto-connect remains opt-in',async t=>{

@@ -5,6 +5,10 @@ import { parseMdns } from './adb-pairing.mjs';
 import { createAdbPairing } from './adb-pairing.mjs';
 
 const proxyKeys = ['http_proxy', 'global_http_proxy_host', 'global_http_proxy_port', 'global_http_proxy_exclusion_list'];
+const hasNoProxy = snapshot => [':0', '', 'null', undefined].includes(snapshot.http_proxy)
+  && ['', 'null', undefined].includes(snapshot.global_http_proxy_host)
+  && ['0', '', 'null', undefined].includes(snapshot.global_http_proxy_port)
+  && ['', 'null', undefined].includes(snapshot.global_http_proxy_exclusion_list);
 const defaults = { reapply: true, revertOnQuit: true, autoConnect: false, metroMode: 'auto' };
 const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 export function systemCaScript(hash, apiLevel, revert = false) {
@@ -45,12 +49,45 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
     return baseRun(file, args, Math.min(timeout, remaining));
   };
   const retries = new Map(), inflight = new Set();
-  let options, watching = false, timer, stopped = false, ticking = false, previous = new Set(), pairingState;
+  let options, watching = false, timer, stopped = false, ticking = false, previous = new Set(), pairingState, revertGeneration = 0;
   async function getOptions() {
     if (!options) { try { options = { ...defaults, ...JSON.parse(await readFile(optionsPath, 'utf8')) }; } catch (error) { if (error.code !== 'ENOENT') throw error; options = { ...defaults }; } }
     return options;
   }
   const keyOf = (platform, id) => `${platform}:${id}`;
+  const hardwareId = serial => cache.get(serial)?.hardwareId;
+  async function androidRestoreRoutes(adb, state, devices) {
+    const online = devices.filter(device => device.state === 'device');
+    const saved = Object.keys(state).filter(key => key.startsWith('android:'));
+    const routes = new Map();
+    for (const key of saved) {
+      const id = key.slice('android:'.length), identity = state[key].setup?.hardwareId;
+      const exact = online.find(device => device.serial === id && (!identity || hardwareId(id) === identity));
+      if (exact) routes.set(key, exact.serial);
+    }
+    const available = () => online.filter(device => ![...routes.values()].includes(device.serial));
+    for (const key of saved) {
+      const identity = state[key].setup?.hardwareId;
+      if (routes.has(key) || !identity) continue;
+      const samePhone = available().filter(device => device.kind === 'physical' && hardwareId(device.serial) === identity);
+      const match = samePhone.find(device => device.transport === 'usb') ?? samePhone[0];
+      if (match) routes.set(key, match.serial);
+    }
+    // Older Wi-Fi journals have no hardware identity. Recover only a unique journal/phone pair
+    // where the phone is still using that exact Streamglass proxy. Never infer ownership from an IP alone.
+    const legacy = saved.filter(key => !routes.has(key) && !state[key].setup?.hardwareId
+      && state[key].setup?.transport === 'wifi' && state[key].setup.proxyValue);
+    const candidates = available().filter(device => device.kind === 'physical' && device.transport !== 'wifi');
+    if (adb && legacy.length && candidates.length) {
+      const current = await Promise.all(candidates.map(async device => [device.serial,
+        await optional(adb, ['-s', device.serial, 'shell', 'settings', 'get', 'global', 'http_proxy'])]));
+      for (const [serial, proxy] of current) {
+        const matches = legacy.filter(key => state[key].setup.proxyValue === proxy);
+        if (matches.length === 1 && current.filter(([, value]) => value === proxy).length === 1) routes.set(matches[0], serial);
+      }
+    }
+    return routes;
+  }
   async function inventory() {
     const opts = await getOptions(), adb = await adbPath(), savedState = await readState();
     const [androidText, iosText, running, lan] = await Promise.all([
@@ -66,11 +103,22 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
         const props = parseGetprop(await optional(adb, ['-s', row.serial, 'shell', 'getprop']) || '');
         const device = classifyAndroid(row, props);
         const avd = device.kind === 'emulator' ? await optional(adb, ['-s', row.serial, 'emu', 'avd', 'name']) : null;
-        info = { time: now(), device: classifyAndroid(row, props, avd?.split(/\r?\n/).find(s => s && s !== 'OK')) };
+        const identity = [props['ro.serialno'], props['ro.boot.serialno'], device.transport === 'usb' ? row.serial : null]
+          .find(value => validSerial(value) && !/^(unknown|null|0+)$/i.test(value));
+        info = { time: now(), device: classifyAndroid(row, props, avd?.split(/\r?\n/).find(s => s && s !== 'OK')),
+          hardwareId: device.kind === 'physical' ? identity : undefined };
         cache.set(row.serial, info);
       }
-      return { ...(info?.device || classifyAndroid(row)), state: row.state, connection: connections.get(keyOf('android', row.serial)) || savedState[keyOf('android', row.serial)]?.setup?.connection || null };
+      return { ...(info?.device || classifyAndroid(row)), state: row.state };
     }));
+    const routes = await androidRestoreRoutes(adb, savedState, android);
+    const savedBySerial = new Map([...routes].map(([key, serial]) => [serial, key]));
+    for (const device of android) {
+      const key = savedBySerial.get(device.serial);
+      device.savedProxyId = key?.slice('android:'.length);
+      device.hasSavedGlobalProxy = !!key && savedState[key]?.setup?.proxyManaged !== false;
+      device.connection = key ? connections.get(key) || savedState[key]?.setup?.connection || null : null;
+    }
     // mDNS wireless-debugging serials carry no IP; resolve them so the UI can match the phone's LAN traffic.
     const unresolved = android.filter(d => d.transport === 'wifi' && !d.address);
     if (unresolved.length && adb) {
@@ -83,7 +131,8 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
     }
     let iosSimulators = [], simctlAvailable = iosText !== null;
     try { iosSimulators = Object.entries(JSON.parse(iosText || '{}').devices || {}).flatMap(([runtime, devices]) => devices.filter(d => d.state === 'Booted').map(d => ({ udid: d.udid, name: d.name, state: d.state, runtime, connection: connections.get(keyOf('ios-simulator', d.udid)) || null }))); } catch { simctlAvailable = false; }
-    return { adbAvailable: Boolean(adb), simctlAvailable, android, iosSimulators,
+    const pendingAndroidRestores = Object.keys(savedState).filter(key => key.startsWith('android:') && !routes.has(key)).length;
+    return { adbAvailable: Boolean(adb), simctlAvailable, android, iosSimulators, pendingAndroidRestores,
       metro: { running, port: 8081, mode: opts.metroMode }, lan: { ...lan, proxyPort },
       options: { reapply: opts.reapply, revertOnQuit: opts.revertOnQuit, autoConnect: opts.autoConnect }, ...(pairingState ? { pairing: pairingState } : {}) };
   }
@@ -139,22 +188,42 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
       } else {
         const device = inv.android.find(d => d.serial === req.id && d.state === 'device');
         if (!device) throw new Error('Select an authorized online Android device');
-        if (device.transport === 'wifi' && (!inv.lan.enabled || !inv.lan.address)) throw new Error('Enable LAN access and connect this Mac to a network before connecting a wireless Android device');
-        const host = device.kind === 'emulator' ? '10.0.2.2' : device.transport === 'usb' ? '127.0.0.1' : inv.lan.address;
-        if (!/^[a-zA-Z0-9.:-]+$/.test(host)) throw new Error('Invalid proxy host');
+        const managesProxy = device.kind === 'emulator' && /^emulator-\d+$/.test(req.id);
+        if (!managesProxy && (!inv.lan.enabled || !inv.lan.address)) throw new Error('Enable local network access before setting up the phone’s Wi-Fi proxy');
+        const proxyValue = managesProxy ? `10.0.2.2:${proxyPort}` : undefined;
         await publicCert(); await ensureProxyListening();
         const adb = await adbPath();
         const shell = args => run(adb, ['-s', req.id, 'shell', ...args]);
         const state = await readState();
+        if (state[key]?.setup?.hardwareId && state[key].setup.hardwareId !== hardwareId(req.id)) {
+          throw new Error('This ADB address has saved settings for a different phone. Reconnect that phone to restore its proxy.');
+        }
+        const priorKey = device.savedProxyId && keyOf('android', device.savedProxyId);
+        const prior = state[priorKey || key];
+        if (!managesProxy && prior && prior.setup?.proxyManaged !== false) {
+          throw new Error('Revert this phone’s saved global proxy before setting up its Wi-Fi proxy.');
+        }
+        if (priorKey && priorKey !== key && state[priorKey] && !state[key]) {
+          state[key] = state[priorKey];
+          if (state[key].setup) state[key].setup.reverses = [];
+          delete state[priorKey];
+          connections.delete(priorKey);
+        }
         if (!state[key]) {
-          state[key] = Object.fromEntries(await Promise.all(proxyKeys.map(async name => [name, await shell(['settings', 'get', 'global', name])])));
+          state[key] = managesProxy ? Object.fromEntries(await Promise.all(proxyKeys.map(async name => [name, await shell(['settings', 'get', 'global', name])]))) : {};
         }
         const saved = state[key];
-        saved.setup ||= { reverses: [], proxyValue: `${host}:${proxyPort}`, apiLevel: device.apiLevel, desired: req, transport: device.transport };
-        saved.setup.desired = req; saved.setup.proxyValue = `${host}:${proxyPort}`;
+        saved.setup ||= { reverses: [], apiLevel: device.apiLevel };
+        if (hardwareId(req.id)) saved.setup.hardwareId = hardwareId(req.id);
+        saved.setup.transport = device.transport;
+        saved.setup.desired = req; saved.setup.proxyValue = proxyValue; saved.setup.proxyManaged = managesProxy;
         await saveState(state); connections.set(key, connection);
-        await shell(['settings', 'put', 'global', 'http_proxy', saved.setup.proxyValue]);
-        connection.proxy = { status: 'ok', value: saved.setup.proxyValue };
+        if (managesProxy) {
+          await shell(['settings', 'put', 'global', 'http_proxy', proxyValue]);
+          connection.proxy = { status: 'ok', value: proxyValue };
+        } else {
+          connection.proxy = { status: 'pending' };
+        }
         let rooted = false;
         if (device.rootable && device.kind === 'emulator') { // never alter a physical phone's system trust store
           const wasRoot = (await optional(adb, ['-s', req.id, 'shell', 'id', '-u']))?.trim() === '0';
@@ -175,7 +244,7 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
         }
         // Reverses come after `adb root`, which restarts adbd and drops existing reverses.
         const metro = req.metro ?? (inv.metro.mode === 'always' || inv.metro.mode === 'auto' && inv.metro.running);
-        const ports = [...new Set([...(device.transport === 'usb' ? [proxyPort] : []), ...(metro && device.transport !== 'wifi' ? [8081] : [])])];
+        const ports = metro && device.transport !== 'wifi' ? [8081] : [];
         for (const port of ports) {
           const listing = await run(adb, ['-s', req.id, 'reverse', '--list']);
           const existing = listing.split('\n').map(l => l.trim().split(/\s+/)).find(parts => parts.at(-2) === `tcp:${port}`);
@@ -190,7 +259,10 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
         saved.setup.connection = connection; await saveState(state);
       }
       previous.add(key); hasDesired = true; schedule();
-      return { ok: true, connection, message: connection.cert.status === 'pending' ? 'Proxy connected. Install the CA certificate from Downloads, then confirm.' : 'Device connected', inventory: await publish() };
+      const message = connection.proxy.status === 'pending'
+        ? 'Set the proxy for the current Wi-Fi network on the phone. The CA certificate is ready in Downloads.'
+        : connection.cert.status === 'pending' ? 'Proxy connected. Install the CA certificate from Downloads, then confirm.' : 'Device connected';
+      return { ok: true, connection, message, inventory: await publish() };
     } catch (error) {
       if (connections.has(key)) { hasDesired = true; previous.add(key); schedule(); }
       if (connection.proxy.status === 'running') connection.proxy.status = 'error';
@@ -198,35 +270,70 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
       return { ok: false, connection, message: error.message, inventory: await publish() };
     }
   }
-  async function disconnect(req, quiet = false) {
+  async function disconnect(req, quiet = false, inv = null) {
     validate(req);
-    const key = keyOf(req.platform, req.id), state = await readState(), saved = state[key];
+    const requestedKey = keyOf(req.platform, req.id);
+    const state = await readState();
+    let key = requestedKey, target = req.id;
+    if (req.platform === 'android') {
+      inv ||= await inventory();
+      const device = inv.android.find(row => row.state === 'device' && row.savedProxyId
+        && (row.serial === req.id || row.savedProxyId === req.id));
+      if (device) { key = keyOf('android', device.savedProxyId); target = device.serial; }
+      else if (state[requestedKey]) throw new Error('Reconnect the Android device over USB or wireless ADB, then retry Revert. Its saved proxy settings were kept.');
+    }
+    const saved = state[key];
+    if (req.platform === 'android' && !saved) throw new Error('No saved Streamglass settings for this Android device.');
     if (saved && req.platform === 'android') {
       const adb = await adbPath(); if (!adb) throw new Error('adb unavailable; saved configuration retained');
-      const shell = args => run(adb, ['-s', req.id, 'shell', ...args]);
-      const current = await shell(['settings', 'get', 'global', 'http_proxy']);
+      const shell = args => run(adb, ['-s', target, 'shell', ...args]);
+      const current = saved.setup?.proxyManaged === false ? null : await shell(['settings', 'get', 'global', 'http_proxy']);
+      const clearsProxy = saved.setup?.proxyManaged !== false && hasNoProxy(saved);
       // Do not overwrite proxy settings changed since our connect.
-      if (!saved.setup || current === saved.setup.proxyValue) {
-        for (const name of proxyKeys) {
-          const value = saved[name];
-          if (typeof value !== 'string') continue;
-          await shell(value === 'null' ? ['settings', 'delete', 'global', name] : ['settings', 'put', 'global', name, quote(value)]);
+      if (!saved.setup || (saved.setup.proxyManaged !== false && current === saved.setup.proxyValue)) {
+        const identity = hardwareId(target);
+        if (saved.setup && identity && !saved.setup.hardwareId) {
+          saved.setup.hardwareId = identity;
+          await saveState(state);
+        }
+        if (clearsProxy) {
+          // Some Android builds silently refuse writing empty proxy values. Delete the saved fields
+          // in this case, deleting the legacy key last so it cannot reload an old host and port.
+          for (const name of [...proxyKeys.slice(1), proxyKeys[0]]) await shell(['settings', 'delete', 'global', name]);
+        } else {
+          for (const name of proxyKeys) {
+            const value = saved[name];
+            if (typeof value !== 'string') continue;
+            await shell(value === 'null' ? ['settings', 'delete', 'global', name] : ['settings', 'put', 'global', name, quote(value)]);
+          }
+        }
+        const restored = Object.fromEntries(await Promise.all(proxyKeys.map(async name => [name, await shell(['settings', 'get', 'global', name])])));
+        if (clearsProxy ? !hasNoProxy(restored) : proxyKeys.some(name => typeof saved[name] === 'string' && restored[name] !== saved[name])) {
+          throw new Error('Android did not restore the saved proxy settings. Reconnect the device and retry Revert.');
         }
       }
-      for (const port of saved.setup?.reverses || []) {
-        const listing = await run(adb, ['-s', req.id, 'reverse', '--list']);
-        if (listing.split('\n').some(line => { const p = line.trim().split(/\s+/); return p.at(-2) === `tcp:${port}` && p.at(-1) === `tcp:${port}`; })) await run(adb, ['-s', req.id, 'reverse', '--remove', `tcp:${port}`]);
+      if (clearsProxy && saved.setup?.proxyValue && !target.startsWith('emulator-')
+          && (current === saved.setup.proxyValue || ['', ':0', 'null'].includes(current))) {
+        const connectivity = await optional(adb, ['-s', target, 'shell', 'dumpsys', 'connectivity']);
+        const active = connectivity?.match(/^\s*Global proxy:\s*\[([^\]]+)\]\s+(\d+)\b/m);
+        if (active && `${active[1]}:${active[2]}` === saved.setup.proxyValue) {
+          throw new Error('The saved global proxy is off. Android is still using a cached proxy. Restart the phone, then retry Revert.');
+        }
+      }
+      for (const port of key === keyOf('android', target) ? saved.setup?.reverses || [] : []) {
+        const listing = await run(adb, ['-s', target, 'reverse', '--list']);
+        if (listing.split('\n').some(line => { const p = line.trim().split(/\s+/); return p.at(-2) === `tcp:${port}` && p.at(-1) === `tcp:${port}`; })) await run(adb, ['-s', target, 'reverse', '--remove', `tcp:${port}`]);
       }
       const file = saved.setup?.connection?.cert?.file;
       if (typeof file === 'string' && /^streamglass-ca-[0-9a-f]{8}\.crt$/.test(file)) await optional(adb, ['-s', req.id, 'shell', 'rm', '-f', `/sdcard/Download/${file}`]);
       if (saved.setup?.systemCa) {
         const { hash, apiLevel, bootId } = saved.setup.systemCa;
-        const nowBoot = (await optional(adb, ['-s', req.id, 'shell', 'cat', '/proc/sys/kernel/random/boot_id']))?.trim();
+        const nowBoot = (await optional(adb, ['-s', target, 'shell', 'cat', '/proc/sys/kernel/random/boot_id']))?.trim();
         // A reboot already cleared the tmpfs/bind mounts; only the root-owned staging files remain.
         const rebooted = !!bootId && !!nowBoot && bootId !== nowBoot;
         // Mounts and staging files are root-owned; a reboot or another tool may have unrooted adbd.
-        if ((await optional(adb, ['-s', req.id, 'shell', 'id', '-u']))?.trim() !== '0') {
-          await keepingReverses(adb, req.id, () => optional(adb, ['-s', req.id, 'root']));
+        if ((await optional(adb, ['-s', target, 'shell', 'id', '-u']))?.trim() !== '0') {
+          await keepingReverses(adb, target, () => optional(adb, ['-s', target, 'root']));
         }
         if (!rebooted) {
           try { await shell(['sh', '-c', quote(systemCaScript(hash, apiLevel, true))]); }
@@ -234,36 +341,47 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
         }
         await optional(adb, ['-s', req.id, 'shell', 'rm', '-rf', `/data/local/tmp/streamglass-${hash}.0`, `/data/local/tmp/streamglass-ca-${hash}`]);
         // Leave adbd as we found it.
-        if (saved.setup.wasRoot === false) await keepingReverses(adb, req.id, () => optional(adb, ['-s', req.id, 'unroot']), saved.setup.reverses || []);
+        if (saved.setup.wasRoot === false) await keepingReverses(adb, target, () => optional(adb, ['-s', target, 'unroot']), saved.setup.reverses || []);
       }
     } else if (saved?.macOwned) {
       const other = Object.keys(state).some(k => k.startsWith('ios-simulator:') && k !== key);
-      if (!other) await performAction({ action: 'mac-restore-proxy' });
+      if (!other) await performAction({ action: 'mac-restore-proxy', onlyOwned: true, networkOnly: true });
       else { const next = Object.keys(state).find(k => k.startsWith('ios-simulator:') && k !== key); state[next].macOwned = true; await saveState(state); }
       // performAction may have removed Mac entries; reload before saving.
     }
     const latest = await readState(); delete latest[key]; await saveState(latest);
     connections.delete(key);
+    previous.add(keyOf(req.platform, target));
     hasDesired = Object.values(latest).some(value => value?.setup?.desired); schedule();
     return { ok: true, message: req.platform === 'ios-simulator' ? 'Proxy restored. Simulator CA trust remains installed.' : 'Saved configuration restored', ...(quiet ? {} : { inventory: await publish() }) };
   }
   async function revertAll({ quit = false } = {}) {
     const state = await readState(), errors = [];
+    const inv = Object.keys(state).some(key => key.startsWith('android:')) ? await inventory() : null;
     for (const key of Object.keys(state)) {
       if (!key.startsWith('android:') && !key.startsWith('ios-simulator:')) continue;
       if (quit && (!key.startsWith('android:') || !state[key].setup)) continue;
-      try { await disconnect({ platform: key.startsWith('android:') ? 'android' : 'ios-simulator', id: key.slice(key.indexOf(':') + 1) }, quit); } catch (error) { errors.push(error.message); }
+      try { await disconnect({ platform: key.startsWith('android:') ? 'android' : 'ios-simulator', id: key.slice(key.indexOf(':') + 1) }, true, inv); }
+      catch (error) { if (!errors.includes(error.message)) errors.push(error.message); }
+    }
+    if (!quit) {
+      const latest = await readState();
+      if (await macMonitorEnabled() || Object.keys(latest).some(key => key.startsWith('mac:'))) {
+        try { await performAction({ action: 'mac-restore-proxy', onlyOwned: true, networkOnly: true }); }
+        catch (error) { errors.push(error.message); }
+      }
     }
     return { ok: !errors.length, message: errors.join('\n') || 'Saved device settings restored', ...(quit ? {} : { inventory: await publish() }) };
   }
   async function tick() {
     if (stopped || ticking) return;
     ticking = true;
+    const generation = revertGeneration;
     try {
       const inv = await inventory(), opts = await getOptions(), state = await readState();
       const current = new Set([...inv.android.filter(d => d.state === 'device').map(d => `android:${d.serial}`), ...inv.iosSimulators.map(d => `ios-simulator:${d.udid}`)]);
       for (const key of current) {
-        if (stopped) return;
+        if (stopped || generation !== revertGeneration) return;
         if (previous.has(key) || inflight.has(key)) continue;
         const saved = state[key], id = key.slice(key.indexOf(':') + 1), platform = key.startsWith('android:') ? 'android' : 'ios-simulator';
         const device = inv.android.find(d => d.serial === id);
@@ -276,7 +394,7 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
           const tries = (retries.get(key) ?? 0) + 1;
           if (result?.ok || tries >= 5) retries.delete(key); else { retries.set(key, tries); current.delete(key); } // retry on the next tick
         }
-        else if (!saved && opts.autoConnect && (platform === 'ios-simulator' || device?.kind === 'emulator')) await enqueue(async () => (await readState())[key] ? { ok: true } : connect({ platform, id }));
+        else if (!saved && opts.autoConnect && (platform === 'ios-simulator' || device?.kind === 'emulator')) await enqueue(async () => generation !== revertGeneration || (await readState())[key] ? { ok: true } : connect({ platform, id }));
       }
       previous = current;
       if (watching || pairingState) emit(await inventory());
@@ -292,7 +410,8 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
     async watch(on) { if (typeof on !== 'boolean') throw new Error('Expected boolean'); watching = on; await getOptions(); schedule(); if (on) await publish(); },
     // User actions mark the device in flight so a concurrent watcher tick doesn't queue a second connect behind them.
     connect: req => { const key = keyOf(req?.platform, req?.id); inflight.add(key); return enqueue(() => connect(req)).finally(() => { inflight.delete(key); previous.add(key); }); },
-    disconnect: req => { const key = keyOf(req?.platform, req?.id); inflight.add(key); return enqueue(() => disconnect(req)).finally(() => { inflight.delete(key); previous.add(key); }); }, revertAll: () => enqueue(() => revertAll()),
+    disconnect: req => { const key = keyOf(req?.platform, req?.id); inflight.add(key); return enqueue(() => disconnect(req)).finally(() => { inflight.delete(key); previous.add(key); }); },
+    revertAll: () => { revertGeneration++; return enqueue(() => revertAll()); },
     setOptions: patch => enqueue(async () => {
       if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Invalid device options');
       for (const [key, value] of Object.entries(patch)) {

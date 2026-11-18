@@ -442,7 +442,6 @@ async function start() {
       if (checkingQuit && devices) return devices.service;
       devices = { port: settings.proxyPort, service: createDeviceService({
         dataDir, certificatePath: path.join(dataDir, 'mitmproxy/mitmproxy-ca-cert.pem'), proxyPort: settings.proxyPort,
-        getProxyHost: () => lanAddresses()[0] || '127.0.0.1',
         getLanInfo: async () => {
           const response = await fetch(`${bootstrap.baseUrl}/api/state`, { headers: { Authorization: `Bearer ${token}` } });
           if (!response.ok) throw new Error('Cannot read LAN settings');
@@ -631,7 +630,7 @@ async function start() {
       'simulator-certificates': 'Trust the CA for this Mac user and install it in the selected simulator without changing network proxy settings',
       'simulator-install-ca': 'Install the Streamglass CA in the selected simulator',
       'android-install-ca': 'Copy the public CA to the selected Android device and open Settings',
-      'android-enable-proxy': 'Route the selected Android device through Streamglass',
+      'android-enable-proxy': 'Prepare Android capture. For a phone, set the proxy in its Wi-Fi settings.',
       'android-restore-proxy': 'Restore the selected Android device’s saved proxy settings',
       'android-reverse': 'Forward the proxy port (and optionally Metro 8081) from the selected Android device to this Mac with adb reverse',
       'android-reverse-remove': 'Remove the adb reverse forwarding for the selected Android device',

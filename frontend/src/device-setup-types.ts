@@ -9,12 +9,15 @@ export type DeviceConnection = {
 export type AndroidDevice = {
   serial: string; kind: 'emulator' | 'physical'; transport: 'emulator' | 'usb' | 'wifi';
   address?: string | null; // LAN IP of a wireless-debugging phone, when known
+  savedProxyId?: string;
+  hasSavedGlobalProxy?: boolean;
   state: 'device' | 'unauthorized' | 'offline'; name: string; apiLevel: number | null; release: string | null;
   image: 'google_apis' | 'google_play' | 'aosp' | 'unknown'; rootable: boolean; connection: DeviceConnection | null;
 };
 export type IosSimulator = { udid: string; name: string; runtime: string; state: string; connection: DeviceConnection | null };
 export type DeviceInventory = {
   adbAvailable: boolean; simctlAvailable: boolean; android: AndroidDevice[]; iosSimulators: IosSimulator[];
+  pendingAndroidRestores?: number;
   metro: { running: boolean; port: 8081; mode: 'auto' | 'always' | 'off' };
   lan: { enabled: boolean; address: string | null; proxyPort: number; setupUrl: string | null };
   pairing?: { status: 'waiting' | 'paired' | 'connected' | 'error' | 'cancelled'; name?: string; message?: string };

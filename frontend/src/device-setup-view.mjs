@@ -41,7 +41,8 @@ export function describeDevice(device, { evidence, metro = false, connecting = f
   const live = !!connection || connecting; // evidence from an earlier session must not light up a disconnected card
   if (metro) metroKind = live && evidence?.metro ? 'bundle' : !connection ? 'none' : connection.metro.status === 'running' ? 'running' : connection.metro.status === 'error' ? 'failed' : connection.metro.status === 'ok' || connection.metro.status === 'skipped' ? 'ready' : 'waiting';
   const metroTone = { bundle: 'ok', running: 'spin', failed: 'err' }[metroKind] ?? 'idle';
-  const proxyTone = connecting && !connection ? 'spin' : tone(connection?.proxy.status);
+  const manualProxy = 'serial' in device && device.kind === 'physical' && connection?.proxy.status === 'pending';
+  const proxyTone = connecting && !connection ? 'spin' : manualProxy && evidence?.traffic ? 'ok' : tone(connection?.proxy.status);
   const traffic = live && !!evidence?.traffic;
   const state = !connection && !connecting ? 'idle' : active ? 'connecting' : cert === 'tap' || certTone === 'err' || proxyTone === 'err' ? 'partial' : 'connected';
   return {

@@ -7,16 +7,19 @@ import WifiGuide, { type LanApproval } from './WifiGuide';
 type Props = {
   os: 'ios' | 'android'; inventory: DeviceInventory | null; ip: string; proxyPort: number; lanOn: boolean; setupUrl: string; fingerprint?: string | null; siteError?: string;
   records: SetupRecord[]; baseline: number; metro: boolean; lan?: LanApproval; onFilterDevice?(id: string): void;
-  renderCard(device: AndroidDevice): ReactNode; pairingQr: string; canPair: boolean; busy: boolean; onPair(): void; onCancelPair(): void; onShortcutsToggle(open: boolean): void;
+  renderCard(device: AndroidDevice): ReactNode; pairingQr: string; canPair: boolean; busy: boolean; onPair(): void; onCancelPair(): void; onShortcutsToggle(open: boolean): void; onRevert?(device: AndroidDevice): void;
 };
 
 /** Real-device page: the Wi-Fi guide first, and (Android only) collapsed developer shortcuts that automate it over adb. */
 export default function RealDevicePage(props: Props) {
-  const { os, inventory, renderCard, pairingQr, canPair, busy, onPair, onCancelPair, onShortcutsToggle } = props;
+  const { os, inventory, renderCard, pairingQr, canPair, busy, onPair, onCancelPair, onShortcutsToggle, onRevert } = props;
   const wifi = inventory?.android.filter(d => d.kind === 'physical' && d.transport === 'wifi') ?? [];
   const usb = inventory?.android.filter(d => d.kind === 'physical' && d.transport === 'usb') ?? [];
   const pairing = pairingQr && <div className="ds-pairing"><QrCode text={pairingQr} label="Wireless debugging pairing QR code"/><p>On the phone: Developer options → Wireless debugging → Pair device with QR code. Once paired, the phone appears here.</p><button type="button" className="ds-sm" onClick={onCancelPair}>Cancel pairing</button></div>;
   return <>
+    {os === 'android' && onRevert && [...usb, ...wifi].filter(device => device.hasSavedGlobalProxy).map(device =>
+      <div className="ds-ask" key={device.serial}><span><strong>{device.name}</strong> has a saved global proxy.</span><span className="ds-spacer"/>
+        <button type="button" className="ds-sm" disabled={busy} onClick={() => onRevert(device)}>Revert {device.name}</button></div>)}
     <WifiGuide {...props} androidAddresses={wifi.flatMap(device => device.address ? [device.address] : [])}/>
     <p className="ds-note ds-wifi-reset">When finished, turn off any manual Wi-Fi proxy on the phone.</p>
     {os === 'android' && <Section title="Developer shortcuts" hint="Wireless debugging or USB" onToggle={onShortcutsToggle}>
