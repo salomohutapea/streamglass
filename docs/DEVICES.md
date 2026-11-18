@@ -94,6 +94,19 @@ Streamglass does not require administrator rights to run. Certificate setup targ
 
 Where your organization allows it, apps with independent proxy settings can point to `127.0.0.1` and the Streamglass proxy port without changing the system proxy. For example, [Firefox supports manual proxy settings](https://support.mozilla.org/en-US/kb/connection-settings-firefox). This captures that app only, not all Mac or simulator traffic. For system-wide or simulator capture, ask IT to configure the host proxy when your account cannot do so.
 
+### Remote Mac proxy setup for IT
+
+Deploy [`enable-mac-proxy.sh`](../scripts/enable-mac-proxy.sh) as a standalone file. Run it as root in your device management tool or Apple Remote Desktop. The user starts Streamglass and shares its proxy port. IT selects the network service using `/usr/sbin/networksetup -listallnetworkservices`.
+
+```sh
+/bin/bash enable-mac-proxy.sh enable "Wi-Fi" 8080
+/bin/bash enable-mac-proxy.sh disable "Wi-Fi" 8080
+```
+
+The helper checks that the Streamglass engine is listening before enabling HTTP and HTTPS on that service. It refuses to replace different proxy settings, including saved settings that are currently off. The disable command turns off matching HTTP/HTTPS proxies on that service. Run it before stopping Streamglass because IT-managed proxy settings are outside the app's restore controls.
+
+For HTTPS inspection, use the app's certificate trust step or deploy the verified **public CA** from the target Streamglass profile through your organization's [Apple Certificates payload](https://support.apple.com/guide/deployment/certificates-payload-settings-dep91d2eb26/1/web/1.0). The standalone helper only configures the proxy. For physical phones, use the phone's Wi-Fi proxy settings.
+
 ## Local network exposure
 
 LAN access is off by default for new profiles: the proxy listens on `127.0.0.1` only. Profiles that already saved the setting keep it. Turning on **Allow devices on the local network** in Settings → Proxy makes the proxy listen on all interfaces, so use it only on trusted networks and turn it off after use. The management API and MCP server remain loopback-only and token-protected.
