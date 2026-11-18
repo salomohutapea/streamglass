@@ -11,7 +11,7 @@ A new installation starts with the narrowest settings:
 | Setting | Default | Turn on in |
 | --- | --- | --- |
 | LAN access (devices on the network using the proxy) | Off: the proxy listens on `127.0.0.1` only | Settings → Proxy |
-| AI access (MCP server) | Off | Tools → Agent (MCP) |
+| AI access (MCP server) | Off | Settings → Agent (MCP) |
 | HTTPS inspection | No domains | Settings → HTTPS / TLS |
 
 Existing profiles keep their stored values. Turn LAN access and MCP off again when you finish with them.
@@ -59,9 +59,10 @@ Actions that send data elsewhere or widen what Streamglass can read wait for you
 | Change HTTP responses (Map Local, response Rewrite, response and SSE breakpoints) | Creating or changing a response rule that supplies headers, redirects or a body, activating such a rule, or changing a paused HTTP response or SSE event |
 | Unlock HTTPS inspection for more sites (`update_settings` `tlsDomains`) | Any domain is added |
 | Run JavaScript on traffic (`upsert_rule`) | The script is new or changed, or its execution scope changes. The prompt shows all of the script |
+| Transform custom field values (`upsert_custom_field`, `set_productivity_preferences`) | A scripted field is added or changed. The prompt shows the script and its matching locations |
 | Load a configuration workspace | Every time |
 
-MCP refuses patterns such as `*`, `*.com` and `*example.com`. Accepted TLS patterns still require approval. Desktop Settings retain their existing pattern controls. Reading and deleting captures, editing ordinary breakpoint definitions and pausing or stopping the proxy need no prompt. **Rotate token** in Tools → Agent (MCP) disconnects clients and requires them to update their configuration. See [MCP](docs/MCP.md) for authentication and tool limits.
+MCP refuses patterns such as `*`, `*.com` and `*example.com`. Accepted TLS patterns still require approval. Desktop Settings retain their existing pattern controls. Reading and deleting captures, editing ordinary breakpoint definitions and pausing or stopping the proxy need no prompt. **Rotate token** in Settings → Agent (MCP) disconnects clients and requires them to update their configuration. See [MCP](docs/MCP.md) for authentication and tool limits.
 
 ## Certificates and system settings
 

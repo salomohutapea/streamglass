@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {lazy, Suspense, useEffect, useMemo, useRef, useState} from 'react';
 import { confirmAction } from './confirm-dialog';
 import JsonViewer from './JsonViewer';
 import {useCaptureComparison} from './capture-compare';
@@ -9,7 +9,9 @@ import CapturePicker, {EmptyState} from './CapturePicker';
 import {describeView} from './saved-filters.mjs';
 import {CustomFieldsSection} from './CustomFields';
 import {GripVertical,Plus,X,Trash2,TriangleAlert,Route,Layers,Filter,StickyNote,ListChecks,Braces,SearchX} from 'lucide-react';
-import {fieldSources,newField,newLocation,changeSource,isHeaderSource,isDefaultLocation,locationMatches,locationText,pickInto,moveField,moveFieldBy,placeField,orderLike,urlWildcard,type FieldSource} from './custom-fields.mjs';
+import {fieldSources,newField,newLocation,changeSource,isHeaderSource,isDefaultLocation,locationMatches,locationText,pickInto,moveField,moveFieldBy,placeField,orderLike,urlWildcard,withScript,scriptTooLong,FIELD_SCRIPT_LIMIT,FIELD_SCRIPT_TEMPLATE,type FieldSource} from './custom-fields.mjs';
+// Monaco loads only when a field's script editor is first opened.
+const ScriptEditor=lazy(()=>import('./ScriptEditor'));
 
 export const dailyTabs = ['Sessions','Journeys','Custom Fields','Assertions','Repeat','Saved filters','Notes'];
 export type SavedView = {id:string;name:string;filter:string;scope:'url'|'request'|'response'|'event';mode:string;protocols:string[];statuses:number[];contentTypes?:string[];device:string;application:string|null;library:string;conditions?:{joiner:'and'|'or';scope:'url'|'request'|'response'|'event';mode:string;filter:string}[]};
@@ -56,6 +58,7 @@ export default function DailyTools({tab,fieldDraft,api,records,selectedId,server
   const captureReady=!!captureId&&capture?.id===captureId;
   // The field being edited: its active location receives values picked from a capture.
   const [activeField,setActiveField]=useState<{id:string;location:number;pickIds:string[];key:string}>({id:'',location:0,pickIds:[],key:''}),[pickNotice,setPickNotice]=useState('');
+  const [scriptOpen,setScriptOpen]=useState(false);
   const [draggingField,setDraggingField]=useState(''),[fieldDrop,setFieldDrop]=useState<{id:string;after:boolean}|null>(null);
   const draftsSeen=useRef(new Set<string>());
   // Custom fields save one card at a time, so they are left out of the shared Save preferences state.
@@ -79,14 +82,14 @@ export default function DailyTools({tab,fieldDraft,api,records,selectedId,server
   useEffect(()=>{void loadConfig().catch(e=>setError(e.message));void refreshSessions().catch(e=>setError(e.message));},[]);
   useEffect(()=>{if(selectedId)setCaptureId(selectedId);},[selectedId]);
   useEffect(()=>setListQuery(''),[tab]);
-  const closeField=()=>{setPickNotice('');setActiveField({id:'',location:0,pickIds:[],key:''});};
+  const closeField=()=>{setPickNotice('');setScriptOpen(false);setActiveField({id:'',location:0,pickIds:[],key:''});};
   function cancelField(field:any){const saved=savedFieldText(field.id);setConfig((value:any)=>({...value,fields:saved?value.fields.map((f:any)=>f.id===field.id?JSON.parse(saved):f):value.fields.filter((f:any)=>f.id!==field.id)}));closeField();}
   // One card is edited at a time; leaving one with unsaved changes asks first.
   async function leaveField(){const current=configRef.current?.fields.find((f:any)=>f.id===activeRef.current.id);if(!current||!fieldDirty(current))return true;if(!await confirmAction({title:`Discard unsaved changes to ${current.name}?`,confirmLabel:'Discard',cancelLabel:'Keep editing',danger:true}))return false;cancelField(current);return true;}
   function doneField(field:any){if(!fieldDirty(field)){closeField();return;}void act(async()=>{await persistFields(server=>placeField(server,configRef.current.fields,field));closeField();setNotice(`Saved ${field.name}.`);});}
   async function deleteField(field:any){const saved=!!savedFieldText(field.id);if(saved&&!await confirmAction({title:`Delete the custom field ${field.name}?`,confirmLabel:'Delete',danger:true}))return;setConfig((value:any)=>({...value,fields:value.fields.filter((f:any)=>f.id!==field.id)}));if(activeRef.current.id===field.id)closeField();if(saved)void act(async()=>{await persistFields(server=>server.filter(f=>f.id!==field.id));setNotice(`Deleted ${field.name}.`);});}
   function reorderFields(next:any[]){setConfig((value:any)=>({...value,fields:next}));void act(()=>persistFields(server=>orderLike(server,next)));}
-  function activateField(field:any,location=0,pickIds?:string[]){setPickNotice('');setActiveField({id:field.id,location,key:crypto.randomUUID(),pickIds:pickIds??[pickCapture(field)].filter(Boolean) as string[]});}
+  function activateField(field:any,location=0,pickIds?:string[]){setPickNotice('');setScriptOpen(!!field.script);setActiveField({id:field.id,location,key:crypto.randomUUID(),pickIds:pickIds??[pickCapture(field)].filter(Boolean) as string[]});}
   // The picker opens on the main window's selection when this field reads it, otherwise on the newest capture it reads.
   function pickCapture(field:any){const reads=(r:any)=>field.locations.some((l:any)=>!isDefaultLocation(l)&&locationMatches(l,r));const selected=records.find(r=>r.id===selectedId);return selected&&reads(selected)?selected.id:records.find(reads)?.id;}
   // A field started from a request's context menu: add it unsaved, scoped to that API, and open the picker on that capture.
@@ -141,7 +144,7 @@ export default function DailyTools({tab,fieldDraft,api,records,selectedId,server
       return <>
       {!config.fields.length&&<EmptyState icon={Braces} title="Right-click a request, then Add custom field…">No custom fields</EmptyState>}
       <div className="custom-field-list">{config.fields.map((field:any)=>{const unsaved=saved.get(field.id)!==JSON.stringify(field),matches=records.filter(r=>r.fields?.some((f:any)=>f.id===field.id)).length,isNew=!saved.has(field.id),status=isNew?'New':unsaved?'Unsaved':`${matches} ${matches===1?'match':'matches'}`;
-        if(field.id!==activeField.id)return item(field,<button type="button" data-field-id={field.id} className="custom-field-card" aria-label={`Edit field ${field.name}`} {...dragField(field)} onClick={async()=>{if(await leaveField())activateField(field);}}><strong>{field.name}</strong><span className="custom-field-card-locations">{field.locations.map((l:any,i:number)=><span key={i}>{l.method==='*'?'':`${l.method} `}{l.pattern}<span className="muted"> · {locationText(l)}</span></span>)}</span><span className="muted field-matches">{status}</span></button>);
+        if(field.id!==activeField.id)return item(field,<button type="button" data-field-id={field.id} className="custom-field-card" aria-label={`Edit field ${field.name}`} {...dragField(field)} onClick={async()=>{if(await leaveField())activateField(field);}}><strong>{field.name}</strong><span className="custom-field-card-locations">{field.locations.map((l:any,i:number)=><span key={i}>{l.method==='*'?'':`${l.method} `}{l.pattern}<span className="muted"> · {locationText(l)}</span></span>)}</span><span className="muted field-matches">{field.script?'Script · ':''}{status}</span></button>);
         const location=Math.min(activeField.location,field.locations.length-1);
         return item(field,<fieldset className="scenario-rule custom-field-rule active" data-field-id={field.id}><legend>{field.name}</legend>
           <label className="custom-field-name">Name<input aria-label={`Field name ${field.id}`} maxLength={100} value={field.name} onChange={e=>{const name=e.target.value;setField(field.id,f=>({...f,name}));}}/></label>
@@ -156,8 +159,15 @@ export default function DailyTools({tab,fieldDraft,api,records,selectedId,server
           </div>
           <button type="button" className="custom-field-add-location" disabled={field.locations.length>=10} onClick={()=>{setField(field.id,f=>({...f,locations:[...f.locations,newLocation()]}));setActiveField(a=>({...a,location:field.locations.length}));}}><Plus size={13}/>Add location</button>
           <PathPicker key={activeField.key} api={api} records={records} mainSelectionId={selectedId} headers open initialIds={activeField.pickIds} initialSource={field.locations[location]?.source??'response'} onPick={(_,source,path,record)=>{const result=pickInto(field,location,record,source,path);if(!result){setPickNotice('At most 10 locations.');return;}setField(field.id,()=>result.field);setActiveField(a=>({...a,location:result.index}));setPickNotice(result.added?`Added location ${result.index+1}: ${record.method} ${urlWildcard(record.url)} · ${path}`:`Location ${result.index+1}: ${path}`);}}/>
+          {(()=>{const open=scriptOpen||!!field.script,length=(field.script??'').length,over=scriptTooLong(field);return <div className="custom-field-script">
+            <label className="custom-field-script-toggle"><input type="checkbox" checked={open} onChange={e=>{if(e.target.checked){setScriptOpen(true);if(!field.script)setField(field.id,f=>withScript(f,FIELD_SCRIPT_TEMPLATE));}else{setScriptOpen(false);setField(field.id,f=>withScript(f,''));}}}/>Transform values with JavaScript<span className="muted"> (optional)</span></label>
+            {open&&<><p className="muted custom-field-script-help">Runs on this field's extracted values (up to 5 distinct strings, each up to 64 KiB) with <code>context</code> = <code>{'{name, url, method}'}</code>. Return an array of JSON values; return nothing to keep the input, or <code>[]</code> to hide the field. An error shows “unavailable” and hides the original values. Clear the code to turn it off.</p>
+              <Suspense fallback={<p className="muted">Loading editor…</p>}><div className="custom-field-script-editor"><ScriptEditor label={`JavaScript for ${field.name}`} disabled={configBusy} value={field.script??''} onChange={script=>setField(field.id,f=>withScript(f,script))}/></div></Suspense>
+              <pre className="custom-field-script-example" aria-label="Example">{"// Mask all but the last 4 characters\nfunction onCustomField(values, context) {\n  return values.map(v => v.slice(-4).padStart(v.length, '•'));\n}"}</pre>
+              <small className={over?'error-text':'muted'} role={over?'alert':undefined}>{over?`Script is ${length.toLocaleString()} characters; the limit is ${FIELD_SCRIPT_LIMIT.toLocaleString()}.`:`${length.toLocaleString()} / ${FIELD_SCRIPT_LIMIT.toLocaleString()}`}</small></>}
+          </div>;})()}
           {pickNotice&&<p className="muted pick-notice" role="status">{pickNotice}</p>}
-          <div className="lab-actions custom-field-actions"><span className="muted field-matches">{status}</span><button className="primary" disabled={busy||configBusy} onClick={()=>doneField(field)}>{configBusy&&unsaved?'Saving…':'Done'}</button>{unsaved&&<button disabled={configBusy} onClick={()=>cancelField(field)}>Cancel</button>}<button aria-label={`Delete field ${field.name}`} disabled={configBusy} onClick={()=>deleteField(field)}>Delete</button></div>
+          <div className="lab-actions custom-field-actions"><span className="muted field-matches">{status}</span><button className="primary" disabled={busy||configBusy||scriptTooLong(field)} onClick={()=>doneField(field)}>{configBusy&&unsaved?'Saving…':'Done'}</button>{unsaved&&<button disabled={configBusy} onClick={()=>cancelField(field)}>Cancel</button>}<button aria-label={`Delete field ${field.name}`} disabled={configBusy} onClick={()=>deleteField(field)}>Delete</button></div>
         </fieldset>);})}</div>
       <button className="primary custom-field-add" disabled={config.fields.length>=50} onClick={async()=>{if(!await leaveField())return;const field=newField();setConfig((value:any)=>({...value,fields:[...value.fields,field]}));activateField(field,0,[]);}}><Plus size={14}/>Add field</button>
       <section className="daily-section"><h4>Preview</h4>{captureSelect}{preview?.fields?.length?<CustomFieldsSection fields={preview.fields} tab="overview"/>:captureId?<EmptyState icon={SearchX}>No match</EmptyState>:null}</section></>;})()}

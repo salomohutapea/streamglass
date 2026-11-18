@@ -14,7 +14,7 @@ from .service import MAX_BODY, is_sse
 from .sse import exported
 from .sse_status import sse_status
 from .search import search as search_records
-from .custom_fields import evaluate as evaluate_fields
+from .custom_fields import evaluate_full as evaluate_fields_full
 
 
 def create_app(service, *, allow_dev_origin=False, mcp_approval_key=None):
@@ -292,7 +292,8 @@ def create_app(service, *, allow_dev_origin=False, mcp_approval_key=None):
         value = service.records.get(record_id)
         if not value:
             raise web.HTTPNotFound()
-        return web.json_response({"id": record_id, "rev": service.record_revs.get(record_id, 0), "fields": evaluate_fields(service, value, full=True)})
+        revision = service.record_revs.get(record_id, 0)
+        return web.json_response({"id": record_id, "rev": revision, "fields": await evaluate_fields_full(service, value, notify=True)})
 
     async def folder(request):
         """Create, change or delete a rule folder. PATCH takes any of name, parentId (null for the top level), enabled,

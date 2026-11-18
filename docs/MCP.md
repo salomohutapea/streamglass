@@ -1,6 +1,6 @@
 # Streamglass MCP
 
-Streamglass exposes its running capture engine to local MCP clients. MCP is off by default for new installs. Open **Tools → Agent (MCP)** (also in the Tools menu and the command palette), enable the server, and copy its URL and dedicated bearer token. The app must remain open. The token is independent of the engine management token; treat it like a password because it grants access to retained traffic and editing controls.
+Streamglass exposes its running capture engine to local MCP clients. MCP is off by default for new installs. Open **Settings → Agent (MCP)** (also in the Tools menu and the command palette; Settings opens in its own window), enable the server, and copy its URL and dedicated bearer token. The app must remain open. The token is independent of the engine management token; treat it like a password because it grants access to retained traffic and editing controls.
 
 The endpoint is `http://127.0.0.1:48722/mcp`, using the Streamable HTTP transport; every request requires `Authorization: Bearer <token>`. This is standard MCP JSON-RPC over the official SDK, including initialization, capability negotiation, tools/list, tools/call, notifications and session lifecycle. The deprecated HTTP+SSE transport (`/sse` and `/messages`) was removed in 1.0.9; point older client entries at `/mcp` with `type: "http"`. Captured application SSE events are delivered by the `watch_sse_events` tool.
 
@@ -32,7 +32,7 @@ Use the panel's URL if the port differs. Close the client when finished.
 | `list_session_captures`, `get_session_capture` | Browse archived metadata and paginated retained content without changing live traffic |
 | `get_capture_analysis` | Read correlation values, custom field values and pass/fail/pending/unknown assertion results |
 | `get_productivity_preferences`, `set_productivity_preferences` | Read or replace journey/custom-field/assertion/view configuration with revision checks (section `fields`; each field has `id`, `name` and `locations` of `pattern`, `method`, `source`, `path`; older flat fields are migrated). Clients must send `fields`; `watches` is no longer accepted |
-| `list_custom_fields`, `upsert_custom_field`, `delete_custom_field` | Add, replace or remove one custom field: `name` plus 1–10 `locations`, each a URL wildcard `pattern`, `method` (default `*`), `source` and a JSONPath or header-name `path`; values from all matching locations are merged. Omit `id` to create. Edits go through the revision-checked preferences API and engine validation; the Tools window picks them up like any other save |
+| `list_custom_fields`, `upsert_custom_field`, `delete_custom_field` | Add, replace or remove a custom field. Supply its `name`, 1–10 `locations` and optionally `script` defining `onCustomField(values, context)`. Omit `id` to create. Both this tool and `set_productivity_preferences` ask for approval before adding or modifying a scripted field. Edits use the same revision-checked preferences API as the Tools window. See [Custom Fields](DAILY_TOOLS.md#custom-fields) for input and return values |
 | `get_capture_fields` | One capture's custom field values in full (up to 64 KiB each); `list_captures` rows carry them cut at 256 characters |
 | `annotate_capture` | Set a capture note and subtle row highlight |
 | `list_replay_jobs`, `start_replay_job`, `cancel_replay_job` | Run explicit bounded sequential replay and page progress/cancel its own connection; starting requires `confirmSend:true` and your approval in the app |
@@ -84,7 +84,7 @@ Some tools can send traffic or widen what Streamglass can read, so they wait for
 
 Reads, capture deletion, ordinary breakpoint definitions, Block rules, pausing capture and stopping the proxy need no prompt.
 
-Redirect approvals apply to the edit shown in the prompt. Previously remembered server approvals are retained for reference and no longer grant consent. In **Tools → Agent (MCP)**, **Rotate token** invalidates the old token and disconnects clients. Copy the new configuration to reconnect them.
+Redirect approvals apply to the edit shown in the prompt. Previously remembered server approvals are retained for reference and no longer grant consent. In **Settings → Agent (MCP)**, **Rotate token** invalidates the old token and disconnects clients. Copy the new configuration to reconnect them.
 
 MCP only accepts a wildcard as the leading `*.` label, followed by at least two literal labels. This check does not identify multi-label public suffixes. Adding any accepted TLS pattern still requires approval. Desktop Settings retain their existing pattern controls.
 

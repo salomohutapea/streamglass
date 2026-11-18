@@ -128,6 +128,9 @@ def validate(value):
                 raise ValueError("IDs must be unique")
             ids.add(item["id"])
             allowed = {"id", "name", "locations"} if key == "fields" else {"id", "name", "enabled", "pattern", "method", "kind", "path", "source", "eventName", "timeoutMs"} if key == "assertions" else {"id", "name", "filter", "scope", "mode", "protocols", "statuses", "device", "application", "library"}
+            if key == "fields" and "script" in item:
+                allowed.add("script")
+                text(item["script"], "custom field script", 16384, True)
             if key == "views" and "conditions" in item:
                 allowed = allowed | {"conditions"}
             if key == "views" and "contentTypes" in item:

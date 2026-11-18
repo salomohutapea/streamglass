@@ -26,6 +26,7 @@ export function executeScript(input, timeout = 1500) {
 export async function startScriptService(token, { resolveApplication, resolveApplicationIcon } = {}) {
   let active = 0;
   let lookups = 0;
+  let formatting = false;
   const server = http.createServer(async (req, res) => {
     const supplied = Buffer.from(req.headers.authorization || '');
     const expected = Buffer.from(`Bearer ${token}`);
@@ -37,15 +38,16 @@ export async function startScriptService(token, { resolveApplication, resolveApp
     const application = req.url === '/application' && resolveApplication;
     const icon = req.url === '/application-icon' && resolveApplicationIcon;
     const lookup = application || icon;
-    if (req.method !== 'POST' || (!lookup && req.url !== '/execute') || req.headers.origin) return send(404, { error: 'Not found' });
-    if (lookup ? lookups >= 16 : active >= 4) return send(429, { error: 'Worker capacity reached' });
-    if (lookup) lookups++; else active++;
+    const field = req.url === '/custom-field';
+    if (req.method !== 'POST' || (!lookup && !field && req.url !== '/execute') || req.headers.origin) return send(404, { error: 'Not found' });
+    if (lookup ? lookups >= 16 : field ? formatting : active >= 4) return send(429, { error: 'Worker capacity reached' });
+    if (lookup) lookups++; else if (field) formatting = true; else active++;
     try {
       const chunks = [];
       let size = 0;
       for await (const chunk of req) {
         size += chunk.length;
-        if (size > (lookup ? 8192 : 8 * 1024 * 1024)) { send(413, { error: 'Input exceeds size limit' }); req.destroy(); return; }
+        if (size > (lookup ? 8192 : field ? 3 * 1024 * 1024 : 8 * 1024 * 1024)) { send(413, { error: 'Input exceeds size limit' }); req.destroy(); return; }
         chunks.push(chunk);
       }
       const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
@@ -59,11 +61,14 @@ export async function startScriptService(token, { resolveApplication, resolveApp
             ![input.clientPort, input.proxyPort].every(port => Number.isInteger(port) && port > 0 && port <= 65535)) return send(400, { error: 'Invalid client connection' });
         return send(200, await resolveApplication(input));
       }
-      if (typeof input.source !== 'string' || input.source.length > 128 * 1024 || !['onRequest', 'onResponse', 'onEvent'].includes(input.hook)) return send(400, { error: 'Invalid script or hook' });
+      const hooks = field ? ['onCustomField'] : ['onRequest', 'onResponse', 'onEvent'];
+      if (typeof input.source !== 'string' || input.source.length > (field ? 16384 : 128 * 1024) || !hooks.includes(input.hook)) return send(400, { error: 'Invalid script or hook' });
+      if (field && (!Array.isArray(input.values) || input.values.length > 5 ||
+          !input.values.every(value => typeof value === 'string' && [...value].length <= 65536))) return send(400, { error: 'Invalid custom field values' });
       send(200, await executeScript(input));
     } catch (error) {
       send(422, { error: error.message });
-    } finally { if (lookup) lookups--; else active--; }
+    } finally { if (lookup) lookups--; else if (field) formatting = false; else active--; }
   });
   server.requestTimeout = 5000;
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });

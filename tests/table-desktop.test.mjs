@@ -146,9 +146,13 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await openSidebar(page);
     assert.equal(await page.getByRole('button', { name: 'Devices', exact: true }).getAttribute('aria-expanded'), 'false');
     await openSidebar(page);
+    const setupOpened = app.waitForEvent('window');
     await page.getByRole('button', { name: 'Connect a device', exact: true }).click();
-    await page.getByRole('dialog', { name: 'Connect a device' }).waitFor();
-    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    const setupWindow = await setupOpened;
+    await setupWindow.getByRole('main', { name: 'Connect a device' }).waitFor();
+    const setupClosed = setupWindow.waitForEvent('close');
+    await setupWindow.getByRole('button', { name: 'Done', exact: true }).click();
+    await setupClosed;
     await openSidebar(page);
     await page.getByRole('button', { name: 'Devices', exact: true }).click();
     await openSidebar(page);
@@ -465,8 +469,9 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
       });
     });
     await openSidebar(page);
+    const deviceSetupOpened = app.waitForEvent('window');
     await page.getByRole('button', { name: 'Connect device', exact: true }).click();
-    const setup = page.getByRole('dialog');
+    const setup = await deviceSetupOpened;
     await setup.getByRole('button', { name: 'Next', exact: true }).click();
     const proxyAddress = setup.getByRole('region', { name: 'HTTP proxy address', exact: true });
     assert.equal(await proxyAddress.getByRole('textbox', { name: 'Proxy IP address', exact: true }).inputValue(), '127.0.0.1');
@@ -500,13 +505,13 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     assert.equal(await setup.getByRole('button', { name: 'Enable Mac capture', exact: true }).count(), 0);
     assert.equal(await setup.getByRole('button', { name: 'Install certificate', exact: true }).count(), 0);
     await prepare.click();
-    await page.waitForFunction(() => document.querySelector('.setup-output')?.textContent === 'Fixture device action complete');
+    await setup.waitForFunction(() => document.querySelector('.setup-output')?.textContent === 'Fixture device action complete');
     assert.equal(await simulator.inputValue(), 'sim-booted');
     assert.equal(await setup.getByRole('button', { name: 'Disable Mac capture', exact: true }).isDisabled(), false);
     await simulator.selectOption('sim-stopped');
     assert.equal(await prepare.isDisabled(), true);
     await setup.getByRole('button', { name: 'Disable Mac capture', exact: true }).click();
-    await page.waitForFunction(() => [...document.querySelectorAll('dialog button')].find(button => button.textContent === 'Disable Mac capture')?.disabled);
+    await setup.waitForFunction(() => [...document.querySelectorAll('.connect-device button')].find(button => button.textContent === 'Disable Mac capture')?.disabled);
     assert.deepEqual(await app.evaluate(() => globalThis.streamglassTestDeviceActions), [
       { action: 'simulator-prepare', target: 'sim-booted', networkTarget: '' }, { action: 'mac-restore-proxy', target: '', networkTarget: undefined },
     ]);
@@ -514,7 +519,9 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await setup.getByText('Certificate-only setup for a managed Mac', { exact: true }).click();
     await setup.getByRole('button', { name: 'Install certificates only', exact: true }).click();
     assert.deepEqual((await app.evaluate(() => globalThis.streamglassTestDeviceActions)).at(-1), { action: 'simulator-certificates', target: 'sim-booted', networkTarget: undefined });
-    await setup.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    const deviceSetupClosed = setup.waitForEvent('close');
+    await setup.getByRole('button', { name: 'Done', exact: true }).click();
+    await deviceSetupClosed;
     if (process.env.STREAMGLASS_TEST_TABLE_SCREENSHOT) await page.screenshot({ path: process.env.STREAMGLASS_TEST_TABLE_SCREENSHOT });
     if (process.env.STREAMGLASS_TEST_HEADER_SCREENSHOT) {
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(win => !win.webContents.getURL().includes('editor=') && !win.webContents.getURL().includes('record='))?.setContentSize(900, 700));

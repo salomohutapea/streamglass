@@ -80,7 +80,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     await brandLogo.waitFor();
     await eventually(() => brandLogo.evaluate(image => image.complete && image.naturalWidth > 0), 'Brand logo did not render');
     const bootstrap = await page.evaluate(() => window.streamglass.getBootstrap());
-    // MCP is off by default; the user enables it in Tools → Agent (MCP).
+    // MCP is off by default; the user enables it in Settings → Agent (MCP).
     assert.equal((await page.evaluate(() => window.streamglass.getMcpConnection())).running, false);
     const mcp = await page.evaluate(() => window.streamglass.setMcpEnabled(true));
     assert.equal(mcp.running, true, mcp.error);
@@ -120,12 +120,20 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     }
     await openSidebar(page);
     await page.getByRole('button', { name: '2 domains', exact: false }).waitFor();
+    // Settings opens in its own window; Agent (MCP) is one of its sections.
+    const settingsOpened = app.waitForEvent('window');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    const domains = page.locator('[data-domain-row]');
-    assert.equal((await page.evaluate(() => window.streamglass.getMcpConnection())).token, mcp.token);
+    const settings = await settingsOpened;
+    await settings.getByRole('button', { name: 'HTTPS / TLS', exact: true }).click();
+    const domains = settings.locator('[data-domain-row]');
+    await domains.first().waitFor();
+    assert.equal((await settings.evaluate(() => window.streamglass.getMcpConnection())).token, mcp.token);
     assert.deepEqual(await domains.evaluateAll(inputs => inputs.map(input => input.value)), ['one.example', 'two.example']);
-    await page.getByRole('button', { name: 'Save settings', exact: true }).click();
-    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    await settings.getByRole('button', { name: 'Agent (MCP)', exact: true }).click();
+    await settings.getByRole('button', { name: 'Disable MCP server', exact: true }).waitFor();
+    const settingsClosed = settings.waitForEvent('close');
+    await settings.getByRole('button', { name: 'Save settings', exact: true }).click();
+    await settingsClosed;
     assert.deepEqual((await api('/api/state')).settings.tlsDomains, ['one.example', 'two.example']);
 
     let editorOpened = app.waitForEvent('window');

@@ -73,7 +73,7 @@ export default function Onboarding({ onClose }: { onClose: (walkthrough?: boolea
     { title: 'Connect', text: 'Pick a device and turn on capture.', note: 'This Mac and simulators take one click. Phones scan a QR code, and you approve each new device once.' },
     { title: 'Trust the certificate', text: 'HTTPS stays encrypted until you trust the Streamglass certificate and add the domain to inspect.', note: 'On iPhone, also turn on full trust in Settings → General → About → Certificate Trust Settings.' },
     { title: tools[tool][0], text: tools[tool][1], note: 'The inspector is read-only. Breakpoints and scripts open in their own windows.' },
-    { title: 'Let your AI drive', text: 'A local MCP server lets your coding agent search and inspect captures.', note: 'Turn it on in Tools → Agent (MCP). It listens on 127.0.0.1, needs a token, and asks before it sends or changes traffic.' },
+    { title: 'Let your AI drive', text: 'A local MCP server lets your coding agent search and inspect captures.', note: 'Turn it on in Settings → Agent (MCP). It listens on 127.0.0.1, needs a token, and asks before it sends or changes traffic.' },
   ];
   const last = step === copy.length - 1;
   const current = copy[step];

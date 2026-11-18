@@ -17,7 +17,6 @@ export type AndroidDevice = {
 export type IosSimulator = { udid: string; name: string; runtime: string; state: string; connection: DeviceConnection | null };
 export type DeviceInventory = {
   adbAvailable: boolean; simctlAvailable: boolean; android: AndroidDevice[]; iosSimulators: IosSimulator[];
-  pendingAndroidRestores?: number;
   metro: { running: boolean; port: 8081; mode: 'auto' | 'always' | 'off' };
   lan: { enabled: boolean; address: string | null; proxyPort: number; setupUrl: string | null };
   pairing?: { status: 'waiting' | 'paired' | 'connected' | 'error' | 'cancelled'; name?: string; message?: string };

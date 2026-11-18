@@ -69,7 +69,7 @@ c.commit()`,path.join(directory,'captures.sqlite3'),String(proxyPort)],{input:JS
     assert.equal((await api('/api/productivity')).config.fields[0].name,'Search ID');
     await panel.getByLabel('Daily tools capture').selectOption('initial');
     await panel.getByRole('region',{name:'Custom fields'}).getByText('synthetic-search',{exact:true}).waitFor();
-    // The table gains a Fields column with the value, and the inspector shows it above the content.
+    // The table gains a Custom Fields column with the value, and the inspector shows it above the content.
     await page.locator('.traffic tbody tr').filter({hasText:'/initial'}).locator('.field-chip').filter({hasText:'synthetic-search'}).first().waitFor();
     await page.locator('.inspector').getByRole('region',{name:'Custom fields'}).getByText('synthetic-search',{exact:true}).waitFor();
     await panel.getByRole('button',{name:'Add field',exact:true}).click();

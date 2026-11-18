@@ -131,8 +131,7 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
     }
     let iosSimulators = [], simctlAvailable = iosText !== null;
     try { iosSimulators = Object.entries(JSON.parse(iosText || '{}').devices || {}).flatMap(([runtime, devices]) => devices.filter(d => d.state === 'Booted').map(d => ({ udid: d.udid, name: d.name, state: d.state, runtime, connection: connections.get(keyOf('ios-simulator', d.udid)) || null }))); } catch { simctlAvailable = false; }
-    const pendingAndroidRestores = Object.keys(savedState).filter(key => key.startsWith('android:') && !routes.has(key)).length;
-    return { adbAvailable: Boolean(adb), simctlAvailable, android, iosSimulators, pendingAndroidRestores,
+    return { adbAvailable: Boolean(adb), simctlAvailable, android, iosSimulators,
       metro: { running, port: 8081, mode: opts.metroMode }, lan: { ...lan, proxyPort },
       options: { reapply: opts.reapply, revertOnQuit: opts.revertOnQuit, autoConnect: opts.autoConnect }, ...(pairingState ? { pairing: pairingState } : {}) };
   }
@@ -357,11 +356,25 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
   }
   async function revertAll({ quit = false } = {}) {
     const state = await readState(), errors = [];
-    const inv = Object.keys(state).some(key => key.startsWith('android:')) ? await inventory() : null;
+    const inv = Object.entries(state).some(([key, value]) => key.startsWith('android:') && (!quit || value.setup))
+      ? await inventory() : null;
+    let hasUnmatchedAndroid = false;
+    const deferredTargets = [];
     for (const key of Object.keys(state)) {
-      if (!key.startsWith('android:') && !key.startsWith('ios-simulator:')) continue;
-      if (quit && (!key.startsWith('android:') || !state[key].setup)) continue;
-      try { await disconnect({ platform: key.startsWith('android:') ? 'android' : 'ios-simulator', id: key.slice(key.indexOf(':') + 1) }, true, inv); }
+      const android = key.startsWith('android:');
+      if (!android && !key.startsWith('ios-simulator:')) continue;
+      if (quit && !android) continue;
+      if (quit && !state[key].setup) {
+        deferredTargets.push(key);
+        continue;
+      }
+      const id = key.slice(key.indexOf(':') + 1);
+      if (android && !inv?.android.some(device => device.state === 'device' && device.savedProxyId === id)) {
+        if (quit) deferredTargets.push(key);
+        else hasUnmatchedAndroid = true;
+        continue;
+      }
+      try { await disconnect({ platform: android ? 'android' : 'ios-simulator', id }, true, inv); }
       catch (error) { if (!errors.includes(error.message)) errors.push(error.message); }
     }
     if (!quit) {
@@ -371,7 +384,11 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
         catch (error) { errors.push(error.message); }
       }
     }
-    return { ok: !errors.length, message: errors.join('\n') || 'Saved device settings restored', ...(quit ? {} : { inventory: await publish() }) };
+    if (hasUnmatchedAndroid) {
+      errors.push('Unmatched Android restore records were kept. If a phone still uses a Streamglass proxy, connect it by USB and retry.');
+    }
+    return { ok: !errors.length, message: errors.join('\n') || 'Saved device settings restored',
+      ...(quit ? { deferredTargets } : { inventory: await publish() }) };
   }
   async function tick() {
     if (stopped || ticking) return;
@@ -432,7 +449,15 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
     reopen: req => enqueue(async () => { validate(req); if (req.platform !== 'android' || !(await inventory()).android.some(d => d.serial === req.id && d.state === 'device')) throw new Error('Select an online Android device'); await installer(await adbPath(), req.id); }),
     startPairing: () => pairing.start(), cancelPairing: () => { pairing.cancel(); pairingState = { status: 'cancelled' }; void publish().catch(() => {}); },
     async start() { stopped = false; deadline = Infinity; await getOptions(); hasDesired = Object.values(await readState()).some(value => value?.setup?.desired); schedule(); },
-    async prepareQuit() { stopped = true; clearInterval(timer); pairing.cancel(); deadline = Date.now() + 6000; if ((await getOptions()).revertOnQuit) return revertAll({ quit: true }); return { ok: true, message: '' }; },
+    async prepareQuit() {
+      stopped = true;
+      clearInterval(timer);
+      pairing.cancel();
+      deadline = Date.now() + 6000;
+      if ((await getOptions()).revertOnQuit) return revertAll({ quit: true });
+      const deferredTargets = Object.keys(await readState()).filter(key => key.startsWith('android:'));
+      return { ok: true, message: '', deferredTargets };
+    },
     dispose() { stopped = true; clearInterval(timer); pairing.cancel(); },
   };
 }

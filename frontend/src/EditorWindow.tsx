@@ -30,7 +30,7 @@ async function onEvent(context, url, request, event) {
 }`;
 const scriptLimit = 100000;
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
-const newRule = (): Rule => ({ id: crypto.randomUUID(), name: '', enabled: true, pattern: '*', method: '*', stages: ['request'], breakpoint: mode !== 'scripts', ...(mode === 'scripts' ? { script: scriptTemplate } : {}) });
+const newRule = (): Rule => ({ id: crypto.randomUUID(), name: '', enabled: true, pattern: '*', method: '*', stages: mode === 'scripts' ? ['request'] : ['request', 'response'], breakpoint: mode !== 'scripts', ...(mode === 'scripts' ? { script: scriptTemplate } : {}) });
 
 export default function EditorWindow() {
   const [connection, setConnection] = useState<Connection | null>(null);

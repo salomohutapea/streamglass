@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AndroidDevice, DeviceInventory, DeviceRequest, IosSimulator, SetupSite } from './device-setup-types';
 import { type SetupRecord } from './device-setup-evidence.mjs';
-import { Callout, Segmented, SubTabs, WifiIcon } from './device-setup-ui';
+import { AnimatedHeight, Callout, Segmented, SubTabs, WifiIcon } from './device-setup-ui';
 import DeviceCard from './DeviceCard';
 import AutomatedPage from './AutomatedPage';
 import RealDevicePage from './RealDevicePage';
 import DeviceOptions from './DeviceOptions';
+import ThisMacPage, { type ThisMacSetup } from './ThisMacPage';
 import type { LanApproval } from './WifiGuide';
 import './connect-device.css';
 
@@ -15,13 +16,13 @@ export { QrCode } from './device-setup-ui';
 const unavailable = 'Device automation is not available in this desktop version. You can still use the Wi-Fi guide.';
 type Device = AndroidDevice | IosSimulator;
 type Platform = 'mac' | 'ios' | 'android';
-type Props = { initialStep?: number; onDone(): void; platform: string; onPlatform(key: string): void; lanAddresses: string[]; port: number; lanEnabled: boolean; records: SetupRecord[]; details: ReactNode; lan?: LanApproval; onTlsSettings?(): void; onFilterDevice?(id: string): void };
+type Props = { initialStep?: number; onDone(): void; platform: string; onPlatform(key: string): void; lanAddresses: string[]; port: number; lanEnabled: boolean; records: SetupRecord[]; mac: ThisMacSetup; lan?: LanApproval; onMacProxiesReverted(): Promise<void>; onTlsSettings?(): void; onFilterDevice?(id: string): void };
 const deviceId = (device: Device) => 'serial' in device ? device.serial : device.udid;
 const requestFor = (device: Device): DeviceRequest => ({ platform: 'serial' in device ? 'android' : 'ios-simulator', id: deviceId(device) });
 const online = (device: Device) => 'serial' in device ? device.state === 'device' : device.state === 'Booted';
 const platformFor = (page: string): Platform => page === 'mac' ? 'mac' : page.startsWith('ios') ? 'ios' : 'android';
 
-export default function ConnectDevice({ onDone, platform, onPlatform, lanAddresses, port, lanEnabled, records, details, lan, onTlsSettings, onFilterDevice }: Props) {
+export default function ConnectDevice({ onDone, platform, onPlatform, lanAddresses, port, lanEnabled, records, mac, lan, onMacProxiesReverted, onTlsSettings, onFilterDevice }: Props) {
   const top = platformFor(platform);
   const [inventory, setInventory] = useState<DeviceInventory | null>(null);
   const [notice, setNotice] = useState<{ page: string; text: string } | null>(null);
@@ -135,7 +136,11 @@ export default function ConnectDevice({ onDone, platform, onPlatform, lanAddress
   const connectAll = () => void run(async () => { for (const device of automated) if (!device.connection && online(device)) await connect(device); });
   const revertAll = () => void run(async () => {
     const result = await api?.revertAllDevices?.();
-    if (result) { setInventory(result.inventory); setMessage(result.message); }
+    if (result) {
+      setInventory(result.inventory);
+      setMessage(result.message);
+      if (top === 'mac') await onMacProxiesReverted();
+    }
   });
 
   const lanBar = <div className="ds-lan"><WifiIcon/>{lanOn
@@ -143,19 +148,17 @@ export default function ConnectDevice({ onDone, platform, onPlatform, lanAddress
     : <><span>Real devices reach Streamglass over Wi-Fi. Local network access is off.{ip ? <> This Mac: <code>{ip}</code></> : ' Join the same Wi-Fi network as the phone to get a LAN address.'}</span><span className="ds-spacer"/><button type="button" className="primary ds-sm" disabled={busy || !api?.setupSite} onClick={turnOnLan}>Turn on</button></>}</div>;
   const metroCallout = metro && <Callout tone="info">{inventory?.metro.running ? 'React Native detected: Metro is running' : 'Metro steps are enabled; waiting for Metro'} on <code>:8081</code>. Connected devices can load the JS bundle from this Mac.</Callout>;
   const partial = !!inventory && (!api?.connectDevice || !api?.disconnectDevice || !api?.watchDevices || !api?.onDeviceInventory);
-  const thisMacSeen = records.some(record => record.clientIsLocal && !record.deviceId && (typeof record.startedAt === 'number' ? record.startedAt < 1e12 ? record.startedAt * 1000 : record.startedAt : Date.parse(record.startedAt ?? '')) >= baseline);
   const platforms = [{ id: 'mac', label: 'This Mac' }, { id: 'ios', label: 'iOS' }, { id: 'android', label: 'Android' }] as const;
   const pages = top === 'ios' ? [{ id: 'iosDevice', label: 'Real device' }, { id: 'iosSimulator', label: 'Simulator' }] : [{ id: 'androidDevice', label: 'Real device' }, { id: 'androidEmulator', label: 'Emulator' }];
 
-  return <div className="connect-device">
+  return <div className="connect-device"><div className="ds-scroll"><AnimatedHeight>
     <div className="ds-navigation">
       {top !== 'mac' && <SubTabs label={`${top === 'ios' ? 'iOS' : 'Android'} device type`} value={platform} items={pages} onChange={changePlatform}/>}
       <div className="ds-platforms"><Segmented label="Platform" value={top} items={[...platforms]} onChange={value => changePlatform(value === 'mac' ? 'mac' : value === 'ios' ? 'iosDevice' : 'androidDevice')}/></div>
     </div>
     <div id="ds-page" role={top === 'mac' ? undefined : 'tabpanel'} aria-labelledby={top === 'mac' ? undefined : `ds-tab-${platform}`} className="ds-body">
-      {message && <p className="ds-message" role="status">{message}</p>}
-      {!!inventory?.pendingAndroidRestores && <Callout>Some Android settings are still saved. After changing networks, reconnect the phone over USB, then choose Revert all proxies.</Callout>}
-      {top === 'mac' ? <>{details}<p role="status" className="ds-note">{thisMacSeen ? 'New traffic received from this Mac.' : 'Open an app or page on this Mac to verify capture. Paused capture or a missing proxy setting can hide requests.'}</p></> : <>
+      {top !== 'mac' && message && <p className="ds-message" role="status">{message}</p>}
+      {top === 'mac' ? <ThisMacPage {...mac} records={records} port={port} baseline={baseline} busy={busy || mac.busy} onTlsSettings={onTlsSettings}/> : <>
         {!inventory && <p className="muted" role="status">{loading ? 'Checking connected devices…' : unavailable}</p>}
         {partial && <p className="muted" role="status">Some device automation is unavailable in this desktop version. The Wi-Fi guide remains available.</p>}
         {real
@@ -164,7 +167,9 @@ export default function ConnectDevice({ onDone, platform, onPlatform, lanAddress
           : <><AutomatedPage metroCallout={metroCallout} os={top as 'ios' | 'android'} inventory={inventory} devices={automated} busy={busy} working={!!connectingId} metro={metro} canConnect={!!api?.connectDevice} onConnectAll={connectAll} renderCard={card as (device: Device) => ReactNode}/></>}
         <DeviceOptions inventory={inventory} metro={metro} disabled={busy || !api?.setDeviceOptions} onChange={setOptions} onTlsSettings={onTlsSettings}/>
       </>}
+      {top === 'mac' && message && <p className="ds-mac-notice" role="status">{message}</p>}
     </div>
-    <div className="connect-nav"><button type="button" className="ghost" disabled={busy || !api?.revertAllDevices} onClick={revertAll}>Revert all proxies</button><span className="ds-spacer"/><button type="button" onClick={onDone}>Done</button></div>
+  </AnimatedHeight></div>
+    <div className="connect-nav"><button type="button" className="ghost" disabled={busy || mac.busy || !api?.revertAllDevices} onClick={revertAll}>Revert all proxies</button><span className="ds-spacer"/><button type="button" onClick={onDone}>Done</button></div>
   </div>;
 }

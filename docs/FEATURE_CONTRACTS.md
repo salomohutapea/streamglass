@@ -43,6 +43,7 @@ These controls came from the 2026-10-29 hardening. Keep them when changing proxy
 ## Device setup
 
 - `ConnectDevice.tsx` presents This Mac, iOS and Android; platform tabs default to the real-device guide, while explicit simulator/emulator links remain available. Manual phone setup uses the LAN proxy and certificate QR page with inline approval and separate HTTPS, Metro and traffic evidence. Installation confirmation is not proof of HTTPS trust.
+- This Mac shows the saved monitoring state, the applied HTTP/HTTPS proxy, and observed Mac traffic separately. It checks the active public CA's SHA-256 fingerprint in Keychain and asks macOS to evaluate SSL trust. A failed status lookup leaves the result unknown.
 - `device-setup.mjs` saves Android global proxy settings before setting the emulator alias, USB loopback or wireless LAN address. It journals owned reverses, temporary system CA mounts, the hash-named copied `.crt` and whether it rooted adbd for Revert; reverses are created after `adb root`, which drops them; changed external proxy settings are not overwritten. Rootable images get temporary system trust; other devices require user installation. Simulator Connect installs the public root certificate and enables Mac monitoring; Revert leaves simulator trust installed and restores an owned Mac proxy when no other simulator needs it.
 - Metro defaults to auto, probing `127.0.0.1:8081/status`; always and off override display and setup. Android emulator and USB connections add a Metro reverse when enabled; Wi-Fi uses the LAN route. Reapply defaults on for emulator and USB reconnects, revert on quit defaults on for adb setups, and auto-connect for new emulators and simulators defaults off. Manual Wi-Fi proxies cannot be reverted by Streamglass.
 
@@ -67,7 +68,7 @@ When the engine terminates TLS (SSL inspection) and a handshake fails, `tls_fail
 
 ## Pause, rules, and gates
 
-Scripts run before the matching breakpoint presents the resulting message. Request, response, and event stages have distinct edit capabilities: an event cannot change HTTP status or headers already sent.
+Scripts run before the matching breakpoint presents the resulting message. Request, response, and event stages have distinct edit capabilities: an event cannot change HTTP status or headers already sent. New breakpoints created in the Breakpoints editor pause at request and response by default; scripts default to request. Saved rules and explicit MCP `stages` are unchanged.
 
 Breakpoint gates have no timeout. They wait until continued or dropped by the user or MCP, released by pausing capture, or ended by proxy stop, client disconnect or app quit. All pending gates are shown in a single Breakpoints window (oldest first, live wait time); resolving one selects the next, and the window closes about 2.5 seconds after its last gate is resolved if no new gate arrives. A gate whose flow ends in an error without being resolved there (typically the client or server disconnecting on its own timeout) stays in the list in its place, marked Disconnected, and stays selected if it was being edited. Its editor keeps the draft read-only under a warning that states how long it was paused, the reason, and that the request can no longer be sent or the device can no longer receive the response or event. Continue and Drop are replaced by Dismiss and no resolve call is made for that token; the window closes only after such entries are dismissed. This is renderer state only: the engine remains the authority on what is pending. The window must not steal focus when a new gate arrives.
 
@@ -150,12 +151,15 @@ the Tools navigation search.
 Dragging a column title before or after another title reorders the visible columns;
 Option+Left/Right on the focused title moves it one position. Column widths and
 the active row sort stay attached to their column identities. Order uses the
-existing local column preference. Clicking a title still sorts rows; dragging
+existing local column preference. Fresh installs show Method, Request, Time, SSL,
+Device and Custom Fields (column id `fields`, so saved preferences are unchanged);
+saved preferences are never rewritten. Clicking a title still sorts rows; dragging
 does not change the row sort. A drop marker shows the insertion edge.
 
 Dragging or keyboard-resizing a column separator changes only the column to its
-left, including Request. Separators appear only between data columns, never after
-the last data column. Other visible widths are held
+left, including Request and the last data column (its right border is a separator
+too; the trailing filler absorbs or yields the difference, and the table scrolls
+horizontally once columns exceed the pane). Other visible widths are held
 at their current sizes; later columns move without resizing. Double-click resets
 only that column. Widths remain local preferences, bounded to 48–900 CSS pixels.
 An empty trailing area fills unused pane width so row borders, hover and selection
@@ -201,10 +205,24 @@ newer native updates supersede older asynchronous reads. Fullscreen chrome and
 per-window header insets keep their existing behavior. About windows receive the
 same zoom setup as other application windows.
 
+Settings and Connect a device each open in their own native window, one instance
+each, like Tools (`open-settings` and `open-device-setup` in `electron/main.mjs`,
+validated by `electron/utility-windows.mjs`). Opening again focuses the window and
+sends the requested section or platform to it. Settings sections are Proxy,
+HTTPS / TLS, Storage, Agent (MCP) and Appearance; Agent (MCP) is no longer in Tools.
 TLS allowlist links (sidebar, connection setup, inspector and SSL footer control)
-open HTTPS / TLS. General settings and proxy-port entry points open Proxy. The
-settings section is controlled independently of the unsaved settings values, so
-section navigation does not discard drafts or save configuration implicitly.
+open HTTPS / TLS. General settings and proxy-port entry points open Proxy; the
+Agent (MCP) menu item and palette command open Agent (MCP). The settings section is
+controlled independently of the unsaved settings values, so section navigation does
+not discard drafts or save configuration implicitly. The Settings window fills its
+form once from the first state it receives and saves with Save settings; the main
+window sees the change on its next poll. The Connect a device window watches device
+inventory while it is open (the main process also stops the watch when it closes)
+and asks the main window to filter to a device through `show-device-traffic`. While
+either window is open, the main window holds back its device approval popup because
+both show approval requests inline. Height changes inside Connect a device animate
+over 200 ms unless reduced motion is requested. Workbench shortcuts apply when
+the main window has focus.
 
 ### Packaged layout inspection snapshot
 

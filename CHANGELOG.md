@@ -2,7 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Add optional JavaScript transforms to Custom Fields. MCP edits to scripted fields require approval.
+
 ### Changed
+
+- Settings and Connect a device now open in separate windows. Agent (MCP) is in Settings.
 
 - Redesigned device setup with guided phone setup, simulator and emulator connections, Metro options, and Revert. Android and iOS verify traffic independently each time the dialog opens. LAN device approvals expire after 24 hours, and Mac development ports other than Metro require destination approval.
 
@@ -12,6 +18,8 @@
 - Pin CI actions, set Electron security fuses before signing, and support independently pinned installer checksums.
 
 ### Fixed
+
+- Preserve old Android restore records for manual recovery without blocking quit.
 
 - iOS Simulator and Android Emulator traffic now shows as separate devices named after the simulator (for example "iPhone 16 Pro (iOS 18.2)") or the AVD, instead of under the Mac. Each device has its own device filter, sidebar entry and Delete. A single device reached through `adb reverse` is named too. Mac traffic still shows as the Mac.
 - Traffic no longer stops after the Mac sleeps with Streamglass running. On wake, connections that sleep left half-open are closed (paused breakpoints stay), a stopped listener restarts, and the Mac proxy is reapplied, so a restart is no longer needed.

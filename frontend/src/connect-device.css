@@ -1,5 +1,4 @@
 /* Connect a device. Built on the workbench tokens (style.css) so both themes work; layout follows the approved device-setup design. */
-dialog.modal-setup{width:min(820px,calc(100vw - 40px))}
 .connect-device{font-size:12px;line-height:1.45;color:var(--text);--ds-ok:var(--q-ok);--ds-warn:var(--q-warn)}
 .connect-device button:focus-visible,.connect-device input:focus-visible,.connect-device summary:focus-visible,.connect-device select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .connect-device code{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
@@ -13,7 +12,7 @@ dialog.modal-setup{width:min(820px,calc(100vw - 40px))}
 .ds-hint,.ds-hint-text{color:var(--muted);font-size:11px;font-weight:400}
 
 /* platform + page tabs */
-.ds-navigation{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.ds-navigation{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;min-height:36px;border-bottom:1px solid var(--line)}
 .ds-platforms{display:flex;margin-left:auto;padding-bottom:4px}
 .ds-seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line-strong);border-radius:7px;overflow:hidden}
 .ds-seg button{border:0;border-radius:0;background:transparent;color:var(--text-secondary);padding:5px 10px;border-right:1px solid var(--line)}
@@ -30,6 +29,31 @@ dialog.modal-setup{width:min(820px,calc(100vw - 40px))}
 .ds-watch{color:var(--muted);font-size:11px;display:flex;align-items:center;gap:6px}
 .ds-pulse{width:7px;height:7px;border-radius:50%;background:var(--ds-ok);animation:ds-pulse 1.8s infinite}
 @keyframes ds-pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ds-ok) 60%,transparent)}70%,100%{box-shadow:0 0 0 6px transparent}}
+
+/* This Mac */
+.ds-mac-rows{border:1px solid var(--line);border-radius:8px}
+.ds-mac-rows>*+*{border-top:1px solid var(--line)}
+.ds-mac-row{display:grid;grid-template-columns:minmax(0,1fr) fit-content(65%);align-items:center;gap:8px;min-height:48px;padding:8px 12px}
+.ds-mac-label{display:block;font-weight:600}
+.ds-mac-secondary{display:block;color:var(--text-secondary);font-size:11px;overflow-wrap:anywhere}
+.ds-mac-secondary .ds-dot{width:6px;height:6px;margin-right:6px;vertical-align:1px}
+.ds-mac-secondary .ds-dot:not(.ok){background:var(--muted)}
+.ds-mac-end{text-align:right}
+.ds-mac-actions,.ds-mac-network-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ds-mac-actions{justify-content:flex-end}
+.ds-mac-info{display:flex;gap:8px;align-items:flex-start;padding:8px 12px;background:var(--selection);font-size:11px}
+.ds-mac-info svg{color:var(--accent);margin-top:1px}
+.ds-mac-rows details:not(.menu)>summary.ds-mac-row{display:flex;margin:0;padding:8px 12px}
+.ds-mac-rows summary .ds-mac-end{margin-left:auto}
+.ds-mac-details{display:grid;gap:8px;padding:0 12px 12px 32px;color:var(--text-secondary)}
+.ds-mac-details ul{margin:0;padding-left:14px}
+.ds-mac-details li+li{margin-top:6px}
+.ds-mac-network-controls{align-items:flex-end}
+.ds-mac-network-controls label{display:grid;gap:4px;max-width:100%;min-width:0}
+.ds-mac-network-controls select{width:100%;padding:5px 8px}
+.ds-mac-notice{margin:8px 0 0;color:var(--text-secondary);font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere}
+.ds-mac-notice.error-text{color:var(--danger)}
+@media(max-width:485px){.ds-mac-https{grid-template-columns:1fr}.ds-mac-https .ds-mac-actions{justify-content:flex-start}}
 
 /* local network bar */
 .ds-lan{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--input);margin-bottom:12px;color:var(--text-secondary)}
@@ -113,5 +137,14 @@ details.ds-sec[open]:not(.menu)>summary{margin-bottom:0}
 .ds-pairing .qr-code{width:120px;height:120px;border-radius:6px;background:#fff}
 
 .connect-nav{position:sticky;bottom:-20px;z-index:2;display:flex;align-items:center;gap:8px;margin:14px -20px -20px;padding:12px 20px;background:var(--panel);border-top:1px solid var(--line)}
-@media(prefers-reduced-motion:reduce){.ds-pulse,.ds-dot.spin,.ds-mark.run,.ds-spin{animation:none}}
+/* AnimatedHeight sets inline height, overflow and transition only while a height change plays. */
+.ds-height,.ds-height>div{display:flow-root}/* keeps the nav bar's negative margins from collapsing through the wrapper */
+@media(prefers-reduced-motion:reduce){.ds-height{transition:none!important}.ds-pulse,.ds-dot.spin,.ds-mark.run,.ds-spin{animation:none}}
 @media(max-width:600px){.ds-steps{padding-left:14px}.ds-step{grid-template-columns:20px minmax(0,1fr)}.ds-acts{grid-column:2;max-width:none;justify-content:flex-start}}
+
+/* Setup window: content scrolls, the Revert all / Done bar stays pinned to the bottom. */
+.aux-setup>.modal-body{padding:0;overflow:hidden;display:flex;flex-direction:column}
+.aux-setup>.modal-body>.modal-error{margin:12px 20px 0}
+.aux-setup .connect-device{flex:1;min-height:0;display:flex;flex-direction:column}
+.aux-setup .ds-scroll{flex:1;min-height:0;overflow:auto;padding:20px}
+.aux-setup .connect-nav{position:static;margin:0;flex-shrink:0}

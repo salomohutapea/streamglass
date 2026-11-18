@@ -180,28 +180,50 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
   tool('get_productivity_preferences', 'Read correlation configuration or a bounded page of custom fields, assertions or saved filters (section views). A custom field has an id, a name and 1-10 locations; each location highlights a value from the request or response body, SSE event data, or a header of APIs matching its URL wildcard and method, and values from all matching locations are merged.', {section:z.enum(['journey','fields','assertions','views']),offset,limit}, true, async a=>{
     const value=await api('/api/productivity');return {revision:value.revision,...(a.section==='journey'?{journey:value.config.journey}:page(value.config[a.section],a.offset,a.limit))};
   });
-  tool('set_productivity_preferences', 'Replace read-only analysis preferences and saved filters (views) using the expected revision. A custom field has 1-10 locations and shows the merged values found in any matching location; in a location, pattern is a URL wildcard, method is * or an HTTP method, source is request/response/event (path is a JSONPath) or requestHeader/responseHeader (path is a header name). Existing engine validation rejects unsupported JSONPaths and stale writes.', {
+  const customFieldScript = z.string().max(16384).optional().describe('Optional onCustomField(values, context) JavaScript to transform extracted display values. A new script or changed scope requires approval.');
+  async function approveFieldScripts(before, after) {
+    const prior = new Map(before.map(field => [field.id, field]));
+    for (const field of after) {
+      const previous = prior.get(field.id);
+      if (!field.script?.trim() || isDeepStrictEqual(field, previous)) continue;
+      await approve({kind:'script',title:'Run JavaScript on custom field values',detail:[
+        `Field: ${field.name}`,
+        ...field.locations.map(location => `${location.method} ${location.pattern} · ${location.source} ${location.path}`),
+      ],source:field.script});
+    }
+  }
+  tool('set_productivity_preferences', 'Replace read-only analysis preferences and saved filters (views) using the expected revision. A custom field has 1-10 locations and an optional onCustomField script. Engine validation rejects unsupported JSONPaths and stale writes.', {
     revision:z.number().int().nonnegative(),
     config:z.object({journey:z.object({paths:z.array(z.string().max(512)).max(10),headers:z.array(z.string().max(128)).max(10),inventoryPath:z.string().max(512)}).strict(),
-      fields:z.array(z.object({id:z.string().min(1).max(128),name:z.string().min(1).max(100),locations:z.array(z.object({pattern:z.string().min(1).max(4096),method:z.string().min(1).max(64),source:z.enum(['request','response','event','requestHeader','responseHeader']),path:z.string().min(1).max(512)}).strict()).min(1).max(10)}).strict()).max(50),
+      fields:z.array(z.object({id:z.string().min(1).max(128),name:z.string().min(1).max(100),script:customFieldScript,locations:z.array(z.object({pattern:z.string().min(1).max(4096),method:z.string().min(1).max(64),source:z.enum(['request','response','event','requestHeader','responseHeader']),path:z.string().min(1).max(512)}).strict()).min(1).max(10)}).strict()).max(50),
       assertions:z.array(z.object({id:z.string().min(1).max(128),name:z.string().min(1).max(100),enabled:z.boolean(),pattern:z.string().min(1).max(4096),method:z.string().min(1).max(64),kind:z.enum(['first-data','required-field','duplicate-event-id','terminal-event']),path:z.string().max(512),source:z.enum(['request','response','event']),eventName:z.string().max(128),timeoutMs:z.number().int().min(1).max(3600000)}).strict()).max(50),
       views:z.array(z.object({id:z.string().min(1).max(128),name:z.string().min(1).max(100),filter:z.string().max(1024),scope:z.enum(['url','request','response','event']),mode:z.enum(['contains','not_contains','equals','starts_with','ends_with','wildcard']),conditions:z.array(z.object({joiner:z.enum(['and','or']),scope:z.enum(['url','request','response','event']),mode:z.enum(['contains','not_contains','equals','starts_with','ends_with','wildcard']),filter:z.string().max(1024)}).strict()).max(7).optional(),protocols:z.array(z.enum(['HTTP','HTTPS','SSE'])).max(3),statuses:z.array(z.number().int().min(1).max(5)).max(5),contentTypes:z.array(z.enum(['json','form','xml','js','css','document','media','other'])).max(8).optional(),device:z.string().min(1).max(256),application:z.string().max(1024).nullable(),library:z.enum(['all','sse','pinned'])}).strict()).max(50)}).strict(),
-  }, false, a=>serializeMutation(()=>api('/api/productivity','PUT',a)));
+  }, false, a=>serializeMutation(async()=>{
+    if (a.config.fields.some(field => field.script?.trim())) {
+      const {revision,config}=await api('/api/productivity');
+      if (revision !== a.revision) throw new Error('Productivity preferences changed; refresh and retry.');
+      await approveFieldScripts(config.fields,a.config.fields);
+    }
+    return api('/api/productivity','PUT',a);
+  }));
   // Custom fields are stored in the productivity preferences; these edit one field and reuse its revision-checked PUT.
   const fieldSource=z.enum(['request','response','event','requestHeader','responseHeader']);
   const fieldLocation=z.object({pattern:z.string().min(1).max(4096).describe('URL wildcard matched against the full URL, e.g. https://api.example.com/v2/search*'),
     method:z.string().min(1).max(64).default('*').describe('* or one HTTP method'),source:fieldSource.describe('request/response body or SSE event data (path is a JSONPath such as $.data.searchId), or requestHeader/responseHeader (path is a header name)'),path:z.string().min(1).max(512)}).strict();
   const fieldShape=z.object({id:id.max(128).optional().describe('Omit to create a new field'),name:z.string().min(1).max(100),
+    script:customFieldScript,
     locations:z.array(fieldLocation).min(1).max(10).describe('Where to read the value. One field can read the same value from several APIs or places, for example SSE event data on a stream API and the response body on a poll API; a capture matches a location by URL wildcard and method, and the distinct values from all matching locations are merged into one list')}).strict();
   async function updateFields(edit){
     const {revision,config}=await api('/api/productivity');
-    const result=await api('/api/productivity','PUT',{revision,config:{...config,fields:edit(config.fields)}});
+    const fields=edit(config.fields);
+    await approveFieldScripts(config.fields,fields);
+    const result=await api('/api/productivity','PUT',{revision,config:{...config,fields}});
     return {revision:result.revision,fields:result.config.fields};
   }
   tool('list_custom_fields', 'List custom fields: values highlighted in the traffic table and inspector. Each field has 1-10 locations (URL wildcard, method, source, path) read from a request/response body, SSE event data or a header; values from every matching location are merged.', {offset,limit}, true, async a=>{
     const value=await api('/api/productivity');return {revision:value.revision,...page(value.config.fields,a.offset,a.limit)};
   });
-  tool('upsert_custom_field', 'Create a custom field, or fully replace the one with the same id. One field can be read from several APIs or places (locations), for example a searchId in SSE event data on the stream API and in the response body on the poll API; the distinct values found in all matching locations are merged. It shows in the table Fields column and at the top of the inspector for matching captures, after the engine evaluates them in the background. Engine validation rejects unsupported JSONPaths and header names; at most 50 fields.', {field:fieldShape}, false,
+  tool('upsert_custom_field', 'Create or fully replace a custom field. Matching locations are merged and the optional onCustomField script transforms the displayed values. Adding or changing a script or its field scope requires user approval. At most 50 fields.', {field:fieldShape}, false,
     a=>serializeMutation(async()=>{
       const field={...a.field,id:a.field.id??crypto.randomUUID()};
       const result=await updateFields(fields=>fields.some(f=>f.id===field.id)?fields.map(f=>f.id===field.id?field:f):[...fields,field]);

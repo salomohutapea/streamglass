@@ -1,7 +1,6 @@
 import ListSearch from './ListSearch';
 import { confirmAction } from './confirm-dialog';
 import {matchesListSearch} from './list-search.mjs';
-import McpSettings from './McpSettings';
 import { useEffect, useRef, useState } from 'react';
 import JsonViewer from './JsonViewer';
 import CodecPanel from './CodecPanel';
@@ -9,9 +8,9 @@ import TrafficTools from './TrafficTools';
 import TrafficRules, {type RuleKind} from './TrafficRules';
 import TestingTools, {testingTabs} from './TestingTools';
 import {EmptyState} from './CapturePicker';
-import {Archive,Ban,Binary,Bot,FileInput,Funnel,Gauge,GitCompare,Layers,ListChecks,PackagePlus,Repeat,Replace,Route,Send,Share2,Shuffle,StickyNote,Tags,FlaskConical,type LucideIcon} from 'lucide-react';
+import {Archive,Ban,Binary,FileInput,Funnel,Gauge,GitCompare,Layers,ListChecks,PackagePlus,Repeat,Replace,Route,Send,Share2,Shuffle,StickyNote,Tags,FlaskConical,type LucideIcon} from 'lucide-react';
 // One icon per Tools section, shown beside its name in the navigation.
-const sectionIcons:Record<string,LucideIcon>={'Agent (MCP)':Bot,'Map Local':FileInput,'Map Remote':Shuffle,Rewrite:Replace,Block:Ban,'Network Conditioner':Gauge,Sessions:Archive,Journeys:Route,'Custom Fields':Tags,Assertions:ListChecks,Repeat,'Saved filters':Funnel,Notes:StickyNote,Compare:GitCompare,Replay:Send,Scenarios:FlaskConical,'Create mock':PackagePlus,Share:Share2,Workspaces:Layers,Codecs:Binary};
+const sectionIcons:Record<string,LucideIcon>={'Map Local':FileInput,'Map Remote':Shuffle,Rewrite:Replace,Block:Ban,'Network Conditioner':Gauge,Sessions:Archive,Journeys:Route,'Custom Fields':Tags,Assertions:ListChecks,Repeat,'Saved filters':Funnel,Notes:StickyNote,Compare:GitCompare,Replay:Send,Scenarios:FlaskConical,'Create mock':PackagePlus,Share:Share2,Workspaces:Layers,Codecs:Binary};
 const SectionIcon=({name}:{name:string})=>{const Icon=sectionIcons[name];return Icon?<Icon className="lab-tab-icon" aria-hidden="true"/>:null;};
 import DailyTools, {dailyTabs, type SavedView, type FieldDraft} from './DailyTools';
 
@@ -33,8 +32,8 @@ export default function LabPanel({api,connection,records,selectedId,initialTab='
   async function act(operation:()=>Promise<void>){setBusy(true);setError('');setNotice('');try{await operation();}catch(e:any){setError(e.message??String(e));}finally{setBusy(false);}}
   async function refreshWorkspaces(){const value=await window.streamglass!.getWorkspaces();setWorkspaces(value);}
   function updateScenario(id:string,patch:any){setScenarioRules(rules=>rules.map(rule=>rule.id===id?{...rule,...patch}:rule));}
-  const toolGroups=[{name:'AI agents',items:['Agent (MCP)']},{name:'Traffic',items:['Map Local','Map Remote','Rewrite','Block','Network Conditioner']},{name:'Daily work',items:dailyTabs},{name:'Testing',items:tabs},{name:'Setup',items:setupTabs}];
-  const aliases:Record<string,string>={'Agent (MCP)':'AI assistant integration','Map Local':'mock file fixture','Map Remote':'redirect proxy','Network Conditioner':'throttle latency bandwidth slow speed','Sessions':'capture archive','Journeys':'correlate search','Custom Fields':'extract JSONPath values','Assertions':'validate checks','Repeat':'loop requests','Saved filters':'views search','Scenarios':'simulate SSE failure delay reconnect','Codecs':'decode encode encryption','Workspaces':'configuration profiles'};
+  const toolGroups=[{name:'Traffic',items:['Map Local','Map Remote','Rewrite','Block','Network Conditioner']},{name:'Daily work',items:dailyTabs},{name:'Testing',items:tabs},{name:'Setup',items:setupTabs}];
+  const aliases:Record<string,string>={'Map Local':'mock file fixture','Map Remote':'redirect proxy','Network Conditioner':'throttle latency bandwidth slow speed','Sessions':'capture archive','Journeys':'correlate search','Custom Fields':'extract JSONPath values','Assertions':'validate checks','Repeat':'loop requests','Saved filters':'views search','Scenarios':'simulate SSE failure delay reconnect','Codecs':'decode encode encryption','Workspaces':'configuration profiles'};
   const matchingGroups=toolGroups.map(group=>({...group,items:group.items.filter(name=>matchesListSearch(toolQuery,[name,group.name,aliases[name]]))})).filter(group=>group.items.length);
   const matchingTools=matchingGroups.flatMap(group=>group.items);
   const totalTools=toolGroups.reduce((count,group)=>count+group.items.length,0);
@@ -50,7 +49,6 @@ export default function LabPanel({api,connection,records,selectedId,initialTab='
     {tab==='Workspaces'&&<><label title="Domains, rules, mocks, scenarios and network profiles. Switching saves the current one first.">Workspace name<input value={workspaceName} onChange={e=>setWorkspaceName(e.target.value)}/></label><div className="lab-actions"><button disabled={busy||!workspaceName.trim()} onClick={()=>void act(async()=>{const result=await window.streamglass!.saveWorkspace({name:workspaceName});setWorkspaces(result);setWorkspaceName('');setNotice('Current configuration saved.');})}>Save current configuration</button><span className="muted">No captures, credentials or keys</span></div>
       {workspaces.workspaces.length===0?<EmptyState icon={Layers}>No workspaces</EmptyState>:<ul className="workspace-list" aria-label="Saved workspaces">{workspaces.workspaces.map((w:any)=><li className="workspace-row" key={w.id}>{renamingId===w.id?<input aria-label="New workspace name" value={renameValue} onChange={e=>setRenameValue(e.target.value)}/>:<strong>{w.name}</strong>}{workspaces.activeId===w.id&&<span className="badge">Active</span>}<span className="workspace-actions">{renamingId===w.id?<><button disabled={busy||!renameValue.trim()} onClick={()=>void act(async()=>{await window.streamglass!.renameWorkspace({id:w.id,name:renameValue});setRenamingId('');await refreshWorkspaces();})}>Save</button><button onClick={()=>setRenamingId('')}>Cancel</button></>:<><button disabled={busy||workspaces.activeId===w.id} aria-label={`Switch to ${w.name}`} onClick={()=>void act(async()=>{await window.streamglass!.loadWorkspace({id:w.id});await refreshWorkspaces();const scenarios=await api('/api/scenarios');setScenarioRules(scenarios.rules);setScenarioBaseline(JSON.stringify(scenarios.rules));await onChanged();setNotice('Workspace loaded. Captures were preserved.');})}>Switch</button><button disabled={busy} aria-label={`Update ${w.name} with current configuration`} onClick={()=>void act(async()=>{setWorkspaces(await window.streamglass!.saveWorkspace({id:w.id,name:w.name}));setNotice('Current configuration saved.');})}>Update</button><button disabled={busy} aria-label={`Rename ${w.name}`} onClick={()=>{setRenamingId(w.id);setRenameValue(w.name);}}>Rename</button><button disabled={busy} aria-label={`Delete ${w.name}`} onClick={async()=>{if(await confirmAction({title:`Delete the workspace ${w.name}?`,message:'Its saved configuration is removed. Current rules and settings are not changed.',confirmLabel:'Delete',danger:true}))void act(async()=>{await window.streamglass!.deleteWorkspace({id:w.id});await refreshWorkspaces();});}}>Delete</button></>}</span></li>)}</ul>}</>}
     {tab==='Codecs'&&<CodecPanel api={api}/>}
-    {tab==='Agent (MCP)'&&<McpSettings/>}
     </div></div><div className="modal-foot"><button aria-label="Close tools" onClick={onClose}>Close</button></div>
   </>;
   return standalone?<section className="lab-dialog lab-window-panel" aria-label="Tools">{content}</section>:<dialog ref={dialog} className="lab-dialog" aria-label="Tools" onCancel={onClose}>{content}</dialog>;

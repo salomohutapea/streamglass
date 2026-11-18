@@ -25,15 +25,18 @@ try {
         const hooks = {
           onRequest: typeof onRequest === 'function' ? onRequest : undefined,
           onResponse: typeof onResponse === 'function' ? onResponse : undefined,
-          onEvent: typeof onEvent === 'function' ? onEvent : undefined
+          onEvent: typeof onEvent === 'function' ? onEvent : undefined,
+          onCustomField: typeof onCustomField === 'function' ? onCustomField : undefined
         };
         const fn = hooks[input.hook];
-        const value = input.hook === 'onRequest' ? input.request : input.hook === 'onResponse' ? input.response : input.event;
-        const args = [input.context || {}, input.url, input.request];
+        const field = input.hook === 'onCustomField';
+        if (field && !fn) throw new Error('Define an onCustomField function');
+        const value = field ? input.values : input.hook === 'onRequest' ? input.request : input.hook === 'onResponse' ? input.response : input.event;
+        const args = field ? [value.slice(), input.context] : [input.context || {}, input.url, input.request];
         if (input.hook === 'onResponse') args.push(input.response);
         if (input.hook === 'onEvent') args.push(input.event);
         const result = fn ? await fn(...args) : value;
-        globalThis.__result = JSON.stringify({ value: result === undefined ? value : result, logs });
+        globalThis.__result = JSON.stringify({ value: result === undefined ? value : result, logs: field ? [] : logs });
       })().catch(error => { globalThis.__error = String(error); });
     `;
     const evaluated = context.evalCode(program, 'user-hook.js');

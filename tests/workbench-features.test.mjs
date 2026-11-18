@@ -56,13 +56,13 @@ c.commit()`, path.join(directory, 'captures.sqlite3')], { input: JSON.stringify(
     await page.getByRole('button', { name: 'Inspector below', exact: true }).click();
     await page.getByRole('button', { name: 'Choose table columns', exact: true }).click();
     const columnMenu = page.getByRole('menu');
-    await columnMenu.getByRole('menuitemcheckbox', { name: /Device/ }).click();
+    await columnMenu.getByRole('menuitemcheckbox', { name: /Application/ }).click();
     await page.keyboard.press('Escape');
-    await page.getByRole('columnheader', { name: /Device/ }).waitFor();
+    await page.getByRole('columnheader', { name: /Application/ }).waitFor();
     await page.reload();
     await page.getByRole('row').filter({ hasText: '/events' }).waitFor();
     await page.getByRole('row').filter({ hasText: '/events' }).getByRole('button', { name: 'Unpin request', exact: true }).waitFor();
-    await page.getByRole('columnheader', { name: /Device/ }).waitFor();
+    await page.getByRole('columnheader', { name: /Application/ }).waitFor();
     assert.equal(await page.evaluate(() => localStorage.getItem('streamglass.inspector.position')), 'below');
     if (process.env.STREAMGLASS_FEATURE_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.STREAMGLASS_FEATURE_SCREENSHOTS, 'workbench.png') });
 
@@ -105,6 +105,8 @@ c.commit()`, path.join(directory, 'captures.sqlite3')], { input: JSON.stringify(
     await page.getByRole('button', { name: /Network conditioning/ }).waitFor();
 
     for (const [platform, label] of [['macos', 'This Mac'], ['ios-simulator', 'iOS Simulator'], ['ios-device', 'iPhone or iPad'], ['android-emulator', 'Android emulator'], ['android-device', 'Android device']]) {
+      // Connect a device opens in its own window, like Tools.
+      const opened = app.waitForEvent('window');
       await app.evaluate(({ app, BrowserWindow, Menu }, id) => {
         const win = BrowserWindow.getAllWindows()[0];
         BrowserWindow.getFocusedWindow = () => win;
@@ -113,8 +115,8 @@ c.commit()`, path.join(directory, 'captures.sqlite3')], { input: JSON.stringify(
         if (!item?.enabled) throw new Error(`Disabled platform setup ${id}`);
         item.click(item, win, {});
       }, `setup-${platform}`);
-      await page.getByRole('dialog', { name: 'Connect a device' }).waitFor();
-      const dialog = page.getByRole('dialog', { name: 'Connect a device' });
+      const dialog = await opened;
+      await dialog.getByRole('main', { name: 'Connect a device' }).waitFor();
       const [selectedPlatform, selectedPage] = { macos: ['This Mac', null], 'ios-simulator': ['iOS', 'Simulator'], 'ios-device': ['iOS', 'Real device'], 'android-emulator': ['Android', 'Emulator'], 'android-device': ['Android', 'Real device'] }[platform];
       assert.equal(await dialog.getByRole('group', { name: 'Platform' }).getByRole('button', { name: selectedPlatform, exact: true }).getAttribute('aria-pressed'), 'true', label);
       if (selectedPage) assert.equal(await dialog.getByRole('tab', { name: new RegExp(`^${selectedPage}`) }).getAttribute('aria-selected'), 'true', label);
@@ -127,7 +129,9 @@ c.commit()`, path.join(directory, 'captures.sqlite3')], { input: JSON.stringify(
         // Collapsibles animate open, so wait for the content rather than checking at once.
         await dialog.getByText('Set proxy and certificate in one click over Wi-Fi', {exact:true}).waitFor({state:'visible'});
       }
-      await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+      const closed = dialog.waitForEvent('close');
+      await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+      await closed;
     }
     assert.deepEqual(errors, []);
   } finally {

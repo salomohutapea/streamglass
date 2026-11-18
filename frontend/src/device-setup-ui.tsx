@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, Copy, Loader2, Monitor, Smartphone, Wifi } from 'lucide-react';
 import { encodeQr } from './qr-code.mjs';
 import type { Tone } from './device-setup-view.mjs';
@@ -6,6 +6,41 @@ import './connect-device.css';
 
 /** Small presentational pieces shared by the Connect a device pages. No device logic lives here. */
 export type StepMark = 'ok' | 'warn' | 'idle' | 'num' | 'run';
+
+/** Animates the wrapper's height when its content grows or shrinks (tab switches, expanding steps, cards appearing).
+ *  A ResizeObserver watches the content; each change plays one 200ms height transition from the previous height and
+ *  then returns to automatic height. Overflow is clipped only while it plays, with a margin so focus rings survive.
+ *  Skipped entirely for prefers-reduced-motion. */
+export function AnimatedHeight({ children }: { children: ReactNode }) {
+  const outer = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const box = outer.current, content = inner.current;
+    if (!box || !content || typeof ResizeObserver === 'undefined') return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let last = content.offsetHeight, playing = false, timer = 0;
+    const settle = () => {
+      window.clearTimeout(timer); playing = false;
+      box.style.transition = ''; box.style.height = ''; box.style.overflow = ''; box.style.overflowClipMargin = '';
+    };
+    const observer = new ResizeObserver(() => {
+      const next = content.offsetHeight;
+      if (next === last) return;
+      const from = playing ? box.getBoundingClientRect().height : last;
+      last = next;
+      if (reduce.matches || Math.abs(from - next) < 2) { settle(); return; }
+      window.clearTimeout(timer);
+      box.style.transition = 'none'; box.style.overflow = 'clip'; box.style.overflowClipMargin = '8px'; box.style.height = `${from}px`;
+      void box.offsetHeight; // one reflow per change commits the start height before the transition begins
+      playing = true;
+      box.style.transition = 'height 200ms ease'; box.style.height = `${next}px`;
+      timer = window.setTimeout(settle, 240);
+    });
+    observer.observe(content);
+    return () => { observer.disconnect(); settle(); };
+  }, []);
+  return <div ref={outer} className="ds-height"><div ref={inner}>{children}</div></div>;
+}
 
 export function QrCode({ text, label }: { text: string; label: string }) {
   const qr = useMemo(() => { try { return encodeQr(text); } catch { return null; } }, [text]);

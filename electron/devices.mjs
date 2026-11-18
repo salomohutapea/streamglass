@@ -1,5 +1,6 @@
 import { createDeviceSetup } from './device-setup.mjs';
 import { execFile } from 'node:child_process';
+import { X509Certificate } from 'node:crypto';
 import { promisify } from 'node:util';
 import { access, mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -89,6 +90,35 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, ensur
     return failures;
   }
   const trustMacCertificate = () => run('/usr/bin/security', ['add-trusted-cert', '-r', 'trustRoot', '-p', 'ssl', '-k', path.join(homedir(), 'Library/Keychains/login.keychain-db'), certificatePath], 120000);
+  async function macCertificateStatus() {
+    if (platform !== 'darwin') return null;
+    let fingerprint;
+    try {
+      fingerprint = new X509Certificate(await readFile(certificatePath)).fingerprint256.replaceAll(':', '');
+    } catch {
+      return null;
+    }
+
+    // Match the active CA exactly. Other Streamglass profiles may have the same certificate name.
+    const keychainResults = await Promise.allSettled([
+      run('/usr/bin/security', ['find-certificate', '-a', '-Z'], 3000),
+      run('/usr/bin/security', ['find-certificate', '-a', '-Z', '/Library/Keychains/System.keychain'], 3000),
+    ]);
+    const hashLine = `SHA-256 hash: ${fingerprint}`;
+    const installed = keychainResults.some(result => result.status === 'fulfilled' && result.value.split(/\r?\n/).includes(hashLine));
+    if (!installed) {
+      return keychainResults.every(result => result.status === 'fulfilled') ? { installed: false, trusted: null } : null;
+    }
+
+    try {
+      // Let macOS use its configured trust settings. Supplying a root with -r would bypass that check.
+      await run('/usr/bin/security', ['verify-cert', '-c', certificatePath, '-p', 'ssl', '-l', '-L'], 3000);
+      return { installed: true, trusted: true };
+    } catch (error) {
+      const rejected = /^Cert Verify Result:|^SecTrustEvaluate result: kSecTrustResultDeny/m.test(error.stderr ?? '');
+      return { installed: true, trusted: rejected ? false : null };
+    }
+  }
   const adbPath = () => findAdb({ executeCommand });
   async function networks(refresh = false) {
     if (!networkCache || refresh) {
@@ -119,11 +149,11 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, ensur
   }
   async function list() {
     const adb = await adbPath();
-    const [simText, androidText, network, state, intent] = await Promise.all([
+    const [simText, androidText, network, state, intent, macCertificate] = await Promise.all([
       optional('/usr/bin/xcrun', ['simctl', 'list', 'devices', 'available', '--json']),
       adb ? optional(adb, ['devices']) : null,
       platform === 'darwin' ? networks(true) : { networkServices: [], activeNetworkId: null, networkNotice: 'macOS required' },
-      readState(), readIntent(),
+      readState(), readIntent(), macCertificateStatus(),
     ]);
     const simulators = simText ? Object.values(JSON.parse(simText).devices).flat().map(({ udid, name, state }) => ({ id: udid, name, state })) : [];
     const android = androidText ? androidText.split('\n').slice(1).filter(line => /\tdevice$/.test(line)).map(line => ({ id: line.split('\t')[0], name: line.split('\t')[0] })) : [];
@@ -135,7 +165,7 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, ensur
       service.canRestore = Boolean(state[`mac:${service.id}`]);
     }));
     const simulatorNotice = simText === null ? 'Simulator tools are unavailable or could not be queried. Check full Xcode, its selected developer directory, and Simulator availability, then refresh.' : simulators.some(item => item.state === 'Booted') ? 'Select a booted simulator and prepare capture to trust certificates and enable the Mac proxy.' : 'No booted simulator detected. Boot a simulator in Xcode or Simulator, then refresh.';
-    return { simulatorNotice, simulators, android, networkServices, activeNetworkId, networkNotice, adbAvailable: Boolean(adb), simulatorToolsAvailable: simText !== null, savedProxyTargets: Object.keys(state), certificatePath, proxyPort, monitorTarget: intent?.enabled ? intent.override || activeNetworkId : null, monitorEnabled: Boolean(intent?.enabled), monitorOverride: intent?.override ?? null, monitorError };
+    return { simulatorNotice, simulators, android, networkServices, activeNetworkId, networkNotice, adbAvailable: Boolean(adb), simulatorToolsAvailable: simText !== null, savedProxyTargets: Object.keys(state), certificatePath, macCertificate, proxyPort, monitorTarget: intent?.enabled ? intent.override || activeNetworkId : null, monitorEnabled: Boolean(intent?.enabled), monitorOverride: intent?.override ?? null, monitorError };
   }
   let pending = Promise.resolve();
   async function performAction({ action, target, networkTarget, restoring = false, networkOnly = false, metro = false, onlyOwned = false } = {}) {
@@ -293,17 +323,19 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, ensur
     return enqueue(async () => {
       const deviceResult = await setup.prepareQuit();
       const state = await readState();
-      const errors = platform === 'darwin' ? await restoreMacProxies(state, { automatic: true }) : [];
+      const macErrors = platform === 'darwin' ? await restoreMacProxies(state, { automatic: true }) : [];
+      const errors = [...macErrors];
       if (!deviceResult.ok) errors.push(deviceResult.message);
       monitorError = errors.join('\n');
       // A simulator entry only records that it owns the Mac proxy (the simulator itself keeps no proxy).
       // Once the Mac proxy is restored it is stale; drop it so it doesn't block quit or confuse the next launch.
       let remaining = await readState();
-      if (!errors.length && !Object.keys(remaining).some(key => key.startsWith('mac:'))) {
+      if (!macErrors.length && !Object.keys(remaining).some(key => key.startsWith('mac:'))) {
         const simulators = Object.keys(remaining).filter(key => key.startsWith('ios-simulator:'));
         if (simulators.length) { for (const key of simulators) delete remaining[key]; await save(remaining); remaining = await readState(); }
       }
-      return {remainingProxyTargets:Object.keys(remaining), errors};
+      const deferred = new Set(deviceResult.deferredTargets);
+      return {remainingProxyTargets:Object.keys(remaining).filter(key => !deferred.has(key)), errors};
     });
   }
   // releaseSystemProxy restores system proxies that still point here and pauses monitoring until restoreMonitor.

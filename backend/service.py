@@ -253,6 +253,7 @@ class Service:
         # Captures whose custom fields still need evaluating (insertion-ordered ids); custom_fields.worker drains it.
         self.field_dirty = {}
         self.field_wake = asyncio.Event()
+        self.field_script_lock = asyncio.Lock()
         self.assertion_summaries = {}
         self.codec_keys = {}
         self.folders = json.loads(config.get("folders", "[]"))
@@ -471,6 +472,7 @@ class Service:
         keys = ("id", "url", "method", "statusCode", "device", "startedAt", "endedAt", "durationMs", "state", "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "clientIsLocal", "pinned", "annotation", "tlsFailure", "deviceId", "deviceName")
         records, icons = [], {}
         fields_cache, current = self.field_cache, self.productivity["fields"]
+        scripted_fields = any(field.get("script", "").strip() for field in current)
         for r in sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True):
             row = {**{key: r.get(key) for key in keys}, "pinned": bool(r.get("pinned")), "isSSE": is_sse(r), "serverMs": (r.get("timings") or {}).get("serverMs"), "devicePlatform": device_platform(r), **({"sseStatus": sse_status(r)} if is_sse(r) else {}), "assertionSummary": self.assertion_summaries.get(r["id"]), "rev": self.record_revs.get(r["id"], 0)}
             row["requestContentType"] = content_type(r, "request")
@@ -478,8 +480,10 @@ class Service:
             row["hasJsonEvents"] = self.has_json_events(r) if row["isSSE"] else False
             # Never evaluates: the latest finished results (possibly from an older revision) until the worker refreshes them.
             entry = fields_cache.get(r["id"])
-            if entry and entry["fields"] is current and entry["results"]:
-                row["fields"] = entry["results"]
+            if entry and entry["fields"] is current:
+                values = entry.get("display") if scripted_fields else entry["results"]
+                if values:
+                    row["fields"] = values
             app = row["application"]
             if isinstance(app, dict) and "icon" in app:
                 if app["icon"] and app.get("id"):

@@ -85,7 +85,7 @@ export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getTo
       command('lab-compare', 'Compare Captures…'), command('lab-replay', 'Edit and Resend…'),
       command('lab-scenarios', 'Test Scenarios…'), command('lab-fixture', 'Save Capture as Mock…'),
       command('lab-share', 'Redacted Export…'), separator,
-      command('lab-workspaces', 'Configuration Workspaces…'), command('lab-codecs', 'Body Codecs…'), command('lab-mcp', 'Agent (MCP) Setup…'),
+      command('lab-workspaces', 'Configuration Workspaces…'), command('lab-codecs', 'Body Codecs…'), command('agent-settings', 'Agent (MCP) Setup…'),
     ] },
     { label: 'Certificate / Setup', submenu: setupCommands },
     { label: 'View', submenu: [
@@ -125,7 +125,7 @@ export function createApplicationMenu({ app, Menu, BrowserWindow, windows, getTo
     set('clear-all', ready && state.hasRecords);
     set('export-all', ready && state.hasRecords);
     for (const id of ['daily-sessions', 'daily-journeys', 'daily-fields', 'daily-assertions', 'daily-repeat', 'daily-views', 'daily-notes']) set(id, ready);
-    for (const id of ['lab-replay', 'lab-scenarios', 'lab-workspaces', 'lab-codecs', 'lab-mcp']) set(id, ready);
+    for (const id of ['lab-replay', 'lab-scenarios', 'lab-workspaces', 'lab-codecs', 'agent-settings']) set(id, ready);
     set('lab-compare', ready && state.hasRecords);
     set('lab-fixture', inspectable && state.hasResponse);
     set('lab-share', inspectable);

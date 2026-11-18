@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { X509Certificate } from 'node:crypto';
+import { rootCertificates } from 'node:tls';
 import path from 'node:path';
 import { createDeviceService } from '../electron/devices.mjs';
 
-async function fixture(t, { route4 = 'en0', route6 = 'en0', failElevation = false, authenticated = false, captured = false, simulators = null, directNetwork = false, failSimulator = false, genericDenial = false, ensureProxyListening = async () => {}, groups = 'staff admin', noOpWrites = false } = {}) {
+async function fixture(t, { route4 = 'en0', route6 = 'en0', failElevation = false, authenticated = false, captured = false, simulators = null, directNetwork = false, failSimulator = false, genericDenial = false, ensureProxyListening = async () => {}, groups = 'staff admin', noOpWrites = false, securityCommand = async () => ({ stdout: '' }) } = {}) {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'streamglass-devices-'));
   t.after(() => rm(dataDir, { recursive: true, force: true }));
   const services = [];
@@ -26,7 +28,7 @@ async function fixture(t, { route4 = 'en0', route6 = 'en0', failElevation = fals
   const executeCommand = async (file, args) => {
     commands.push([file, ...args]);
     if (file.endsWith('/id')) { if (groups === null) throw new Error('Cannot read groups'); return { stdout: groups }; }
-    if (file.endsWith('/security')) return { stdout: '' };
+    if (file.endsWith('/security')) return securityCommand(args);
     if (file.endsWith('/xcrun') && failSimulator && args.includes('add-root-cert')) throw new Error('Simulator trust denied');
     if (file.endsWith('/xcrun') && simulators !== null) return { stdout: args.includes('list') ? JSON.stringify({ devices: { iOS: simulators } }) : '' };
     if (file.endsWith('/networksetup')) {
@@ -51,6 +53,37 @@ async function fixture(t, { route4 = 'en0', route6 = 'en0', failElevation = fals
   t.after(() => services.forEach(service => service.dispose()));
   return { commands, dataDir, service: restart(), restart, setNoOpWrites: value => { noOpWrites = value; }, setRoute: (ipv4, ipv6 = ipv4) => { route4 = ipv4; route6 = ipv6; }, proxyState };
 }
+
+test('Mac certificate status matches the active CA and distinguishes trust rejection from probe failure', async t => {
+  // Use bundled public certificates as distinct inputs. All Keychain commands are mocked.
+  const [currentCA, otherCA] = rootCertificates;
+  const hashLine = certificate => `SHA-256 hash: ${new X509Certificate(certificate).fingerprint256.replaceAll(':', '')}`;
+  let installedInSystemKeychain = false;
+  let trustError;
+  const { service, dataDir, commands } = await fixture(t, {
+    securityCommand: async ([command, ...args]) => {
+      if (command === 'find-certificate') {
+        return { stdout: hashLine(installedInSystemKeychain && args.includes('/Library/Keychains/System.keychain') ? currentCA : otherCA) };
+      }
+      if (trustError) throw trustError;
+      return { stdout: '' };
+    },
+  });
+  await writeFile(path.join(dataDir, 'ca.pem'), currentCA);
+  assert.deepEqual((await service.list()).macCertificate, { installed: false, trusted: null });
+  assert.equal(commands.some(command => command.includes('verify-cert')), false);
+
+  installedInSystemKeychain = true;
+  assert.deepEqual((await service.list()).macCertificate, { installed: true, trusted: true });
+  assert.deepEqual(commands.find(command => command.includes('verify-cert')), [
+    '/usr/bin/security', 'verify-cert', '-c', path.join(dataDir, 'ca.pem'), '-p', 'ssl', '-l', '-L',
+  ]);
+
+  trustError = Object.assign(new Error('Trust rejected'), { stderr: 'Cert Verify Result: certificate is not trusted' });
+  assert.deepEqual((await service.list()).macCertificate, { installed: true, trusted: false });
+  trustError = new Error('Keychain probe timed out');
+  assert.deepEqual((await service.list()).macCertificate, { installed: true, trusted: null });
+});
 
 test('Mac setup selects the active interface rather than the first network service', async t => {
   const { service, commands } = await fixture(t);
@@ -397,14 +430,14 @@ test('quit retains failed snapshots and never requests administrator credentials
   }
 });
 
-test('quit leaves Android restoration snapshots for an explicit device restore', async t => {
+test('quit preserves legacy Android snapshots for explicit restore without warning', async t => {
   const { service, commands, dataDir } = await fixture(t, {directNetwork:true});
   await service.perform({action:'mac-enable-proxy'});
   const saved = JSON.parse(await readFile(path.join(dataDir, 'device-proxy-state.json'), 'utf8'));
   saved['android:fixture-phone'] = {http_proxy:':0'};
   await writeFile(path.join(dataDir, 'device-proxy-state.json'), JSON.stringify(saved));
   const before = commands.length;
-  assert.deepEqual(await service.prepareQuit(), {remainingProxyTargets:['android:fixture-phone'], errors:[]});
+  assert.deepEqual(await service.prepareQuit(), {remainingProxyTargets:[], errors:[]});
   assert.deepEqual(JSON.parse(await readFile(path.join(dataDir, 'device-proxy-state.json'), 'utf8')), {'android:fixture-phone':{http_proxy:':0'}});
   assert.equal(commands.slice(before).some(command => command[0].includes('adb')), false);
 });

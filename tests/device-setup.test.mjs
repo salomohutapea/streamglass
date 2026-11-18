@@ -135,7 +135,9 @@ test('user confirmation and reopen maintain separate proxy and cert states',asyn
   await x.service.reopen(x.req);assert.equal(x.commands.filter(a=>a.includes('push')).length,2);
 });
 test('revertOnQuit false leaves saved proxy and reverse ownership intact',async t=>{
-  const x=await fixture(t,fixtures[0]);await x.service.setOptions({revertOnQuit:false});await x.service.connect(x.req);await x.service.prepareQuit();assert.equal(x.settings.get('http_proxy'),'10.0.2.2:9090');assert.ok(x.state()['android:emulator-5554'].setup);
+  const x=await fixture(t,fixtures[0]);await x.service.setOptions({revertOnQuit:false});await x.service.connect(x.req);
+  assert.deepEqual((await x.service.prepareQuit()).deferredTargets, ['android:emulator-5554']);
+  assert.equal(x.settings.get('http_proxy'),'10.0.2.2:9090');assert.ok(x.state()['android:emulator-5554'].setup);
 });
 
 test('Revert all finds an older Wi-Fi proxy on the same phone over USB', async t => {
@@ -160,9 +162,37 @@ test('Revert all never guesses between two old Wi-Fi snapshots for the same prox
     x.state()[`android:${id}`] = { http_proxy: ':0', setup: { transport: 'wifi', proxyValue, reverses: [] } };
   }
   x.settings.set('http_proxy', proxyValue);
-  assert.equal((await x.service.revertAll()).ok, false);
+  const result = await x.service.revertAll();
+  assert.equal(result.ok, false);
+  assert.match(result.message, /Unmatched Android restore records were kept/);
   assert.equal(x.settings.get('http_proxy'), proxyValue);
   assert.equal(Object.keys(x.state()).length, 2);
+});
+
+test('quit defers an unmatched Wi-Fi record without deleting it', async t => {
+  const x = await fixture(t, fixtures[2]);
+  const key = 'android:192.0.2.40:43275';
+  x.state()[key] = { http_proxy: ':0', setup: { transport: 'wifi', proxyValue: '192.0.2.20:9090', reverses: [] } };
+  const result = await x.service.prepareQuit();
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.deferredTargets, [key]);
+  assert.ok(x.state()[key]);
+});
+
+test('quit defers a disconnected emulator, leaving explicit restore available', async t => {
+  const x = await fixture(t, fixtures[0]);
+  assert.equal((await x.service.connect(x.req)).ok, true);
+  const key = `android:${x.req.id}`;
+  x.offline();
+  const result = await x.service.prepareQuit();
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.deferredTargets, [key]);
+  assert.ok(x.state()[key]);
+  x.online();
+  await x.service.start();
+  assert.equal((await x.service.revertAll()).ok, true);
+  assert.equal(x.settings.get('http_proxy'), 'previous.example:3128');
+  assert.deepEqual(x.state(), {});
 });
 
 test('reapply reconnects known devices and auto-connect remains opt-in',async t=>{

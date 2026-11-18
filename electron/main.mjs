@@ -19,6 +19,7 @@ import { exportSession, importSession } from './export-session.mjs';
 import { readMapLocalFile } from './map-local-file.mjs';
 import { createWorkspaceService } from './workspaces.mjs';
 import { validateToolsInput, validateToolsAction } from './tools-window.mjs';
+import { validateSettingsInput, validateSetupInput, validateDeviceFilter } from './utility-windows.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 app.setName('Streamglass');
@@ -59,7 +60,7 @@ let pendingTimer;
 let mcpService;
 let startupReady = false;
 let setupSiteTimer, setupSiteClose;
-let toolsWindow, toolsOwner, mainWindow;
+let toolsWindow, toolsOwner, mainWindow, settingsWindow, setupWindow;
 let toolsContext = {section:'Sessions'};
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -88,6 +89,7 @@ function windowURL(recordId, editor) {
   if (recordId) url.searchParams.set('record', recordId);
   if (editor) {
     url.searchParams.set('editor', editor.type);
+    for (const [key, value] of Object.entries(editor.params ?? {})) if (value) url.searchParams.set(key, value);
     if (editor.type === 'paused') { if (editor.token) url.hash = `gate=${editor.token}`; }
     else if (editor.recordId) url.searchParams.set('record', editor.recordId);
   }
@@ -97,8 +99,8 @@ function windowURL(recordId, editor) {
 function createWindow(recordId, editor) {
   const auxiliary = Boolean(editor || recordId);
   const win = new BrowserWindow({
-    width: editor ? editor.type === 'paused' ? 1180 : 1040 : recordId ? 1100 : 1480,
-    height: editor ? editor.type === 'breakpoints' ? 760 : 820 : 940,
+    width: editor ? editor.size?.[0] ?? (editor.type === 'paused' ? 1180 : 1040) : recordId ? 1100 : 1480,
+    height: editor ? editor.size?.[1] ?? (editor.type === 'breakpoints' ? 760 : 820) : 940,
     minWidth: editor ? 600 : 900, minHeight: editor ? 400 : 600,
     title: 'Streamglass', backgroundColor: '#17191e',
     fullscreenable: !auxiliary,
@@ -149,6 +151,44 @@ function openToolsWindow(source, input) {
     toolsWindow.on('closed', () => {toolsWindow = undefined; toolsOwner = undefined;});
   } else toolsWindow.webContents.send('menu-action', 'tools-context', context);
   if (focus) {toolsWindow.restore(); toolsWindow.focus();}
+  return true;
+}
+
+// Settings and Connect a device each live in one window of their own: opening again focuses it and, when the caller
+// names a section or platform, sends that to the open window instead of replacing its state.
+function openUtilityWindow(type, size, params, current, onOpen) {
+  if (current && !current.isDestroyed()) {
+    onOpen(current);
+    current.restore(); current.focus();
+    return { win: current, created: false };
+  }
+  if (windows.size >= 8) throw new Error('Close a window before opening another');
+  const win = createWindow(undefined, { type, size, params });
+  return { win, created: true };
+}
+
+// Other windows hold back their own device-approval prompt while one of these shows the same requests inline.
+function announceUtilityWindow(kind, open) {
+  for (const other of windows) if (!other.isDestroyed() && other.webContents.getURL().indexOf('editor=') === -1) other.webContents.send('menu-action', 'utility-window-state', { kind, open });
+}
+
+function openSettingsWindow(input) {
+  const { section } = validateSettingsInput(input);
+  const { win, created } = openUtilityWindow('settings', [860, 700], { section }, settingsWindow, existing => existing.webContents.send('menu-action', 'settings-section', { section: section ?? 'proxy' }));
+  if (created) {
+    settingsWindow = win; announceUtilityWindow('settings', true);
+    win.on('closed', () => { if (settingsWindow === win) settingsWindow = undefined; announceUtilityWindow('settings', false); });
+  }
+  return true;
+}
+
+function openSetupWindow(input, onClosed) {
+  const { platform } = validateSetupInput(input);
+  const { win, created } = openUtilityWindow('setup', [860, 760], { platform }, setupWindow, existing => existing.webContents.send('menu-action', 'open-device-setup', platform ? { platform } : undefined));
+  if (created) {
+    setupWindow = win; announceUtilityWindow('setup', true);
+    win.on('closed', () => { if (setupWindow === win) setupWindow = undefined; announceUtilityWindow('setup', false); onClosed?.(); });
+  }
   return true;
 }
 
@@ -554,6 +594,19 @@ async function start() {
     win.on('closed', () => { if (inspectorWindows.get(id) === win) inspectorWindows.delete(id); });
   });
   handle('open-editor', (_event, input) => openEditor(input));
+  handle('open-settings', (_event, input) => openSettingsWindow(input));
+  handle('open-device-setup', (_event, input) => openSetupWindow(input, () => {
+    // Closing the window ends the inventory watch even if the page never got to clean up.
+    if (shuttingDown) return;
+    void deviceServiceForCurrentPort().then(service => service.setup.watch(false)).catch(() => {});
+  }));
+  // The Connect a device window asks the main window to show one device's traffic.
+  handle('show-device-traffic', (_event, id) => {
+    const deviceId = validateDeviceFilter(id);
+    const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
+    target.webContents.send('menu-action', 'filter-device', { deviceId });
+    target.restore(); target.focus();
+  });
   handle('open-tools', (event, input) => openToolsWindow(BrowserWindow.fromWebContents(event.sender), input));
   handle('tools-context', event => {
     if (BrowserWindow.fromWebContents(event.sender) !== toolsWindow) throw new Error('Tools context is only available in the Tools window');
@@ -681,15 +734,23 @@ app.on('before-quit', event => {
   event.preventDefault();
   if (checkingQuit) return;
   checkingQuit = true;
+  // Hide windows at once so quitting feels immediate; proxy restoration and engine shutdown finish behind them.
+  const hidden = BrowserWindow.getAllWindows().filter(win => !win.isDestroyed() && win.isVisible());
+  for (const win of hidden) win.hide();
+  if (process.platform === 'darwin' && !background) app.hide();
   void (async () => {
     let cleanup = {remainingProxyTargets:[], errors:[]};
     try { if (devices) cleanup = await Promise.race([devices.service.prepareQuit(), new Promise(resolve => { const timeout = setTimeout(() => resolve({ remainingProxyTargets: [], errors: ['Proxy restoration timed out; saved device settings are retained for retry.'] }), 12000); timeout.unref?.(); })]); }
     catch (error) { cleanup.errors = [error.message]; }
     if (cleanup.remainingProxyTargets.length || cleanup.errors.length) {
-      const macProblem = cleanup.errors.length || cleanup.remainingProxyTargets.some(target => target.startsWith('mac:'));
+      if (process.platform === 'darwin' && !background) app.show();
+      for (const win of hidden) if (!win.isDestroyed()) background ? win.showInactive() : win.show();
+      const macProblem = cleanup.remainingProxyTargets.some(target => target.startsWith('mac:'));
+      const deviceProblem = cleanup.remainingProxyTargets.some(target => target.startsWith('android:'));
       const result = await dialog.showMessageBox({ type: 'warning', buttons: ['Keep Open', 'Quit Anyway'], defaultId: 0, cancelId: 0,
-        message: macProblem ? 'Mac proxy settings could not be fully restored' : 'Some devices still use this proxy',
-        detail: [macProblem ? 'Your Mac may still point to Streamglass. Keep the app open and restore its proxy in Device Setup or macOS Network settings.' : 'Mac proxy settings were restored. Other configured devices may still use Streamglass; restore their proxy in Device Setup or on the device before quitting.', ...cleanup.errors].join('\n') });
+        message: macProblem ? 'Mac proxy settings could not be fully restored' : deviceProblem ? 'Some Android settings could not be restored' : 'Proxy restoration could not be confirmed',
+        detail: [macProblem ? 'Your Mac may still point to Streamglass. Keep the app open and restore its proxy in Device Setup or macOS Network settings.'
+          : deviceProblem ? 'Restore the device’s proxy in Device Setup or on the device before quitting.' : 'Saved settings are kept for retry.', ...cleanup.errors].join('\n') });
       if (result.response !== 1) {
         checkingQuit = false;
         // The device service exposes any resume failure through monitorError.
@@ -700,14 +761,16 @@ app.on('before-quit', event => {
     }
     shuttingDown = true;
     clearTimeout(pendingTimer);
-    await mcpService?.close();
-    await setupSiteClose?.();
     scriptService?.close();
-    if (engine && engine.exitCode === null) {
+    // These are independent, so stop them together rather than one after another.
+    const stopEngine = async () => {
+      if (!engine || engine.exitCode !== null || engine.signalCode !== null) return;
+      const exited = new Promise(resolve => engine.once('exit', resolve));
       engine.kill('SIGTERM');
-      await Promise.race([new Promise(resolve => engine.once('exit', resolve)), new Promise(resolve => setTimeout(resolve, 2500))]);
+      await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 2500))]);
       if (engine.exitCode === null) engine.kill('SIGKILL');
-    }
+    };
+    await Promise.all([mcpService?.close(), setupSiteClose?.(), stopEngine()].map(step => Promise.resolve(step).catch(() => {})));
     app.quit();
   })();
 });

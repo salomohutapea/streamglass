@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readColumnWidths,readColumns,matchesLibrary,matchesQuickFilters,recordContentTypes} from './traffic-preferences.mjs';
 test('column preferences discard unknown properties and retain a usable default',()=>{
  assert.deepEqual(readColumns('["status","status","secret"]'),['status']);
- for(const value of ['[]','{}','bad','["unknown"]',null]) assert.deepEqual(readColumns(value),['method','request','status','duration']);
+ for(const value of ['[]','{}','bad','["unknown"]',null]) assert.deepEqual(readColumns(value),['method','request','time','ssl','device','fields']);
 });
 test('Pinned library uses durable record metadata and SSE stays independent',()=>{
  assert.equal(matchesLibrary({pinned:true},'pinned'),true);
