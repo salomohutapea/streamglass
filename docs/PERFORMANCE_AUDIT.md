@@ -134,6 +134,48 @@ The measurements change the order. Fix the renderer first, because that's what u
 - The Breakpoints window polls with the etag.
 - Unrelated fix found during the run: the phone setup page defaulted to proxy port + 1, which put a proxy on 8080 onto Metro's 8081. It now skips common dev-server ports.
 
+## Round 2 (2026-11-18)
+
+Measured at 1.1.4 plus unreleased work, with `scripts/perf-baseline.mjs`, a new engine-only harness (`scripts/perf-engine.py`), Chromium traces and quit timing. All traffic and profiles were synthetic. Load averages were 2–5, and other agents were working on the same machine, so the absolute latencies vary by about 1 ms between runs; the comparisons below are paired, back-to-back runs.
+
+**Starting point.** Round 1 held: the idle renderer was 0.2% busy, the idle engine 0.5%, and SSE latency stayed flat. What remained:
+- The renderer process used 16–31% CPU during traffic while its main thread was only 7–17% busy.
+- The proxy added about 3 ms p50 per HTTP request.
+- Quitting took about a second.
+
+| # | Finding | Fix | Measured gain |
+| --- | --- | --- | --- |
+| R1 | Two CSS animations (`sse-pulse` on the live dot, `incoming-request` on every cell of a new row) animated `box-shadow`, which repaints the table layer about 60 times a second during traffic. That repainting was the gap between the main thread and the process CPU. | The pulse is a `::after` ring animated with `transform`/`opacity` (`frontend/src/timing.css`). The row flash is one overlay per row with an `opacity` animation (`frontend/src/style.css`). Both look the same and respect reduced motion. | Renderer process CPU: live SSE 26% → 6–13%, live SSE on Events tab 30–35% → 18%, 20 HTTP req/s 25–27% → 11–14%. Layout/style during HTTP fell from 3.5% to 0.7%. |
+| R2 | Opening an 8 MB JSON body takes about 400 ms. 270 ms of that is formatting, which reran each time the viewer remounted. | `JsonViewer.tsx` keeps the formatted text of the last body of 256 KB or more. | Returning to the same 8 MB body: 425 → 240 ms. |
+| R3 | `/api/state` re-serialized every row whenever anything changed. | Only rows whose capture changed are rebuilt. Anything that changes derived row data (custom fields, assertions, labels, gates) still calls `changed()` without an id, which rebuilds every row (`service.py` `state_rows_snapshot`). | State delta p50 at 5,000 captures: 39–52 ms → 3.4–5.1 ms. Engine CPU for the mixed management workload at 5,000 captures: 45–49% → 10–14%. |
+| R4 | Once retention was full, each new capture sorted every evictable capture. | Each retention group keeps a sorted `evictable` list, updated as captures are saved and removed. | At eight concurrent clients, throughput rose 22–28% and engine CPU per request fell 19–23%. |
+| R5 | A plain HTTP flow made five message conversions and three saves. | Rule-free requests skip the final request re-capture, and an unchanged response reuses its first conversion. | Isolated added p95 latency: about 5.0 → 3.9 ms. |
+| R6 | Quitting kept the windows visible while it restored the Mac proxy (several `networksetup` calls), then closed MCP, the setup site and the engine one after another. | `before-quit` hides the windows (and the app) at once, shows them again if restoration needs a decision, and stops MCP, the setup site and the engine in parallel. A crashed engine no longer costs the 2.5 s timeout. | Windows disappear right away. Measured quit without a proxy to restore: about 230 ms → 140–220 ms. The engine alone stops in about 110 ms (packaged) or 80 ms (source). |
+
+**Engine harness, two paired runs before → after.** Plain HTTP at 20 req/s added p95: 6.5–7.1 → 3.0–5.5 ms. Throughput at 8 clients: 827–832 → 1,224–1,250 req/s. 16 concurrent SSE streams at 50 events/s added p95: 5.5–6.4 → 4.3–5.7 ms. Cold start was the same within noise (about 360–380 ms from source in a separate check).
+
+**Where engine time goes** (cProfile active time, before the fixes):
+
+| Workload | mitmproxy and protocol code | Streamglass, SQLite and JSON | asyncio and other |
+| --- | --- | --- | --- |
+| Plain HTTP | 73% | 19% | 9% |
+| Saturated HTTP | 67% | 29% | 5% |
+| SSE | 60% | 28% | 12% |
+| Inspected HTTPS | 74% | 17% | 9% |
+
+A Rust proxy core would mostly raise the saturation point. At debugging rates, the engine used about 5% of one core even before these fixes. The renderer's remaining costs (Chromium baseline, Monaco text models) would not change with a Rust engine.
+
+**Tried and rejected:** a colour-only JSON mode for large bodies (memory went up), main-process setup-site polling with an etag (no measurable change), and lazy-loading Monaco (DOMContentLoaded is only about 160 ms of a 1.2 s launch).
+
+**Remaining, ranked by gain for the effort:**
+1. Format large bodies off the main thread, or show the first part first. The 8 MB case still has a 270 ms long task and takes the renderer from about 230 MB to 650–1,000 MB.
+2. Make search cheaper at 5,000 captures (15–18 ms p95 per poll).
+3. Batch SSE persistence: SQLite commits took 252 ms over 4,068 events in the SSE profile.
+4. Engine startup loads at most `MAX_RECORDS` (1,000) captures, although the inspected budget allows 5,000. That's a correctness question as much as a performance one.
+5. Electron's main process is about 250 MB with a 20 MB JS heap, which is the framework baseline (M2).
+
+New opt-in flags in `scripts/perf-baseline.mjs`: `--ux` (cold start, scrolling, selection, filter typing, large body, Tools window), `--ux-only`, `--records=N`, `--large-body-mb=N` and `--trace=DIR`. The default scenarios are unchanged.
+
 ## Measurement plan
 
 Rerun the baseline after each phase, with synthetic traffic only, on an otherwise idle machine. Builds, emulators and indexing distort the latency figures. `scripts/perf-baseline.mjs` covers the idle, long-SSE and steady-HTTP scenarios below. Breakpoint wait is not automated yet.

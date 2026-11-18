@@ -1,9 +1,34 @@
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from mitmproxy import http
+from mitmproxy.test.tflow import tflow
 from backend.service import Service, apply_message, message_value, device_platform, SSL_INTERRUPTION_REASON
+
+
+class CaptureHookTests(unittest.IsolatedAsyncioTestCase):
+    async def test_plain_flow_serializes_and_saves_only_once_per_stage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            service = Service(directory, "test-token", 47821)
+            self.addCleanup(service.db.close)
+            flow = tflow()
+            with patch.object(service, "save", wraps=service.save) as save, patch(
+                "backend.service.message_value", wraps=message_value,
+            ) as capture:
+                await service.request(flow)
+                self.assertEqual(save.call_count, 1)
+                self.assertEqual(capture.call_count, 1)
+                self.assertEqual(service.records[flow.id]["state"], "pending")
+
+                flow.response = http.Response.make(200, b"original")
+                await service.response(flow)
+                self.assertEqual(save.call_count, 2)
+                self.assertEqual(capture.call_count, 2)
+                record = service.records[flow.id]
+                self.assertEqual(record["state"], "complete")
+                self.assertEqual(record["response"], message_value(flow.response))
+                self.assertEqual(flow.response.raw_content, b"original")
 
 
 class MessageTests(unittest.TestCase):

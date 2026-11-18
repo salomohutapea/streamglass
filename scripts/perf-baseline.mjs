@@ -1,7 +1,11 @@
 // Performance baseline for docs/PERFORMANCE_AUDIT.md. Seeds synthetic captures, launches the built UI in
 // background mode (invisible, never focused), drives synthetic HTTP and SSE traffic through the proxy, and prints
-// JSON metrics. Usage: npm run build:ui && node scripts/perf-baseline.mjs [--quick]
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+// JSON metrics. Usage: npm run build:ui && node scripts/perf-baseline.mjs [--quick] [--skip-sse]
+// Opt-in extras, which leave the default scenarios unchanged: --records=N seeds N records instead of 1,000 (the engine
+// loads at most its 1,000-record limit at start, so more only grows the database);
+// --ux adds cold start, table scroll/select/filter-typing latency, a large JSON body and Tools window scenarios
+// (--ux-only runs just those); --trace=DIR writes a Chromium trace of every process per scenario.
+import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +16,11 @@ import { crc32, deflateSync } from 'node:zlib';
 import { _electron as electron } from 'playwright';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const flag = name => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
 const quick = process.argv.includes('--quick'), skipSse = process.argv.includes('--skip-sse');
+const uxOnly = process.argv.includes('--ux-only'), ux = uxOnly || process.argv.includes('--ux');
+const recordCount = Number(flag('records') ?? 1000), largeBodyMB = Number(flag('large-body-mb') ?? 8);
+const traceDir = flag('trace') ? path.resolve(flag('trace')) : null;
 const seconds = quick ? 8 : 20;
 const now = () => performance.now();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -43,6 +51,17 @@ function seedRecords(count) {
       response: { statusCode: 200, headers: [['content-type', sse ? 'text/event-stream' : 'application/json']], body: sse ? '' : body, bodyBase64: '' }, events });
   }
   return records;
+}
+
+// One extra capture with a large JSON response (--ux), as an API listing or export a user might open.
+function largeBodyRecord(megabytes, startedAt) {
+  const item = i => ({ id: i, sku: `SKU-${String(i).padStart(8, '0')}`, name: `Synthetic product ${i}`, price: +(i * 1.37).toFixed(2), tags: ['alpha', 'beta', 'gamma'], stock: { warehouse: `W${i % 9}`, count: i % 500 } });
+  const one = JSON.stringify(item(0)).length + 1, body = JSON.stringify({ items: Array.from({ length: Math.ceil(megabytes * 2 ** 20 / one) }, (_, i) => item(i)) });
+  const url = 'https://large-body.example.test/v1/export?format=json';
+  return { id: 'seed-large-body', kind: 'request', method: 'GET', url, startedAt, endedAt: startedAt + .4, durationMs: 400, state: 'complete', statusCode: 200,
+    clientIsLocal: true, device: '127.0.0.1', eventCount: 0, isSSE: false, events: [],
+    request: { method: 'GET', url, headers: [['accept', 'application/json']], body: '', bodyBase64: '' },
+    response: { statusCode: 200, headers: [['content-type', 'application/json']], body, bodyBase64: '' } };
 }
 
 async function freePort() { const server = net.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); const { port } = server.address(); await new Promise(resolve => server.close(resolve)); return port; }
@@ -89,7 +108,8 @@ const latencyStats = values => ({ ...summary(values), first100: summary(values.s
 
 const directory = await mkdtemp(path.join(tmpdir(), 'streamglass-perf-'));
 const proxyPort = await freePort();
-const records = seedRecords(1000);
+const records = seedRecords(recordCount);
+if (ux) records.push(largeBodyRecord(largeBodyMB, 1792123200 + recordCount + 60));
 execFileSync(path.join(root, '.venv/bin/python'), ['-c', `import sqlite3,json,sys
 c=sqlite3.connect(sys.argv[1])
 c.execute('CREATE TABLE config (key TEXT PRIMARY KEY,value TEXT NOT NULL)')
@@ -100,10 +120,22 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)], { inp
 
 const env = { ...process.env, STREAMGLASS_BACKGROUND: '1', STREAMGLASS_MCP_PORT: '0', STREAMGLASS_KEEP_CAPTURES: '1', STREAMGLASS_BUILT_UI: '1', STREAMGLASS_DATA_DIR: directory, STREAMGLASS_SETUP_PORT: String(await freePort()) };
 delete env.ELECTRON_RUN_AS_NODE;
+if (traceDir) await mkdir(traceDir, { recursive: true });
+const launchStarted = now();
 const app = await electron.launch({ args: [root, `--user-data-dir=${path.join(directory, 'chromium')}`], env, timeout: 60000 });
 const results = { seeded: { records: records.length, sseRecords: records.filter(r => r.isSSE).length, eventsPerSeededStream: 200 }, scenarioSeconds: seconds };
 try {
   const page = await app.firstWindow();
+  if (ux) {
+    // Cold start: process launch to the first painted table row. The renderer figures count from its navigation start.
+    const windowMs = now() - launchStarted;
+    const rendererFirstRowMs = await page.waitForFunction(() => document.querySelector('tr[data-record-id]') && performance.now(), null, { polling: 'raf', timeout: 60000 }).then(handle => handle.jsonValue());
+    const launchToFirstRowMs = now() - launchStarted;
+    const paint = await page.evaluate(() => ({ fcp: performance.getEntriesByName('first-contentful-paint')[0]?.startTime ?? null, domContentLoaded: performance.getEntriesByType('navigation')[0]?.domContentLoadedEventEnd ?? null,
+      scriptKB: Math.round(performance.getEntriesByType('resource').filter(r => r.initiatorType === 'script' || r.name.endsWith('.js')).reduce((sum, r) => sum + (r.decodedBodySize || 0), 0) / 1024) }));
+    results.coldStart = { launchToWindowMs: Math.round(windowMs), launchToFirstRowMs: Math.round(launchToFirstRowMs), rendererDomContentLoadedMs: Math.round(paint.domContentLoaded), rendererFirstContentfulPaintMs: paint.fcp == null ? null : Math.round(paint.fcp), rendererFirstRowMs: Math.round(rendererFirstRowMs) };
+    console.error(`coldStart: ${JSON.stringify(results.coldStart)}`);
+  }
   await page.getByRole('dialog', { name: 'Welcome tour' }).getByRole('button', { name: 'Skip tour' }).click();
   const bootstrap = await page.evaluate(() => window.streamglass.getBootstrap());
   const api = async route => (await fetch(bootstrap.baseUrl + route, { headers: { Authorization: `Bearer ${bootstrap.token}` } }));
@@ -121,7 +153,10 @@ try {
   page.on('response', response => { const url = response.url(), size = Number(response.headers()['content-length'] ?? 0);
     if (url.includes('/api/state')) { transfer.state += size; transfer.stateCount++; } else if (url.includes('/api/records/')) { transfer.record += size; transfer.recordCount++; } else if (url.includes('/api/search')) transfer.search += size; });
 
+  // Trace categories for --trace: the timeline DevTools records, plus compositor, GPU, scheduler and worker activity.
+  const traceCategories = ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.frame', 'toplevel', 'v8', 'v8.execute', 'blink', 'blink.user_timing', 'cc', 'gpu', 'viz', 'renderer.scheduler', 'loading', 'latencyInfo', 'ipc', 'mojom', 'electron'];
   async function measure(name, work) {
+    if (traceDir) await app.evaluate(({ contentTracing }, categories) => contentTracing.startRecording({ included_categories: categories, excluded_categories: ['*'] }), traceCategories);
     for (const key of Object.keys(transfer)) transfer[key] = 0;
     await app.evaluate(({ app }) => app.getAppMetrics());
     const before = (await cdp.send('Performance.getMetrics')).metrics, engineBefore = engineProcess(), helpersBefore = helperCpu(), started = now();
@@ -148,15 +183,117 @@ try {
       ...detail,
     };
     console.error(`${name}: ${JSON.stringify(results[name])}`);
+    if (traceDir) { const file = path.join(traceDir, `${name}.json`); await app.evaluate(({ contentTracing }, target) => contentTracing.stopRecording(target), file); console.error(`trace: ${file}`); }
+  }
+
+  // Input-to-next-frame latency for trusted input in the renderer: from the event's timestamp to a task after the
+  // following animation frame, which is when the frame that reflects the handler's work has been produced.
+  const installLatencyProbe = target => target.evaluate(() => {
+    if (window.__perfLatency) return;
+    window.__perfLatency = [];
+    for (const type of ['keydown', 'click', 'input']) addEventListener(type, event => { const start = event.timeStamp; requestAnimationFrame(() => setTimeout(() => window.__perfLatency.push({ type, ms: performance.now() - start }))); }, true);
+    window.__perfLongTasks = [];
+    new PerformanceObserver(list => { for (const entry of list.getEntries()) window.__perfLongTasks.push(entry.duration); }).observe({ type: 'longtask', buffered: false });
+  });
+  const takeLatency = async (target, type) => {
+    const { latencies, longTasks } = await target.evaluate(kind => { const out = { latencies: window.__perfLatency.filter(item => !kind || item.type === kind).map(item => item.ms), longTasks: window.__perfLongTasks }; window.__perfLatency = []; window.__perfLongTasks = []; return out; }, type);
+    return { ...summary(latencies), longTasks: longTasks.length, longestTaskMs: longTasks.length ? Math.round(Math.max(...longTasks)) : 0 };
+  };
+  const settle = target => target.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 50)))));
+
+  async function uxScenarios() {
+    await installLatencyProbe(page);
+    const scroller = await page.evaluate(() => { const row = document.querySelector('tr[data-record-id]'); let node = row?.parentElement; while (node && !(node.scrollHeight > node.clientHeight + 10 && /(auto|scroll)/.test(getComputedStyle(node).overflowY))) node = node.parentElement; if (node) node.dataset.perfScroller = '1'; return Boolean(node); });
+    if (!scroller) throw new Error('Cannot find the table scroller');
+    // Scroll: jump through the whole table in viewport-sized steps and time each step until the next frame is out.
+    results.tableScroll = await page.evaluate(async () => {
+      const element = document.querySelector('[data-perf-scroller]'), frame = () => new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve)));
+      element.scrollTop = 0; await frame();
+      const steps = [], long = []; const observer = new PerformanceObserver(list => { for (const entry of list.getEntries()) long.push(entry.duration); }); observer.observe({ type: 'longtask' });
+      const started = performance.now();
+      while (element.scrollTop + element.clientHeight < element.scrollHeight - 2) { const start = performance.now(); element.scrollTop += element.clientHeight; await frame(); steps.push(performance.now() - start); }
+      const total = performance.now() - started; observer.disconnect(); element.scrollTop = 0; await frame();
+      const sorted = [...steps].sort((a, b) => a - b), pick = p => +sorted[Math.min(sorted.length - 1, Math.ceil(p * sorted.length) - 1)].toFixed(2);
+      return { steps: steps.length, totalMs: Math.round(total), p50: pick(.5), p95: pick(.95), max: pick(1), longTasks: long.length, renderedRows: document.querySelectorAll('tr[data-record-id]').length };
+    });
+    console.error(`tableScroll: ${JSON.stringify(results.tableScroll)}`);
+    await settle(page); await takeLatency(page);
+    // Select: click a row, then move the selection with the keyboard.
+    await page.locator('tr[data-record-id]').nth(3).click(); await settle(page);
+    const select = await takeLatency(page, 'click');
+    for (let i = 0; i < 30; i++) { await page.keyboard.press('ArrowDown'); await sleep(60); }
+    await settle(page);
+    results.tableSelect = { click: select, arrowDown: await takeLatency(page, 'keydown') };
+    console.error(`tableSelect: ${JSON.stringify(results.tableSelect)}`);
+    // Filter typing: URL filter, then a response-content filter; each keystroke re-filters every retained row.
+    const filterBox = page.getByRole('textbox', { name: 'Filter requests', exact: true });
+    if (!await filterBox.count()) await page.getByRole('button', { name: 'Filter requests', exact: true }).click();
+    const typing = async scope => {
+      await page.getByRole('combobox', { name: 'Search content' }).selectOption(scope);
+      await filterBox.fill(''); await settle(page); await takeLatency(page);
+      await filterBox.focus(); await page.keyboard.type('items/12', { delay: 80 }); await sleep(500); await settle(page);
+      const result = { ...await takeLatency(page, 'input'), rowsShown: await page.locator('tr[data-record-id]').count() };
+      await filterBox.fill(''); await settle(page); return result;
+    };
+    const scopes = await page.getByRole('combobox', { name: 'Search content' }).evaluate(select => [...select.options].map(option => option.value));
+    results.filterTyping = { url: await typing(scopes[0]) };
+    if (scopes.includes('response')) results.filterTyping.response = await typing('response');
+    await page.getByRole('combobox', { name: 'Search content' }).selectOption(scopes[0]);
+    console.error(`filterTyping: ${JSON.stringify(results.filterTyping)}`);
+    // Large body: select the large capture and open its Response tab until the editor shows text.
+    await filterBox.fill('large-body.example.test'); await page.locator('tr[data-record-id="seed-large-body"]').waitFor();
+    await page.getByRole('tab', { name: 'Overview' }).click().catch(() => {});
+    await settle(page); await takeLatency(page);
+    const largeStarted = now();
+    await page.locator('tr[data-record-id="seed-large-body"]').click();
+    await page.getByRole('tab', { name: 'Response' }).click();
+    await page.locator('.inspector .json-viewer .view-lines').first().waitFor({ timeout: 120000 });
+    await page.waitForFunction(() => document.querySelector('.inspector .json-viewer .view-lines')?.textContent.includes('items'), null, { polling: 'raf', timeout: 120000 });
+    const openMs = now() - largeStarted;
+    await settle(page);
+    const openLatency = await takeLatency(page);
+    // Scroll the open editor, then switch away and back.
+    const scrollStarted = now();
+    await page.locator('.inspector .json-viewer .monaco-editor').first().hover();
+    for (let i = 0; i < 20; i++) { await page.mouse.wheel(0, 2000); await sleep(30); }
+    await settle(page);
+    const scrollMs = now() - scrollStarted;
+    const switchStarted = now();
+    await page.getByRole('tab', { name: 'Overview' }).click(); await settle(page);
+    await page.getByRole('tab', { name: 'Response' }).click();
+    await page.waitForFunction(() => document.querySelector('.inspector .json-viewer .view-lines')?.textContent.includes('items'), null, { polling: 'raf', timeout: 120000 });
+    const reopenMs = now() - switchStarted;
+    const heap = await cdp.send('Performance.getMetrics').then(({ metrics }) => metrics.find(m => m.name === 'JSHeapUsedSize').value / 2 ** 20);
+    results.largeBody = { megabytes: largeBodyMB, clickToTextMs: Math.round(openMs), openLongTasks: openLatency.longTasks, openLongestTaskMs: openLatency.longestTaskMs, wheelScroll20Ms: Math.round(scrollMs), tabSwitchBackMs: Math.round(reopenMs), rendererJsHeapMB: +heap.toFixed(1) };
+    console.error(`largeBody: ${JSON.stringify(results.largeBody)}`);
+    await page.getByRole('tab', { name: 'Overview' }).click();
+    await filterBox.fill(''); await settle(page);
+    await page.locator('tr[data-record-id]').nth(3).click(); await settle(page);
+    // Tools window: click to the window's Tools region being visible, then close it.
+    const toolsStarted = now();
+    const opened = app.waitForEvent('window');
+    await page.getByRole('button', { name: 'Tools', exact: true }).click();
+    const tools = await opened;
+    const toolsWindowMs = now() - toolsStarted;
+    await tools.getByRole('region', { name: 'Tools', exact: true }).waitFor({ timeout: 30000 });
+    results.toolsWindow = { clickToWindowMs: Math.round(toolsWindowMs), clickToToolsVisibleMs: Math.round(now() - toolsStarted) };
+    await tools.close();
+    console.error(`toolsWindow: ${JSON.stringify(results.toolsWindow)}`);
+    const processes = await app.evaluate(({ app }) => app.getAppMetrics().map(p => ({ type: p.type, memoryMB: p.memory.workingSetSize / 1024 })));
+    const mainMemory = await app.evaluate(() => { const usage = process.memoryUsage(); return Object.fromEntries(Object.entries(usage).map(([key, value]) => [key, Math.round(value / 2 ** 20)])); });
+    results.uxMemoryMB = { ...Object.fromEntries(['Browser', 'Tab', 'GPU'].map(type => [type, Math.round(processes.filter(p => p.type === type).reduce((sum, p) => sum + p.memoryMB, 0))])), mainProcess: mainMemory };
+    console.error(`uxMemoryMB: ${JSON.stringify(results.uxMemoryMB)}`);
   }
 
   const stateBytes = (await (await api('/api/state')).arrayBuffer()).byteLength;
   results.stateResponseBytes = stateBytes;
+  if (ux) await uxScenarios();
+  if (!uxOnly) {
   await measure('idleTable', () => sleep(seconds * 1000));
-  await page.locator('tr[data-record-id="seed-980"]').click();
+  await page.locator(`tr[data-record-id="seed-${recordCount - 20}"]`).click();
   await page.getByRole('tab', { name: /Events/ }).click();
   await measure('idleSseSelectedEventsTab', () => sleep(seconds * 1000));
-  await page.locator('tr[data-record-id="seed-981"]').click();
+  await page.locator(`tr[data-record-id="seed-${recordCount - 19}"]`).click();
 
   const sseCount = quick ? 400 : 1500;
   if (!skipSse) {
@@ -187,6 +324,7 @@ try {
   await page.getByRole('combobox', { name: 'Search content' }).selectOption('response');
   await page.getByRole('textbox', { name: 'Filter requests', exact: true }).fill('perf-needle');
   await measure('steadyHttpWithResponseFilter', async () => ({ requestLatencyMs: summary(await steadyHttp(proxyPort, 20, seconds * 1000)) }));
+  }
   results.databaseMB = +((await stat(path.join(directory, 'captures.sqlite3'))).size / 2 ** 20).toFixed(1);
 } finally {
   await app.close().catch(() => {});

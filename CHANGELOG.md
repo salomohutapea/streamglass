@@ -11,6 +11,9 @@
 - Settings and Connect a device now open in separate windows. Agent (MCP) is in Settings.
 
 - Redesigned device setup with guided phone setup, simulator and emulator connections, Metro options, and Revert. Android and iOS verify traffic independently each time the dialog opens. LAN device approvals expire after 24 hours, and Mac development ports other than Metro require destination approval.
+- Quitting hides the windows at once; proxy restoration and engine shutdown finish behind them, and the shutdown steps run in parallel. Windows return if restoration needs attention.
+- Lower renderer CPU during live traffic: the live-stream pulse and the new-row flash are compositor animations instead of repainted box-shadows. Switching back to a large JSON body reuses its formatted text.
+- Lower engine overhead per request: state polls rebuild only changed rows, eviction no longer sorts the retained captures, and unmodified HTTP captures are serialized and saved fewer times.
 
 ### Security
 

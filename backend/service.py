@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from bisect import bisect_left, insort
 import copy
 import fnmatch
 import json
@@ -291,9 +292,10 @@ class Service:
         self.record_revs = {}
         self.json_event_cache = {}
         self.mark_fields()
-        # Records subject to the count/size limits, rebuilt when the TLS allowlist changes or a record is removed elsewhere.
+        # Records subject to the count/size limits, rebuilt when the TLS allowlist changes.
         self.retention = None
         self.state_rows_cache = None
+        self.state_rows_dirty = None
         self.search_lock = asyncio.Lock()
         self.search_cache = None
         for record in list(self.records.values()):
@@ -352,24 +354,28 @@ class Service:
         if new_events:
             self.db.executemany("INSERT OR REPLACE INTO events VALUES (?,?,?)", ((record_id, persisted + index, item) for index, item in enumerate(new_events)))
         self.event_rows[record_id] = (len(events), event_bytes)
-        self.records[record_id] = record
-        for group in retention["groups"].values():
-            if record_id in group["ids"]:
-                group["ids"].discard(record_id)
-                group["size"] -= self.record_sizes.get(record_id, 0)
-        self.record_sizes[record_id] = payload_size
         # Captures for TLS-allowlisted domains have their own larger budget, so ordinary traffic never evicts them.
         # Pinned captures are never evicted but still count.
         name = "inspected" if self.tls_allowlisted(record, retention["patterns"]) else "limited"
         group = retention["groups"][name]
-        group["ids"].add(record_id)
-        group["size"] += payload_size
+        order = None if record.get("pinned") else (record["startedAt"], record_id)
+        if record_id in group["ids"] and group["ids"][record_id] == order:
+            group["size"] += payload_size - self.record_sizes.get(record_id, 0)
+        else:
+            self.remove_from_retention(record_id)
+            group["ids"][record_id] = order
+            group["size"] += payload_size
+            if order is not None:
+                insort(group["evictable"], order)
+        self.records[record_id] = record
+        self.record_sizes[record_id] = payload_size
         self.evict(name)
         self.db.commit()
-        self.changed()
-        self.record_revs[record_id] = self.revision
-        if record_id in self.records and record.get("kind") != "tunnel":
-            self.mark_fields(record_id)
+        self.changed(record_id)
+        if record_id in self.records:
+            self.record_revs[record_id] = self.revision
+            if record.get("kind") != "tunnel":
+                self.mark_fields(record_id)
 
     def mark_fields(self, record_id=None):
         """Queue one capture (or all) for custom field evaluation; nothing is queued while no field is configured."""
@@ -394,30 +400,41 @@ class Service:
         max_records, max_bytes = self.retention_limits()[name]
         if len(group["ids"]) <= max_records and group["size"] <= max_bytes:
             return False
-        evictable = sorted((self.records[key] for key in group["ids"] if not self.records[key].get("pinned")), key=lambda r: r["startedAt"])
-        for oldest in evictable:
-            if len(group["ids"]) <= max_records and group["size"] <= max_bytes:
-                break
-            group["size"] -= self.record_sizes.get(oldest["id"], 0)
-            group["ids"].discard(oldest["id"])
-            self.forget_record(oldest["id"])
+        while group["evictable"] and (len(group["ids"]) > max_records or group["size"] > max_bytes):
+            self.forget_record(group["evictable"][0][1])
         return True
 
     def retention_index(self):
         key = tuple(self.settings["tlsDomains"])
         if self.retention is None or self.retention["key"] != key:
             patterns = [re.compile(pattern, re.IGNORECASE) for pattern in self.tls_patterns()]
-            groups = {"limited": {"ids": set(), "size": 0}, "inspected": {"ids": set(), "size": 0}}
+            groups = {name: {"ids": {}, "size": 0, "evictable": []} for name in ("limited", "inspected")}
             for record_id, record in self.records.items():
                 group = groups["inspected" if self.tls_allowlisted(record, patterns) else "limited"]
-                group["ids"].add(record_id)
+                order = None if record.get("pinned") else (record["startedAt"], record_id)
+                group["ids"][record_id] = order
                 group["size"] += self.record_sizes.get(record_id, 0)
+                if order is not None:
+                    group["evictable"].append(order)
+            for group in groups.values():
+                group["evictable"].sort()
             self.retention = {"key": key, "patterns": patterns, "groups": groups}
         return self.retention
 
+    def remove_from_retention(self, record_id):
+        if self.retention is not None:
+            for group in self.retention["groups"].values():
+                if record_id in group["ids"]:
+                    order = group["ids"].pop(record_id)
+                    group["size"] -= self.record_sizes.get(record_id, 0)
+                    if order is not None:
+                        group["evictable"].pop(bisect_left(group["evictable"], order))
+                    return
+
     def forget_record(self, record_id):
-        self.json_event_cache.pop(record_id, None)
         """Drop one retained capture from memory and storage; the caller commits and calls changed()."""
+        self.remove_from_retention(record_id)
+        self.json_event_cache.pop(record_id, None)
         self.records.pop(record_id, None)
         self.record_sizes.pop(record_id, None)
         self.event_rows.pop(record_id, None)
@@ -426,8 +443,8 @@ class Service:
         self.field_full_cache.pop(record_id, None)
         self.field_dirty.pop(record_id, None)
         self.record_revs.pop(record_id, None)
-        if self.retention is not None and any(record_id in group["ids"] for group in self.retention["groups"].values()):
-            self.retention = None
+        if self.state_rows_dirty is not None:
+            self.state_rows_dirty.discard(record_id)
         self.db.execute("DELETE FROM records WHERE id=?", (record_id,))
         self.db.execute("DELETE FROM events WHERE record=?", (record_id,))
 
@@ -467,13 +484,14 @@ class Service:
         self.json_event_cache[record["id"]] = (len(events), found)
         return found
 
-    def state_rows(self):
+    def state_rows(self, selected=None):
         """Table rows, newest first, plus each application's icon once; rows carry no icon data."""
         keys = ("id", "url", "method", "statusCode", "device", "startedAt", "endedAt", "durationMs", "state", "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "clientIsLocal", "pinned", "annotation", "tlsFailure", "deviceId", "deviceName")
         records, icons = [], {}
         fields_cache, current = self.field_cache, self.productivity["fields"]
         scripted_fields = any(field.get("script", "").strip() for field in current)
-        for r in sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True):
+        ordered = sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True) if selected is None else selected
+        for r in ordered:
             row = {**{key: r.get(key) for key in keys}, "pinned": bool(r.get("pinned")), "isSSE": is_sse(r), "serverMs": (r.get("timings") or {}).get("serverMs"), "devicePlatform": device_platform(r), **({"sseStatus": sse_status(r)} if is_sse(r) else {}), "assertionSummary": self.assertion_summaries.get(r["id"]), "rev": self.record_revs.get(r["id"], 0)}
             row["requestContentType"] = content_type(r, "request")
             row["responseContentType"] = content_type(r, "response")
@@ -511,17 +529,30 @@ class Service:
         after it are sent, with the full id order so the client can drop removed rows. The etag also covers the small
         summary, which can change without a revision bump (proxy status, gates)."""
         if not self.state_rows_cache or self.state_rows_cache["revision"] != self.revision:
-            records, icons = self.state_rows()
             previous = self.state_rows_cache["rows"] if self.state_rows_cache else {}
-            rows = {}
-            for row in records:
+            ordered = sorted(self.records.values(), key=lambda record: record["startedAt"], reverse=True)
+            dirty = self.state_rows_dirty
+            selected = [record for record in ordered if dirty is None or record["id"] in dirty or record["id"] not in previous]
+            changed_rows, _ = self.state_rows(selected)
+            rows, icons = {}, {}
+            for row in changed_rows:
                 text = json.dumps(row, separators=(",", ":"))
                 old = previous.get(row["id"])
                 rows[row["id"]] = (text, old[1] if old and old[0] == text else self.revision)
+            order = []
+            for record in ordered:
+                record_id = record["id"]
+                order.append(record_id)
+                if record_id not in rows:
+                    rows[record_id] = previous[record_id]
+                app = record.get("application")
+                if isinstance(app, dict) and app.get("icon") and app.get("id"):
+                    icons.setdefault(app["id"], app["icon"])
             icons_json = json.dumps(icons, separators=(",", ":"))
             old_icons = self.state_rows_cache["icons"] if self.state_rows_cache else None
-            self.state_rows_cache = {"revision": self.revision, "order": [row["id"] for row in records], "rows": rows,
+            self.state_rows_cache = {"revision": self.revision, "order": order, "rows": rows,
                                      "icons": (icons_json, old_icons[1] if old_icons and old_icons[0] == icons_json else self.revision)}
+            self.state_rows_dirty = set()
         cache = self.state_rows_cache
         summary = json.dumps(self.state_summary(), separators=(",", ":"))
         etag = f"{self.instance}-{self.revision}-{zlib.crc32(summary.encode()):08x}"
@@ -536,7 +567,12 @@ class Service:
         icons = f',"applicationIcons":{cache["icons"][0]}' if cache["icons"][1] > base else ""
         return etag, f'{head},"delta":true,"rows":[{changed}],"ids":{json.dumps(cache["order"], separators=(",", ":"))}{icons}}}'
 
-    def changed(self):
+    def changed(self, record_id=None):
+        # Without a capture ID, callers may have changed derived row data (fields, assertions, gates).
+        if record_id is None:
+            self.state_rows_dirty = None
+        elif self.state_rows_dirty is not None and record_id in self.records:
+            self.state_rows_dirty.add(record_id)
         self.dirty = True
         self.revision += 1
 
@@ -975,14 +1011,17 @@ class Service:
             if self.bypass_rules(flow):
                 flow.metadata["streamglass_passthrough"] = True
                 return
+            started = time.time()
+            original = message_value(flow.request, True)
             if not self.settings["capturePaused"]:
                 record = {"id": flow.id, "kind": "request", "isEncrypted": False, "sslInspected": flow.request.scheme == "https",
                           "host": flow.request.host, "port": flow.request.port,
                           "url": flow.request.url, "method": flow.request.method, "device": str(flow.client_conn.peername[0]),
-                          "startedAt": time.time(), "state": "pending", "eventCount": 0, "events": [], "request": message_value(flow.request, True)}
+                          "startedAt": started, "state": "pending", "eventCount": 0, "events": [], "request": original}
                 self.save(self.attribute_record(flow.client_conn, record))
             original_request = copy.deepcopy(flow.request) if any(rule["enabled"] for rule in self.traffic_tools["mapLocalRules"]) or any(rule["enabled"] for rule in self.scenarios) or traffic_rules.rules_active(self.traffic_tools) else None
-            original = message_value(flow.request, True)
+            # Keep the final save on rule paths, including scripts that only add capture logs.
+            may_change = original_request is not None or bool(self.rules)
             value = await self.process(flow, "request", original)
             if value != original:
                 apply_message(flow.request, value, True)
@@ -1003,7 +1042,7 @@ class Service:
             if flow.metadata.get("streamglass_map_local"):
                 flow.metadata["streamglass_original_request"] = original_request
             flow.metadata["streamglass_forwarded_at"] = time.time()
-            if flow.id in self.records:
+            if may_change and flow.id in self.records:
                 self.records[flow.id].update(request=message_value(flow.request, True), url=flow.request.url, method=flow.request.method)
                 if flow.metadata.get("streamglass_applied_rules"):
                     self.records[flow.id]["appliedRules"] = list(flow.metadata["streamglass_applied_rules"])
@@ -1259,11 +1298,14 @@ class Service:
                 flow.response.headers["content-length"] = str(len(flow.response.raw_content))
             if complete_response(self, flow):
                 return
+            captured = None
             if flow.id not in self.streams and not flow.metadata.get("streamglass_response_processed"):
                 original = message_value(flow.response)
                 value = await self.process(flow, "response", original)
                 if value != original:
                     apply_message(flow.response, value, headers_only=flow.request.method == "HEAD")
+                else:
+                    captured = original
             if self.bypass_rules(flow) and flow.metadata.pop("streamglass_map_local", None):
                 flow.response = None
                 return
@@ -1275,7 +1317,7 @@ class Service:
                                 "body": "", "bodyBase64": "", "bodyUnavailable": True, "bodyBytes": len(raw),
                                 "bodyPreview": raw[:65536].decode("utf-8", "replace"), "bodyPreviewBytes": min(len(raw), 65536),
                                 "bodyUnavailableReason": "Map Local response exceeds body retention limit; bounded preview retained."}
-                else:
+                elif captured is None:
                     captured = message_value(flow.response)
                 record.update(response=captured, statusCode=flow.response.status_code, state="complete")
                 self.save(record)

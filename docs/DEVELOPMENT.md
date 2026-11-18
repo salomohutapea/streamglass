@@ -109,7 +109,9 @@ Before labeling a 1.0.0 artifact, use the [release qualification checklist](RELE
 npm run build:ui && node scripts/perf-baseline.mjs [--quick] [--skip-sse]
 ```
 
-The script seeds 1,000 synthetic captures, sends synthetic HTTP and SSE traffic through the proxy, and prints renderer, Electron and engine metrics as JSON. It sets `STREAMGLASS_BACKGROUND=1`, which works only in unpackaged builds. In that mode windows are invisible and ignore the mouse, focus requests do nothing, and there's no Dock icon. Results and the findings they test are in the [performance audit](PERFORMANCE_AUDIT.md).
+The script seeds 1,000 synthetic captures, sends synthetic HTTP and SSE traffic through the proxy, and prints renderer, Electron and engine metrics as JSON. It sets `STREAMGLASS_BACKGROUND=1`, which works only in unpackaged builds. In that mode windows are invisible and ignore the mouse, focus requests do nothing, and there's no Dock icon. Results and the findings they test are in the [performance audit](PERFORMANCE_AUDIT.md). Add `--ux` for cold start, scrolling, filter typing, large-body and Tools-window timings.
+
+For the engine alone, `.venv/bin/python scripts/perf-engine.py --out <new directory> [scenario ...]` starts the engine with a temporary profile against a synthetic loopback origin. It measures HTTP, throughput, SSE, large bodies, inspected HTTPS and management API scenarios. `--profile cprofile` records where engine time goes.
 
 ### Showcase captures
 
