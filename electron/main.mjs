@@ -627,11 +627,27 @@ async function start() {
     if (canceled || !filePaths.length) return null;
     return readMapLocalFile(filePaths[0]);
   });
+  function ruleEditorKind(owner) {
+    const kind = ['breakpoints', 'scripts'].find(value => editorWindows.get(`${value}:`) === owner);
+    if (!kind) throw new Error('This action requires a rules window');
+    return kind;
+  }
+  handle('show-other-rule-kind', async (event, reason) => {
+    if (!['imported', 'dragged'].includes(reason)) throw new Error('Invalid rule notice');
+    const source = ruleEditorKind(BrowserWindow.fromWebContents(event.sender));
+    const type = source === 'scripts' ? 'breakpoints' : 'scripts';
+    const title = type === 'scripts' ? 'JavaScript rules' : 'Breakpoint rules';
+    openEditor({ type });
+    const destination = editorWindows.get(`${type}:`);
+    await dialog.showMessageBox(destination, {
+      type: 'info',
+      message: reason === 'imported' ? `Rules imported into ${title}` : `This rule belongs in ${title}`,
+      detail: reason === 'imported' ? 'Imported rules are disabled. Review them before enabling.' : 'The rule stays in its current folder.',
+    });
+  });
   handle('import-rule-files', async event => {
     const owner = BrowserWindow.fromWebContents(event.sender);
-    if (!['breakpoints', 'scripts'].some(kind => editorWindows.get(`${kind}:`) === owner)) {
-      throw new Error('Rule import requires a rules window');
-    }
+    ruleEditorKind(owner);
     const { canceled, filePaths } = await dialog.showOpenDialog(owner, {
       title: 'Import Streamglass rules', properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'Streamglass rules', extensions: ['sgrules', 'json'] }],

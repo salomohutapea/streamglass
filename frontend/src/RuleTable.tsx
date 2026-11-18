@@ -9,6 +9,10 @@ export type TableFolder = { id: string; name: string; parentId?: string; enabled
 type Row = RuleRow<TableRule, TableFolder>;
 type Zone = 'before' | 'after' | 'inside';
 const dragType = 'application/x-streamglass-rule-row';
+export const ruleKindDragType = {
+  scripts: 'application/x-streamglass-script',
+  breakpoints: 'application/x-streamglass-breakpoint',
+};
 const stages: [string, string][] = [['request', 'Request'], ['response', 'Response'], ['event', 'SSE']];
 
 // An untitled rule is named by the last segment of its URL pattern, such as "dateflow" for *flight/dateflow.
@@ -21,8 +25,8 @@ export function ruleLabel(rule: TableRule) {
 
 /** Rules and folders in one compact table. Folders are rows that expand in place; rows drag to reorder or to move into
  *  a folder (Option+Up/Down does the same from the keyboard). Sorting is off while a search is filtering the list. */
-export default function RuleTable({ rows, folders, searching, emptyMessage, folderForm, onFolderForm, onSaveFolder, onToggleRule, onToggleFolder, onExpand, onEdit, onShare, onDeleteRule, onDeleteFolder, onAddRule, onPlace, onStep }: {
-  rows: Row[]; folders: TableFolder[]; searching: boolean; emptyMessage: string;
+export default function RuleTable({ kind, rows, folders, searching, emptyMessage, folderForm, onFolderForm, onSaveFolder, onToggleRule, onToggleFolder, onExpand, onEdit, onShare, onDeleteRule, onDeleteFolder, onAddRule, onPlace, onStep }: {
+  kind: keyof typeof ruleKindDragType; rows: Row[]; folders: TableFolder[]; searching: boolean; emptyMessage: string;
   folderForm: { id?: string; parentId?: string | null; name: string } | null;
   onFolderForm(form: { id?: string; parentId?: string | null; name: string } | null): void; onSaveFolder(): void;
   onToggleRule(rule: TableRule, enabled: boolean): void; onToggleFolder(folder: TableFolder, enabled: boolean): void; onExpand(folder: TableFolder, expanded: boolean): void;
@@ -43,11 +47,17 @@ export default function RuleTable({ rows, folders, searching, emptyMessage, fold
   };
   const dragProps = (row: Row) => sortable ? {
     draggable: true,
-    onDragStart: (event: DragEvent) => { dragging.current = { type: row.type, id: row.id }; event.dataTransfer.setData(dragType, `${row.type}:${row.id}`); event.dataTransfer.effectAllowed = 'move'; event.currentTarget.classList.add('dragging'); },
+    onDragStart: (event: DragEvent) => {
+      dragging.current = { type: row.type, id: row.id };
+      event.dataTransfer.setData(dragType, `${row.type}:${row.id}`);
+      if (row.type === 'rule') event.dataTransfer.setData(ruleKindDragType[kind], row.id);
+      event.dataTransfer.effectAllowed = 'move';
+      event.currentTarget.classList.add('dragging');
+    },
     onDragEnd: (event: DragEvent) => { dragging.current = null; setDrop(null); event.currentTarget.classList.remove('dragging'); },
-    onDragOver: (event: DragEvent) => { if (!event.dataTransfer.types.includes(dragType)) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; const zone = zoneFor(event, row); setDrop(current => current?.id === row.id && current.zone === zone ? current : { id: row.id, zone }); },
+    onDragOver: (event: DragEvent) => { if (!dragging.current || !event.dataTransfer.types.includes(dragType)) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; const zone = zoneFor(event, row); setDrop(current => current?.id === row.id && current.zone === zone ? current : { id: row.id, zone }); },
     onDragLeave: () => setDrop(current => current?.id === row.id ? null : current),
-    onDrop: (event: DragEvent) => { event.preventDefault(); const source = dragging.current; const zone = zoneFor(event, row); setDrop(null); dragging.current = null; if (source) onPlace(source, { type: row.type, id: row.id }, zone); },
+    onDrop: (event: DragEvent) => { const source = dragging.current; if (!source || !event.dataTransfer.types.includes(dragType)) return; event.preventDefault(); const zone = zoneFor(event, row); setDrop(null); dragging.current = null; onPlace(source, { type: row.type, id: row.id }, zone); },
   } : {};
   const onRowKey = (event: KeyboardEvent, row: Row) => {
     if (event.target !== event.currentTarget) return;
@@ -62,7 +72,7 @@ export default function RuleTable({ rows, folders, searching, emptyMessage, fold
   const form = (depth: number, key: string) => <tr key={key} className="rule-folder-form-row"><td colSpan={7} style={indent(depth)}><form className="rule-folder-inline" onSubmit={event => { event.preventDefault(); onSaveFolder(); }}><Folder size={13} aria-hidden="true"/><input aria-label="Folder name" placeholder="Folder name" autoFocus maxLength={128} value={folderForm?.name ?? ''} onChange={event => folderForm && onFolderForm({ ...folderForm, name: event.target.value })} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onFolderForm(null); } }}/><button type="button" onClick={() => onFolderForm(null)}>Cancel</button><button className="primary" type="submit" disabled={!folderForm?.name.trim()}>{folderForm?.id ? 'Save folder' : 'Create folder'}</button></form></td></tr>;
   const creatingIn = folderForm && !folderForm.id ? folderForm.parentId ?? null : undefined;
 
-  return <div className="rule-table-wrap" onDragOver={sortable ? event => { if (event.target === event.currentTarget && event.dataTransfer.types.includes(dragType)) event.preventDefault(); } : undefined}>
+  return <div className="rule-table-wrap" onDragOver={sortable ? event => { if (dragging.current && event.target === event.currentTarget && event.dataTransfer.types.includes(dragType)) event.preventDefault(); } : undefined}>
     <table className="rule-table">
       <colgroup><col className="rule-colw-name"/><col className="rule-colw-method"/><col/><col className="rule-colw-stage"/><col className="rule-colw-stage"/><col className="rule-colw-stage"/><col className="rule-colw-actions"/></colgroup>
       <thead><tr><th>Name</th><th className="rule-col-method">Method</th><th>Matching rule</th>{stages.map(([, label]) => <th key={label} className="rule-col-stage">{label}</th>)}<th aria-label="Actions"/></tr></thead>

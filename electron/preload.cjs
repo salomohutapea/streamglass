@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   toolsAction: (input) => ipcRenderer.invoke('tools-action', input),
   pickMapLocalFile: () => ipcRenderer.invoke('pick-map-local-file'),
   importRuleFiles: () => ipcRenderer.invoke('import-rule-files'),
+  showOtherRuleKind: reason => ipcRenderer.invoke('show-other-rule-kind', reason),
   exportFile: (file) => ipcRenderer.invoke('export-file', file),
   exportAllCaptures: () => ipcRenderer.invoke('export-all-captures'),
   sessionFile: (input) => ipcRenderer.invoke('session-file', input),

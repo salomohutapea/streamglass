@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import Banner from './Banner';
 import { FolderPlus, Globe, Plus } from 'lucide-react';
 import ListSearch from './ListSearch';
 import {matchesRuleSearch} from './list-search.mjs';
-import RuleTable, { ruleLabel } from './RuleTable';
+import RuleTable, { ruleKindDragType, ruleLabel } from './RuleTable';
 import { dropPlacement, folderPath, ruleRows, stepPlacement, type TreeRef } from './rule-tree.mjs';
 import { confirmAction } from './confirm-dialog';
 import ScriptEditor from './ScriptEditor';
@@ -12,6 +12,7 @@ import './editor-window.css';
 
 type Rule = { id: string; name?: string; enabled: boolean; pattern: string; method: string; stages: string[]; script?: string; breakpoint?: boolean; folderId?: string; order?: number };
 type RuleFolder = { id: string; name: string; kind: 'breakpoints' | 'scripts'; parentId?: string; enabled?: boolean; expanded?: boolean; order?: number };
+type ImportResult = { breakpoints: number; scripts: number };
 type State = { rules: Rule[]; rulesRevision: number; folders: RuleFolder[] };
 type Connection = { baseUrl: string; token: string };
 const params = new URLSearchParams(location.search);
@@ -118,6 +119,9 @@ export default function EditorWindow() {
   // Opened from a captured request: show only this rule's form and close when done, never the rules list.
   const title = recordId ? (mode === 'scripts' ? 'New JavaScript rule' : 'New breakpoint') : mode === 'scripts' ? 'JavaScript rules' : 'Breakpoint rules';
   const kind = mode === 'scripts' ? 'scripts' : 'breakpoints';
+  const otherKind = kind === 'scripts' ? 'breakpoints' : 'scripts';
+  const otherDragType = ruleKindDragType[otherKind];
+  const canDrop = Boolean(window.streamglass && !recordId && !editing && !share && data);
   const folders = data?.folders?.filter(folder => folder.kind === kind) ?? [];
   const rules = data?.rules.filter(rule => mode === 'scripts' ? rule.breakpoint === false : rule.breakpoint !== false) ?? [];
   const searching = Boolean(query.trim());
@@ -213,20 +217,64 @@ export default function EditorWindow() {
     catch (error) { setError(errorMessage(error)); return false; }
     finally { revision.current++; working.current = false; setBusy(false); }
   }
-  async function importRules() {
+  async function showOtherKind(reason: 'dragged' | 'imported') {
+    try { await window.streamglass?.showOtherRuleKind(reason); }
+    catch (error) { setError(errorMessage(error)); }
+  }
+
+  async function importRules(files?: File[]) {
     const desktop = window.streamglass;
-    if (!desktop) return;
+    if (!desktop || working.current) return;
     setNotice('');
     await configRequest(async () => {
-      const result = await desktop.importRuleFiles();
+      let result: ImportResult | null;
+      if (files) {
+        if (files.length > 500 || files.reduce((size, file) => size + file.size, 0) > shareLimit) {
+          throw new Error('Drop at most 500 rule files totaling up to 16 MiB.');
+        }
+        const bundles = [];
+        for (const file of files) {
+          if (!/\.(sgrules|json)$/i.test(file.name)) throw new Error('Drop a Streamglass .sgrules or .json file.');
+          try {
+            const contents = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+            bundles.push(JSON.parse(contents));
+          } catch { throw new Error(`Invalid JSON in "${file.name}"`); }
+        }
+        result = await api('/api/rules/import', 'POST', bundles) as ImportResult;
+      } else {
+        result = await desktop.importRuleFiles();
+      }
       if (!result) return;
       const count = [
         result.breakpoints && `${result.breakpoints} breakpoint${result.breakpoints === 1 ? '' : 's'}`,
         result.scripts && `${result.scripts} script${result.scripts === 1 ? '' : 's'}`,
       ].filter(Boolean).join(' and ');
       setQuery('');
-      setNotice(`Imported ${count}. Review and enable them in Breakpoint rules or JavaScript rules.`);
+      setNotice(`Imported ${count} as disabled rules.`);
+      if (result[otherKind]) await showOtherKind('imported');
     });
+  }
+
+  function dragOver(event: DragEvent) {
+    const files = event.dataTransfer.types.includes('Files');
+    if (!files && !event.dataTransfer.types.includes(otherDragType)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = !canDrop || working.current ? 'none' : files ? 'copy' : 'move';
+  }
+
+  function drop(event: DragEvent) {
+    if (event.dataTransfer.types.includes('Files')) {
+      event.preventDefault();
+      const files = Array.from(event.dataTransfer.files);
+      if (canDrop && files.length) void importRules(files);
+      return;
+    }
+    const id = event.dataTransfer.getData(otherDragType);
+    if (!id) return;
+    event.preventDefault();
+    if (canDrop && !working.current && data?.rules.some(rule => rule.id === id && (rule.breakpoint === false) === (otherKind === 'scripts'))) {
+      void showOtherKind('dragged');
+    }
   }
   // The folder route re-sorts the stored rules in the same write.
   const patchFolder = (id: string, body: Record<string, unknown>) => configRequest(() => api(`/api/folders/${encodeURIComponent(id)}`, 'PATCH', body));
@@ -256,7 +304,7 @@ export default function EditorWindow() {
     setData(current => current && { ...current, folders: current.folders.map(item => item.id === folder.id ? { ...item, expanded } : item) });
     void patchFolder(folder.id, { expanded });
   }
-  return <main className="editor-window">
+  return <main className="editor-window" onDragOver={dragOver} onDrop={drop}>
     <header className="editor-window-heading window-header"><h1>{title}</h1><span role="img" aria-label="Applies to all connected devices" title="Applies to all connected devices"><Globe size={14}/></span></header>
     {error && <Banner tone="error" className="editor-error" actions={<button onClick={() => setError('')}>Dismiss</button>}>{error}</Banner>}
     {notice && <Banner tone="info" actions={<button onClick={() => setNotice('')}>Dismiss</button>}>{notice}</Banner>}
@@ -273,7 +321,7 @@ export default function EditorWindow() {
       </fieldset> : <>{data ? <fieldset className="editor-fields rule-browser" disabled={busy}>
         <section className="rule-folder-content" aria-label="Rules">
           <div className="rule-table-toolbar"><ListSearch label={mode === 'scripts' ? 'Search scripts' : 'Search breakpoints'} placeholder={mode === 'scripts' ? 'Search name, URL, method or script…' : 'Search name, URL, method or stage…'} value={query} onChange={setQuery} matches={shownRules} total={rules.length}/><button type="button" aria-label="New folder" title="New folder" onClick={() => { setFolderForm({ parentId: null, name: '' }); setError(''); }}><FolderPlus size={14}/>New folder</button></div>
-          <RuleTable rows={rows as any} folders={folders} searching={searching} folderForm={folderForm} onFolderForm={setFolderForm} onSaveFolder={() => void saveFolder()}
+          <RuleTable kind={kind} rows={rows as any} folders={folders} searching={searching} folderForm={folderForm} onFolderForm={setFolderForm} onSaveFolder={() => void saveFolder()}
             emptyMessage={searching ? 'No matching rules. Clear search to show the list.' : mode === 'scripts' ? 'No scripts yet' : 'No breakpoints yet'}
             onToggleRule={(rule, enabled) => void mutateRules(list => list.map(item => item.id === rule.id ? { ...item, enabled } : item))}
             onToggleFolder={(folder, enabled) => void patchFolder(folder.id, { enabled })}
@@ -289,7 +337,7 @@ export default function EditorWindow() {
     </div>
     <footer className="editor-window-footer">
       {editing ? <><button disabled={busy} onClick={() => { if (recordId) { window.close(); return; } setEditing(null); setError(''); }}>Cancel</button><button className="primary" disabled={busy} onClick={() => void saveRule()}>Save rule</button></> : <>{!recordId && window.streamglass && <div className="rule-file-actions">
-        <button disabled={busy || !data} onClick={() => void importRules()}>Import…</button>
+        <button disabled={busy || !data} title="Choose or drop Streamglass rule files" onClick={() => void importRules()}>Import…</button>
         <button disabled={busy || !data?.rules.length} onClick={() => { if (data) setShare({ rules: data.rules, folders: data.folders }); }}>Share…</button>
       </div>}<button onClick={() => window.close()}>Close</button><button className="primary" disabled={busy || !data || seedLoading} onClick={() => { setEditing(newRule()); setFolderForm(null); setError(''); }}><Plus size={14}/>Add rule</button></>}
     </footer>
