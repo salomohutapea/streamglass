@@ -1,4 +1,4 @@
-.editor-window{height:100dvh;min-width:360px;display:flex;flex-direction:column;background:var(--panel)}
+.editor-window{position:relative;height:100dvh;min-width:360px;display:flex;flex-direction:column;background:var(--panel)}
 .editor-window-heading{gap:15px}
 .editor-window-heading h1{font-size:16px;font-weight:600;margin:0}.editor-window-heading>span{display:inline-flex;align-items:center;color:var(--muted);font-size:11px}
 .editor-window-content{flex:1;min-height:0;overflow:auto;padding:16px}.editor-window-content>p:first-child{margin-top:0;line-height:1.7}
@@ -132,4 +132,25 @@
 .rule-share-list .check small {
   display: block;
   color: var(--muted);
+}
+
+.rule-file-drop-indicator {
+  position: absolute;
+  z-index: 2;
+  inset: 6px;
+  display: grid;
+  justify-items: center;
+  align-items: start;
+  padding-top: 8px;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  pointer-events: none;
+}
+.rule-file-drop-indicator span {
+  padding: 5px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 600;
 }

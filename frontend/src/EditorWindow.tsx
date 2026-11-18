@@ -111,6 +111,7 @@ export default function EditorWindow() {
   const [folderForm, setFolderForm] = useState<{ id?: string; parentId?: string | null; name: string } | null>(null);
   const [share, setShare] = useState<{ rules: Rule[]; folders: RuleFolder[] } | null>(null);
   const [notice, setNotice] = useState('');
+  const [filesOverWindow, setFilesOverWindow] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [seedLoading, setSeedLoading] = useState(Boolean(recordId));
@@ -259,12 +260,20 @@ export default function EditorWindow() {
     const files = event.dataTransfer.types.includes('Files');
     if (!files && !event.dataTransfer.types.includes(otherDragType)) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = !canDrop || working.current ? 'none' : files ? 'copy' : 'move';
+    const accepting = canDrop && !working.current;
+    event.dataTransfer.dropEffect = !accepting ? 'none' : files ? 'copy' : 'move';
+    if (files) setFilesOverWindow(accepting);
+  }
+
+  function dragLeave(event: DragEvent) {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    setFilesOverWindow(false);
   }
 
   function drop(event: DragEvent) {
     if (event.dataTransfer.types.includes('Files')) {
       event.preventDefault();
+      setFilesOverWindow(false);
       const files = Array.from(event.dataTransfer.files);
       if (canDrop && files.length) void importRules(files);
       return;
@@ -304,7 +313,10 @@ export default function EditorWindow() {
     setData(current => current && { ...current, folders: current.folders.map(item => item.id === folder.id ? { ...item, expanded } : item) });
     void patchFolder(folder.id, { expanded });
   }
-  return <main className="editor-window" onDragOver={dragOver} onDrop={drop}>
+  return <main className="editor-window" onDragOver={dragOver} onDragLeave={dragLeave} onDrop={drop}>
+    {filesOverWindow && canDrop && !busy && <div className="rule-file-drop-indicator" role="status">
+      <span>Drop rule files to import</span>
+    </div>}
     <header className="editor-window-heading window-header"><h1>{title}</h1><span role="img" aria-label="Applies to all connected devices" title="Applies to all connected devices"><Globe size={14}/></span></header>
     {error && <Banner tone="error" className="editor-error" actions={<button onClick={() => setError('')}>Dismiss</button>}>{error}</Banner>}
     {notice && <Banner tone="info" actions={<button onClick={() => setNotice('')}>Dismiss</button>}>{notice}</Banner>}
