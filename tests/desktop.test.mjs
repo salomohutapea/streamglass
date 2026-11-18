@@ -163,6 +163,12 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     editor = await editorOpened;
     await editor.getByRole('button', { name: 'Add rule', exact: true }).click();
     await editor.getByRole('textbox', { name: 'Name', exact: true }).fill('Pause binary');
+    const pauseStages = editor.getByRole('group', { name: 'Pause at', exact: true });
+    assert.equal(await pauseStages.getByRole('checkbox', { name: 'Request', exact: true }).isChecked(), true);
+    const responseStage = pauseStages.getByRole('checkbox', { name: 'Response', exact: true });
+    assert.equal(await responseStage.isChecked(), true, 'New breakpoints pause on responses by default');
+    // This round trip edits just the request. A later scenario exercises response and event pauses.
+    await responseStage.uncheck();
     await editor.getByRole('textbox', { name: 'URL wildcard', exact: false }).fill(`http://127.0.0.1:${fixturePort}/*`);
     await editor.getByRole('button', { name: 'Save rule', exact: true }).click();
     await editor.getByRole('button', { name: 'Add rule', exact: true }).waitFor();
