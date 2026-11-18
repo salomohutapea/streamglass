@@ -9,10 +9,10 @@ import { confirmAction } from './confirm-dialog';
 import ScriptEditor from './ScriptEditor';
 import { upsertRule } from './rule-order.mjs';
 import './editor-window.css';
+import { importedRuleNotice, readDroppedRuleBundles, ruleFileLimit, RuleFileDropIndicator, useRuleFileDrop, type RuleImportResult } from './rule-file-drop';
 
 type Rule = { id: string; name?: string; enabled: boolean; pattern: string; method: string; stages: string[]; script?: string; breakpoint?: boolean; folderId?: string; order?: number };
 type RuleFolder = { id: string; name: string; kind: 'breakpoints' | 'scripts'; parentId?: string; enabled?: boolean; expanded?: boolean; order?: number };
-type ImportResult = { breakpoints: number; scripts: number };
 type State = { rules: Rule[]; rulesRevision: number; folders: RuleFolder[] };
 type Connection = { baseUrl: string; token: string };
 const params = new URLSearchParams(location.search);
@@ -30,7 +30,6 @@ async function onEvent(context, url, request, event) {
   return event;
 }`;
 const scriptLimit = 100000;
-const shareLimit = 16 * 1024 * 1024;
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
 const newRule = (): Rule => ({ id: crypto.randomUUID(), name: '', enabled: true, pattern: '*', method: '*', stages: mode === 'scripts' ? ['request'] : ['request', 'response'], breakpoint: mode !== 'scripts', ...(mode === 'scripts' ? { script: scriptTemplate } : {}) });
 
@@ -42,7 +41,7 @@ async function exportRules(rules: Rule[]) {
     breakpoint: rule.breakpoint !== false, script: rule.script ?? '',
   }));
   const content = JSON.stringify({ format: 'streamglass-rules', version: 1, rules: entries });
-  if (new TextEncoder().encode(content).length > shareLimit) throw new Error('Selection exceeds 16 MiB. Share fewer rules at a time.');
+  if (new TextEncoder().encode(content).length > ruleFileLimit) throw new Error('Selection exceeds 16 MiB. Share fewer rules at a time.');
   const name = rules.length === 1 ? 'streamglass-rule.sgrules' : 'streamglass-rules.sgrules';
   return (await desktop.exportFile({ name, content })).saved;
 }
@@ -111,7 +110,6 @@ export default function EditorWindow() {
   const [folderForm, setFolderForm] = useState<{ id?: string; parentId?: string | null; name: string } | null>(null);
   const [share, setShare] = useState<{ rules: Rule[]; folders: RuleFolder[] } | null>(null);
   const [notice, setNotice] = useState('');
-  const [filesOverWindow, setFilesOverWindow] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [seedLoading, setSeedLoading] = useState(Boolean(recordId));
@@ -123,6 +121,7 @@ export default function EditorWindow() {
   const otherKind = kind === 'scripts' ? 'breakpoints' : 'scripts';
   const otherDragType = ruleKindDragType[otherKind];
   const canDrop = Boolean(window.streamglass && !recordId && !editing && !share && data);
+  const ruleFileDrop = useRuleFileDrop(() => canDrop && !working.current, files => void importRules(files));
   const folders = data?.folders?.filter(folder => folder.kind === kind) ?? [];
   const rules = data?.rules.filter(rule => mode === 'scripts' ? rule.breakpoint === false : rule.breakpoint !== false) ?? [];
   const searching = Boolean(query.trim());
@@ -228,56 +227,24 @@ export default function EditorWindow() {
     if (!desktop || working.current) return;
     setNotice('');
     await configRequest(async () => {
-      let result: ImportResult | null;
-      if (files) {
-        if (files.length > 500 || files.reduce((size, file) => size + file.size, 0) > shareLimit) {
-          throw new Error('Drop at most 500 rule files totaling up to 16 MiB.');
-        }
-        const bundles = [];
-        for (const file of files) {
-          if (!/\.(sgrules|json)$/i.test(file.name)) throw new Error('Drop a Streamglass .sgrules or .json file.');
-          try {
-            const contents = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
-            bundles.push(JSON.parse(contents));
-          } catch { throw new Error(`Invalid JSON in "${file.name}"`); }
-        }
-        result = await api('/api/rules/import', 'POST', bundles) as ImportResult;
-      } else {
-        result = await desktop.importRuleFiles();
-      }
+      const result = files
+        ? await api('/api/rules/import', 'POST', await readDroppedRuleBundles(files)) as RuleImportResult
+        : await desktop.importRuleFiles();
       if (!result) return;
-      const count = [
-        result.breakpoints && `${result.breakpoints} breakpoint${result.breakpoints === 1 ? '' : 's'}`,
-        result.scripts && `${result.scripts} script${result.scripts === 1 ? '' : 's'}`,
-      ].filter(Boolean).join(' and ');
       setQuery('');
-      setNotice(`Imported ${count} as disabled rules.`);
+      setNotice(importedRuleNotice(result));
       if (result[otherKind]) await showOtherKind('imported');
     });
   }
 
   function dragOver(event: DragEvent) {
-    const files = event.dataTransfer.types.includes('Files');
-    if (!files && !event.dataTransfer.types.includes(otherDragType)) return;
+    if (ruleFileDrop.onDragOver(event) || !event.dataTransfer.types.includes(otherDragType)) return;
     event.preventDefault();
-    const accepting = canDrop && !working.current;
-    event.dataTransfer.dropEffect = !accepting ? 'none' : files ? 'copy' : 'move';
-    if (files) setFilesOverWindow(accepting);
-  }
-
-  function dragLeave(event: DragEvent) {
-    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
-    setFilesOverWindow(false);
+    event.dataTransfer.dropEffect = canDrop && !working.current ? 'move' : 'none';
   }
 
   function drop(event: DragEvent) {
-    if (event.dataTransfer.types.includes('Files')) {
-      event.preventDefault();
-      setFilesOverWindow(false);
-      const files = Array.from(event.dataTransfer.files);
-      if (canDrop && files.length) void importRules(files);
-      return;
-    }
+    if (ruleFileDrop.onDrop(event)) return;
     const id = event.dataTransfer.getData(otherDragType);
     if (!id) return;
     event.preventDefault();
@@ -313,10 +280,8 @@ export default function EditorWindow() {
     setData(current => current && { ...current, folders: current.folders.map(item => item.id === folder.id ? { ...item, expanded } : item) });
     void patchFolder(folder.id, { expanded });
   }
-  return <main className="editor-window" onDragOver={dragOver} onDragLeave={dragLeave} onDrop={drop}>
-    {filesOverWindow && canDrop && !busy && <div className="rule-file-drop-indicator" role="status">
-      <span>Drop rule files to import</span>
-    </div>}
+  return <main className="editor-window" onDragOver={dragOver} onDragLeave={ruleFileDrop.onDragLeave} onDrop={drop}>
+    {ruleFileDrop.over && canDrop && !busy && <RuleFileDropIndicator/>}
     <header className="editor-window-heading window-header"><h1>{title}</h1><span role="img" aria-label="Applies to all connected devices" title="Applies to all connected devices"><Globe size={14}/></span></header>
     {error && <Banner tone="error" className="editor-error" actions={<button onClick={() => setError('')}>Dismiss</button>}>{error}</Banner>}
     {notice && <Banner tone="info" actions={<button onClick={() => setNotice('')}>Dismiss</button>}>{notice}</Banner>}
