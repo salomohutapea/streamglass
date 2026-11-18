@@ -6,10 +6,16 @@
 #   STREAMGLASS_DIR=~/Tools      install there without asking (the prompt defaults to /Applications)
 #   STREAMGLASS_VERSION=1.0.4    install a specific version
 #   STREAMGLASS_FORCE=1          reinstall even when that version is already installed
+#   STREAMGLASS_SHA256=...       require an independently trusted SHA-256 for the macOS zip
 set -euo pipefail
 
 REPO="salomohutapea/streamglass"
 here="$PWD"
+expected_sha="${STREAMGLASS_SHA256:-}"
+if [ -n "${expected_sha}" ] && ! [[ "${expected_sha}" =~ ^[a-fA-F0-9]{64}$ ]]; then
+  echo "STREAMGLASS_SHA256 must be a 64-character SHA-256 digest." >&2
+  exit 1
+fi
 
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
   echo "Streamglass releases are built for Apple silicon Macs only." >&2
@@ -64,14 +70,14 @@ cd "$work"
 echo "Checking the latest release..."
 curl -fsSL "$base/SHA256SUMS.txt" -o SHA256SUMS.txt
 zip="$(awk '/-arm64-mac\.zip$/ {print $2; exit}' SHA256SUMS.txt)"
-if [ -z "${zip}" ]; then
-  echo "No macOS zip found in the release checksums." >&2
+if ! [[ "${zip}" =~ ^Streamglass-[0-9]+\.[0-9]+\.[0-9]+([+-][a-zA-Z0-9.+-]+)?-arm64-mac\.zip$ ]]; then
+  echo "No valid macOS zip found in the release checksums." >&2
   exit 1
 fi
 
 latest="${zip#Streamglass-}"; latest="${latest%-arm64-mac.zip}"
 installed="$(defaults read "${APP}/Contents/Info" CFBundleShortVersionString 2>/dev/null || true)"
-if [ "${installed}" = "${latest}" ] && [ -z "${STREAMGLASS_FORCE:-}" ]; then
+if [ "${installed}" = "${latest}" ] && [ -z "${STREAMGLASS_FORCE:-}" ] && [ -z "${expected_sha}" ]; then
   echo "Streamglass ${installed} is already installed. Set STREAMGLASS_FORCE=1 to reinstall."
   open "${APP}"
   exit 0
@@ -80,7 +86,13 @@ fi
 
 echo "Downloading ${zip}..."
 curl -fL --progress-bar "$base/${zip}" -o "${zip}"
-grep " ${zip}\$" SHA256SUMS.txt | shasum -a 256 -c - >/dev/null || { echo "Checksum mismatch for ${zip}; nothing was installed." >&2; exit 1; }
+release_sha="$(awk -v file="${zip}" '$2 == file {print $1}' SHA256SUMS.txt)"
+actual_sha="$(shasum -a 256 "${zip}" | awk '{print $1}')"
+if [ "${actual_sha}" != "${release_sha}" ] ||
+   { [ -n "${expected_sha}" ] && [ "${actual_sha}" != "$(printf '%s' "${expected_sha}" | tr '[:upper:]' '[:lower:]')" ]; }; then
+  echo "Checksum mismatch for ${zip}; nothing was installed." >&2
+  exit 1
+fi
 ditto -x -k "${zip}" extracted
 [ -d extracted/Streamglass.app ] || { echo "The download did not contain Streamglass.app." >&2; exit 1; }
 

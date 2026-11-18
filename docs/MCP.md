@@ -42,7 +42,7 @@ Use the panel's URL if the port differs. Close the client when finished.
 | `get_capture_events`, `get_event_content` | Page retained SSE events by sequence; read full individual event text |
 | `watch_sse_events` | Receive new retained events while a stream remains open |
 | `export_capture` | cURL, request, response or events as text, without writing files or executing commands |
-| `delete_capture`, `clear_captures` | Delete retained data by record or explicit all/device scope |
+| `delete_capture`, `clear_captures` | Delete retained data by record or explicit all/device scope. A device is the capture's `deviceId` (simulator, emulator, adb reverse) when present, otherwise its client address; `list_captures` filters the same way |
 | `list_rules`, `get_rule`, `upsert_rule`, `delete_rule` | Inspect and edit breakpoint and JavaScript rules |
 | `list_folders`, `create_folder`, `rename_folder`, `delete_folder` | Manage script/breakpoint folders |
 | `list_pending`, `get_pending`, `resolve_pending` | Inspect a paused message, continue with optional edits or drop its connection |
@@ -75,17 +75,18 @@ Some tools can send traffic or widen what Streamglass can read, so they wait for
 | Action | When approval is required |
 | --- | --- |
 | `replay_request`, `start_replay_job` | Every time, because they send requests |
-| `upsert_map_remote_rule`, `set_map_remote_rule_enabled`, `set_traffic_rule_group_enabled`, or any traffic-tools edit | The change newly enables a redirect to a server (`scheme://host:port`) you have not approved before |
-| `resolve_pending` | The edited request URL has a different scheme, host or port than the paused request, and that server is not already approved |
+| Map Remote, Map Local and response Rewrite | Creating, materially changing or enabling a redirect or response rule requires approval for its match scope, including when a new rule is saved disabled. Changes to rule precedence can also require approval |
+| `resolve_pending` | The edited request changes the upstream server, or the edit changes the HTTP response or SSE event. The prompt shows a bounded change summary and the engine verifies approval for the exact edit |
 | `update_settings` | It adds TLS inspection domains that were not already configured. Removing domains, pausing capture and stopping the proxy need no approval |
-| `upsert_rule` | The rule has new or changed JavaScript, because scripts can rewrite URLs and headers |
+| `upsert_rule` | JavaScript is added, changed, or enabled for a different execution scope. The dialog shows the full source |
+| `create_capture_fixture` | Before saving the disabled fixture |
 | `load_workspace` | Always, because it replaces TLS domains, rules, scripts and traffic tools |
 
-Other tools, including reads, capture deletion, breakpoint, Rewrite, Block and Map Local rules, pausing capture and stopping the proxy, do not ask.
+Reads, capture deletion, ordinary breakpoint definitions, Block rules, pausing capture and stopping the proxy need no prompt.
 
-Approved redirect servers are remembered in `mcp.json` (`approvedRedirects`, at most 200) and listed in **Tools → Agent (MCP)** with a Remove button. Removing one makes the next redirect to it ask again.
+Redirect approvals apply to the edit shown in the prompt. Previously remembered server approvals are retained for reference and no longer grant consent. In **Tools → Agent (MCP)**, **Rotate token** invalidates the old token and disconnects clients. Copy the new configuration to reconnect them.
 
-MCP also refuses broad TLS inspection patterns: the last two host labels must be literal, so `*`, `*.com`, `*.*`, `api.*` and `localhost` are refused while `*.example.com` and `api.example.com` are allowed. The desktop Settings still accept any pattern.
+MCP requires TLS wildcard patterns to be scoped below a public suffix. For example, `*.co.id` is refused and `*.example.co.id` is allowed. Desktop Settings retain their existing pattern controls.
 
 Capture pause bypasses breakpoints and scripts while traffic continues. Waiting breakpoints continue with their original, unedited value, and unsent script results are discarded. Changes already sent cannot be undone. Requests started while paused and SSE streams already switched to pass-through stay in that mode until completion. Stopping the proxy interrupts active traffic, and the app then restores saved Mac system proxy settings that still point at Streamglass within about 3 seconds. TLS-domain changes can reconnect tunnels. Deleting a capture does not stop its connection or release its paused breakpoints. Pending gate tokens are local breakpoint identifiers, distinct from bearer credentials; stale gates fail instead of resuming another message. Edited message values retain the HTTP API's header/body/base64 and streaming restrictions.
 

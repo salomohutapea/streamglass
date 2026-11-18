@@ -187,5 +187,11 @@ below that the track becomes a vertical list, tiles go two-up, and the events ta
 shows delivery as a dot. A step that never happened reads "not reached"; a stream with no events says so instead of
 showing an empty table.
 
-In Connect a device, the certificate page (QR, URL, fingerprint) is step 1 and labelled as not the proxy; the proxy
-address is step 2 with where to enter it.
+Connect a device has This Mac, iOS and Android tabs. Mobile platforms open on Real device before Simulator or
+Emulator. Wi-Fi guides show the LAN address/port separately from the certificate-page QR and reuse inline LAN
+approval. Automated device cards report proxy, certificate, optional Metro and attributed traffic separately;
+certificate installation alone does not verify application trust. Inventory is watched only while the dialog is
+open. Metro rows appear only for Always mode or Auto with Metro running. Options persist through the desktop
+bridge. Older bridges keep the manual guide available and explain unavailable automation. Manual Wi-Fi proxy
+settings must be switched off on the phone; automated Revert restores saved settings. Runtime and device
+verification of this redesign have not been performed.

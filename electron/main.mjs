@@ -1,6 +1,6 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, protocol, session, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, powerMonitor, protocol, session, shell } from 'electron';
 import { spawn } from 'node:child_process';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, isIP } from 'node:net';
 import { hostname, networkInterfaces } from 'node:os';
@@ -9,11 +9,11 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startScriptService } from './script-service.mjs';
 import { createUpdateChecker, releasesPrefix } from './updater.mjs';
-import { createDeviceService } from './devices.mjs';
+import { createDeviceService, findAdb } from './devices.mjs';
 import { certificateFingerprint, createSetupHandler, createSetupSite, defaultSetupPort, parsePublicCertificate } from './setup-site.mjs';
 import { createApplicationMenu } from './menu.mjs';
 import { startMcpServer } from './mcp-server.mjs';
-import { approveRedirects, loadMcpConfig, saveMcpConfig } from './mcp-config.mjs';
+import { loadMcpConfig, saveMcpConfig } from './mcp-config.mjs';
 import { createApplicationResolver } from './applications.mjs';
 import { exportSession, importSession } from './export-session.mjs';
 import { readMapLocalFile } from './map-local-file.mjs';
@@ -24,6 +24,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 app.setName('Streamglass');
 if (process.env.STREAMGLASS_DATA_DIR) app.setPath('userData', path.resolve(process.env.STREAMGLASS_DATA_DIR));
 const token = randomBytes(32).toString('hex');
+const mcpApprovalKey = randomBytes(32).toString('hex');
 const windows = new Set();
 const editorWindows = new Map();
 const inspectorWindows = new Map();
@@ -246,8 +247,10 @@ const approvalList = () => [...approvals.values()].map(item => item.request);
 function notifyApprovals() {
   for (const win of windows) if (!win.isDestroyed()) win.webContents.send('approvals-changed', approvalList());
 }
-function requestApproval({ kind, title, detail = [] }) {
+function requestApproval({ kind, title, detail = [], source }) {
   if (shuttingDown || !startupReady || approvals.size >= 8) return Promise.resolve(false);
+  if (detail.length > 40 || detail.some(line => String(line).length > 8192)
+      || (source !== undefined && (typeof source !== 'string' || source.length > 100000))) return Promise.resolve(false);
   const id = randomUUID();
   return new Promise(resolve => {
     const finish = allowed => {
@@ -258,7 +261,7 @@ function requestApproval({ kind, title, detail = [] }) {
     };
     const timer = setTimeout(() => finish(false), APPROVAL_MS);
     approvals.set(id, { finish, request: { id, kind: String(kind).slice(0, 32), title: String(title).slice(0, 200),
-      detail: detail.slice(0, 40).map(line => String(line).slice(0, 2000)), requestedAt: Date.now(), expiresAt: Date.now() + APPROVAL_MS } });
+      detail: detail.map(String), source, requestedAt: Date.now(), expiresAt: Date.now() + APPROVAL_MS } });
     const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
     notifyApprovals();
     win.show();
@@ -326,16 +329,18 @@ async function start() {
     baseUrl: `http://127.0.0.1:${port}`, token,
     lanAddresses: lanAddresses(),
   };
-  const applications = createApplicationResolver({ getFileIcon: (file, options) => app.getFileIcon(file, options) });
+  const applications = createApplicationResolver({ getFileIcon: (file, options) => app.getFileIcon(file, options), findAdb });
   scriptService = await startScriptService(token, {
-    resolveApplication: async connection => ({ clientIsLocal: applications.isLocalHost(connection.clientHost), application: await applications.resolve(connection) }),
+    // Loopback clients (simulators, emulators, adb reverse) also get a device identity from the socket's owning process.
+    resolveApplication: async connection => ({ clientIsLocal: applications.isLocalHost(connection.clientHost), ...(await applications.resolveClient(connection)) }),
     resolveApplicationIcon: id => applications.resolveIcon(id),
   });
   const executable = app.isPackaged ? path.join(process.resourcesPath, 'engine/streamglass-engine') : process.env.STREAMGLASS_PYTHON || path.join(root, '.venv/bin/python');
   const args = [...(app.isPackaged ? [] : ['-m', 'backend']), '--port', String(port), '--data-dir', dataDir];
   engine = spawn(executable, args, {
     cwd: app.isPackaged ? process.resourcesPath : root, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, STREAMGLASS_TOKEN: token, STREAMGLASS_SCRIPT_URL: scriptService.url, PYTHONUNBUFFERED: '1' },
+    env: { ...process.env, STREAMGLASS_TOKEN: token, STREAMGLASS_SCRIPT_URL: scriptService.url,
+      STREAMGLASS_MCP_APPROVAL_KEY: mcpApprovalKey, STREAMGLASS_ALLOW_DEV_ORIGIN: dev ? '1' : '0', PYTHONUNBUFFERED: '1' },
   });
   engine.stderr.on('data', chunk => { startupError = (startupError + chunk.toString()).slice(-6000); });
   // Drain stdout without persisting traffic or secrets in a second log.
@@ -382,20 +387,18 @@ async function start() {
     mcpConfigOperation = operation.catch(() => {});
     return operation;
   };
-  const confirmMcp = async request => {
-    const allowed = await requestApproval(request);
-    // Approved redirect servers are remembered; the user can remove them in Tools → Agent (MCP).
-    if (allowed && request.targets?.length) await updateMcpConfig(config => approveRedirects(config, request.targets));
-    return allowed;
-  };
-  const isApprovedRedirect = target => Boolean(mcpConfig?.approvedRedirects.includes(target));
+  let mcpGeneration = 0;
   async function enableMcp(enabled) {
     if (typeof enabled !== 'boolean') throw new Error('Expected boolean');
     if (!mcpConfig) throw new Error(mcpError || 'MCP configuration unavailable');
+    const generation = ++mcpGeneration;
+    for (const item of approvals.values()) item.finish(false);
     if (mcpService) { await mcpService.close(); mcpService = undefined; }
     mcpError = '';
     try {
-      if (enabled) mcpService = await startMcpServer({ port: mcpPort, authToken: mcpConfig.token, bootstrap, workspaces, confirm: confirmMcp, isApproved: isApprovedRedirect });
+      if (enabled) mcpService = await startMcpServer({ port: mcpPort, authToken: mcpConfig.token, bootstrap, workspaces,
+        confirm: async request => generation === mcpGeneration && await requestApproval(request) && generation === mcpGeneration,
+        signApproval: stamp => generation === mcpGeneration ? createHmac('sha256', mcpApprovalKey).update(stamp).digest('hex') : undefined });
       await updateMcpConfig(config => ({ ...config, enabled }));
     } catch (error) { mcpError = error.message; }
     return mcpConnection();
@@ -404,11 +407,18 @@ async function start() {
   catch (error) { mcpError = error.message; }
   let mcpOperation = Promise.resolve();
   handle('mcp-connection', () => mcpConnection());
-  handle('mcp-enabled', (_event, enabled) => {
-    const operation = mcpOperation.then(() => enableMcp(enabled));
+  const queueMcp = action => {
+    const operation = mcpOperation.then(action);
     mcpOperation = operation.catch(() => {});
     return operation;
-  });
+  };
+  handle('mcp-enabled', (_event, enabled) => queueMcp(() => enableMcp(enabled)));
+  handle('mcp-rotate-token', () => queueMcp(async () => {
+    if (!mcpConfig) throw new Error(mcpError || 'MCP configuration unavailable');
+    const enabled = mcpConfig.enabled;
+    await updateMcpConfig(config => ({ ...config, token: randomBytes(32).toString('hex') }));
+    return enableMcp(enabled);
+  }));
   handle('mcp-forget-redirect', async (_event, target) => {
     if (typeof target !== 'string' || target.length > 300) throw new Error('Invalid server');
     await updateMcpConfig(config => ({ ...config, approvedRedirects: config.approvedRedirects.filter(item => item !== target) }));
@@ -433,16 +443,25 @@ async function start() {
       devices = { port: settings.proxyPort, service: createDeviceService({
         dataDir, certificatePath: path.join(dataDir, 'mitmproxy/mitmproxy-ca-cert.pem'), proxyPort: settings.proxyPort,
         getProxyHost: () => lanAddresses()[0] || '127.0.0.1',
+        getLanInfo: async () => {
+          const response = await fetch(`${bootstrap.baseUrl}/api/state`, { headers: { Authorization: `Bearer ${token}` } });
+          if (!response.ok) throw new Error('Cannot read LAN settings');
+          const { settings: current } = await response.json();
+          const address = lanAddresses()[0] || null;
+          return { enabled: current.listenHost === '0.0.0.0', address, setupUrl: address && current.listenHost === '0.0.0.0' ? `http://${address}:${Number(process.env.STREAMGLASS_SETUP_PORT) || defaultSetupPort(current.proxyPort)}` : null };
+        },
+        emitInventory: inventory => { for (const win of windows) if (!win.isDestroyed()) win.webContents.send('device-inventory', inventory); },
         ensureProxyListening: async () => {
           const response = await fetch(`${bootstrap.baseUrl}/api/settings`, { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ proxyEnabled: true }) });
           if (!response.ok) throw new Error('Cannot start proxy listener. Check Proxy settings before enabling Mac monitoring.');
         },
       }) };
-      if (replacing) await devices.service.restoreMonitor({ startListener: false }).catch(() => {});
+      if (replacing) { await devices.service.setup.start(); await devices.service.restoreMonitor({ startListener: false }).catch(() => {}); }
     }
     return devices.service;
   };
   const initialDevices = await deviceServiceForCurrentPort();
+  await initialDevices.setup.start();
   let monitorRestoreError = '';
   try { await initialDevices.restoreMonitor(); } catch (error) { monitorRestoreError = error.message; }
   handle('bootstrap', () => ({ ...bootstrap, lanAddresses: lanAddresses() }));
@@ -482,6 +501,18 @@ async function start() {
   setupSiteTimer.unref?.();
   setupSiteClose = () => { clearInterval(setupSiteTimer); return setupSite.close(); };
   void syncSetupSite();
+  // After sleep, keep-alive connections through the proxy can be half-open, so clients wait on sockets that no
+  // longer reach a server. On wake the engine drops them (paused breakpoints stay) and restarts a dead listener,
+  // and the Mac proxy is reapplied, as an app restart would. A stopped proxy stays stopped.
+  let wakeRecovery;
+  const recoverAfterWake = () => wakeRecovery ??= (async () => {
+    try {
+      await fetch(`${bootstrap.baseUrl}/api/wake`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) });
+      if (devices && !checkingQuit && !shuttingDown) await devices.service.reconcileMonitor(true);
+    } catch { /* The engine reports listener failures in its state; the monitor records its own errors. */ }
+    finally { wakeRecovery = undefined; }
+  })();
+  powerMonitor.on('resume', () => { if (!shuttingDown) void recoverAfterWake(); });
   handle('setup-site', async (_event, input) => {
     if (input?.enableLan === true) {
       const response = await fetch(`${bootstrap.baseUrl}/api/settings`, { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ listenHost: '0.0.0.0' }) });
@@ -581,6 +612,17 @@ async function start() {
     const status = await (options?.networkOnly === true ? service.monitorStatus() : service.list());
     return { ...status, monitorRestoreError: status.monitorError ?? monitorRestoreError };
   });
+  const setupMethods = {
+    'device-inventory': 'inventory', 'watch-devices': 'watch', 'connect-device': 'connect',
+    'disconnect-device': 'disconnect', 'revert-all-devices': 'revertAll', 'set-device-options': 'setOptions',
+    'confirm-user-cert': 'confirm', 'reopen-cert-installer': 'reopen',
+    'start-adb-pairing': 'startPairing', 'cancel-adb-pairing': 'cancelPairing',
+  };
+  for (const [channel, method] of Object.entries(setupMethods)) handle(channel, async (_event, input) => {
+    if (checkingQuit) throw new Error('Streamglass is preparing to quit');
+    const service = await deviceServiceForCurrentPort();
+    return service.setup[method](input);
+  });
   handle('device-action', async (event, input) => {
     if (checkingQuit) throw new Error('Streamglass is preparing to quit. Try again after keeping the app open.');
     const descriptions = {
@@ -597,12 +639,6 @@ async function start() {
       'mac-restore-proxy': 'Disable Mac monitoring and restore every saved network proxy',
     };
     if (!input || !Object.hasOwn(descriptions, input.action)) throw new Error('Unknown setup action');
-    if (input.action === 'android-enable-proxy') {
-      const response = await fetch(`${bootstrap.baseUrl}/api/state`, { headers: { Authorization: `Bearer ${token}` } });
-      if (!response.ok) throw new Error('Cannot read proxy settings');
-      const { settings } = await response.json();
-      if (!settings.proxyEnabled || settings.listenHost !== '0.0.0.0' || !lanAddresses().length) throw new Error('Start the proxy and enable LAN access in Settings before configuring Android.');
-    }
     const confirmation = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
       type: 'question', buttons: ['Cancel', 'Continue'], defaultId: 0, cancelId: 0,
       message: descriptions[input.action], detail: `${input.target || 'This Mac'}${input.networkTarget ? ` · ${input.networkTarget}` : ''}. Certificate trust may request your login credentials. System proxy changes require permission; a standard account will be directed to IT or app-specific proxy setup without an administrator prompt. Mac monitoring is remembered across restarts; capture pause is unchanged.`,
@@ -648,7 +684,7 @@ app.on('before-quit', event => {
   checkingQuit = true;
   void (async () => {
     let cleanup = {remainingProxyTargets:[], errors:[]};
-    try { if (devices) cleanup = await devices.service.prepareQuit(); }
+    try { if (devices) cleanup = await Promise.race([devices.service.prepareQuit(), new Promise(resolve => { const timeout = setTimeout(() => resolve({ remainingProxyTargets: [], errors: ['Proxy restoration timed out; saved device settings are retained for retry.'] }), 12000); timeout.unref?.(); })]); }
     catch (error) { cleanup.errors = [error.message]; }
     if (cleanup.remainingProxyTargets.length || cleanup.errors.length) {
       const macProblem = cleanup.errors.length || cleanup.remainingProxyTargets.some(target => target.startsWith('mac:'));

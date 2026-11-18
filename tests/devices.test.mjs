@@ -357,6 +357,16 @@ test('quit restores every monitored Mac network and keeps the next-launch prefer
   assert.equal(proxyState('Wi-Fi', 'web').host, 'previous.example');
 });
 
+test('quit drops a stale simulator ownership entry once the Mac proxy is restored', async t => {
+  const { service, dataDir } = await fixture(t, { directNetwork: true });
+  await service.perform({ action: 'mac-enable-proxy' });
+  const file = path.join(dataDir, 'device-proxy-state.json');
+  const state = JSON.parse(await readFile(file, 'utf8')); state['ios-simulator:ABC-123'] = { macOwned: true };
+  await writeFile(file, JSON.stringify(state));
+  assert.deepEqual(await service.prepareQuit(), {remainingProxyTargets:[], errors:[]});
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), {});
+});
+
 test('quit preserves externally changed proxy fields while restoring fields still owned by Streamglass', async t => {
   const { service, proxyState } = await fixture(t, { directNetwork:true });
   await service.perform({ action:'mac-enable-proxy' });

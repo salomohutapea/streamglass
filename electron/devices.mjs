@@ -1,3 +1,4 @@
+import { createDeviceSetup } from './device-setup.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { access, mkdir, readFile, writeFile, rename } from 'node:fs/promises';
@@ -8,7 +9,21 @@ import path from 'node:path';
 const execute = promisify(execFile);
 const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 
-export function createDeviceService({ dataDir, certificatePath, proxyPort, getProxyHost, ensureProxyListening = async () => {}, executeCommand = execute, platform = process.platform }) {
+// The Android SDK's adb, from ANDROID_HOME, ANDROID_SDK_ROOT, the default SDK folder or PATH. Shared with the
+// application resolver so it never runs a binary named only by a socket owner's path.
+export async function findAdb({ executeCommand = execute } = {}) {
+  const roots = [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT, path.join(homedir(), 'Library/Android/sdk')];
+  const candidates = roots.filter(root => root && path.isAbsolute(root)).map(root => path.join(root, 'platform-tools/adb'));
+  let fromPath = null;
+  try { fromPath = (await executeCommand('/usr/bin/which', ['adb'], { timeout: 15000, maxBuffer: 1024 * 1024 })).stdout.trim(); } catch { /* adb is not on PATH. */ }
+  if (fromPath && path.isAbsolute(fromPath)) candidates.push(fromPath);
+  for (const candidate of new Set(candidates)) {
+    try { await access(candidate, constants.X_OK); return candidate; } catch { /* Try the next installed SDK. */ }
+  }
+  return null;
+}
+
+export function createDeviceService({ dataDir, certificatePath, proxyPort, getProxyHost, ensureProxyListening = async () => {}, executeCommand = execute, platform = process.platform, getLanInfo, emitInventory, metroProbe }) {
   if (!Number.isInteger(proxyPort) || proxyPort < 1024 || proxyPort > 65535) throw new Error('Invalid proxy port');
   if (!path.isAbsolute(certificatePath)) throw new Error('Public certificate path must be absolute');
   const intentPath = path.join(dataDir, 'mac-monitor.json');
@@ -73,16 +88,7 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
     return failures;
   }
   const trustMacCertificate = () => run('/usr/bin/security', ['add-trusted-cert', '-r', 'trustRoot', '-p', 'ssl', '-k', path.join(homedir(), 'Library/Keychains/login.keychain-db'), certificatePath], 120000);
-  const adbPath = async () => {
-    const roots = [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT, path.join(homedir(), 'Library/Android/sdk')];
-    const candidates = roots.filter(root => root && path.isAbsolute(root)).map(root => path.join(root, 'platform-tools/adb'));
-    const fromPath = await optional('/usr/bin/which', ['adb']);
-    if (fromPath && path.isAbsolute(fromPath)) candidates.push(fromPath);
-    for (const candidate of new Set(candidates)) {
-      try { await access(candidate, constants.X_OK); return candidate; } catch { /* Try the next installed SDK. */ }
-    }
-    return null;
-  };
+  const adbPath = () => findAdb({ executeCommand });
   async function networks(refresh = false) {
     if (!networkCache || refresh) {
       const [servicesText, orderText] = await Promise.all([
@@ -278,6 +284,7 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
   }
   async function restoreMonitor({ startListener = true } = {}) {
     suspended = false;
+    await setup.start();
     return enqueue(async () => {
       let intent = await readIntent();
       if (!intent) {
@@ -296,18 +303,37 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
     const [intent, state] = await Promise.all([readIntent(), readState()]);
     return { ...observedNetwork, monitorEnabled: Boolean(intent?.enabled), monitorOverride: intent?.override ?? null, monitorError, savedProxyTargets: Object.keys(state) };
   }
+  const setup = createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath, run, optional, readState, saveState: save, enqueue, performAction, ensureProxyListening, getLanInfo, emit: emitInventory, metroProbe, macMonitorEnabled: async () => Boolean((await readIntent())?.enabled) });
   async function prepareQuit() {
     suspended = true;
     clearInterval(timer); timer = undefined;
     return enqueue(async () => {
+      const deviceResult = await setup.prepareQuit();
       const state = await readState();
       const errors = platform === 'darwin' ? await restoreMacProxies(state, true) : [];
+      if (!deviceResult.ok) errors.push(deviceResult.message);
       monitorError = errors.join('\n');
-      return {remainingProxyTargets:Object.keys(state), errors};
+      // A simulator entry only records that it owns the Mac proxy (the simulator itself keeps no proxy).
+      // Once the Mac proxy is restored it is stale; drop it so it doesn't block quit or confuse the next launch.
+      let remaining = await readState();
+      if (!errors.length && !Object.keys(remaining).some(key => key.startsWith('mac:'))) {
+        const simulators = Object.keys(remaining).filter(key => key.startsWith('ios-simulator:'));
+        if (simulators.length) { for (const key of simulators) delete remaining[key]; await save(remaining); remaining = await readState(); }
+      }
+      return {remainingProxyTargets:Object.keys(remaining), errors};
     });
   }
   // releaseSystemProxy restores system proxies that still point here and pauses monitoring until restoreMonitor.
-  return { list, monitorStatus, restoreMonitor, prepareQuit, releaseSystemProxy: prepareQuit, reconcileMonitor: () => enqueue(() => reconcileMonitor()), dispose: async () => { suspended = true; clearInterval(timer); await pending; }, perform: input => enqueue(async () => {
-    try { return await performAction(input); } catch (error) { monitorError = error.message; throw error; }
-  }) };
+  return { setup, list, monitorStatus, restoreMonitor, prepareQuit, releaseSystemProxy: prepareQuit, reconcileMonitor: (force = false) => enqueue(() => reconcileMonitor(force)), dispose: async () => { suspended = true; clearInterval(timer); setup.dispose(); await pending; }, perform: input => {
+    if (input?.action === 'android-enable-proxy') return setup.connect({ platform: 'android', id: input.target, ...(input.metro === undefined ? {} : { metro: input.metro }) }).then(async result => {
+      if (!result.ok) throw new Error(result.message);
+      return { ...result, devices: await list() };
+    });
+    if (input?.action === 'android-restore-proxy') return readState().then(state => state[`android:${input.target}`]?.setup
+      ? setup.disconnect({ platform: 'android', id: input.target }).then(async result => ({ ...result, devices: await list() }))
+      : enqueue(() => performAction(input)));
+    return enqueue(async () => {
+      try { return await performAction(input); } catch (error) { monitorError = error.message; throw error; }
+    });
+  } };
 }

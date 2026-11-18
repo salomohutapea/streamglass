@@ -16,10 +16,12 @@ export function trafficDevices(records) {
   for (const record of records) {
     const id = record.deviceId ?? record.device;
     if (!id) continue;
-    if (!devices.has(id)) devices.set(id, { id, platforms: new Set() });
+    if (!devices.has(id)) devices.set(id, { id, platforms: new Set(), name: null });
     if (['android', 'ios', 'mac'].includes(record.devicePlatform)) devices.get(id).platforms.add(record.devicePlatform);
+    // Simulators and emulators arrive named by the engine (their id is not an address to look up).
+    if (record.deviceId && typeof record.deviceName === 'string' && record.deviceName && !devices.get(id).name) devices.get(id).name = record.deviceName;
   }
-  return [...devices.values()].map(({ id, platforms }) => ({ id, platform: platforms.size === 1 ? [...platforms][0] : 'generic' }));
+  return [...devices.values()].map(({ id, platforms, name }) => ({ id, platform: platforms.size === 1 ? [...platforms][0] : 'generic', ...(name ? { name } : {}) }));
 }
 
 // Keeps sidebar devices where they were: known devices hold their slot (even while they have no records), and new
@@ -39,6 +41,9 @@ export function stableDeviceOrder(devices, previousOrder = [], records = []) {
   const position = new Map(order.map((id, index) => [id, index]));
   return { order, devices: [...devices].sort((a, b) => position.get(a.id) - position.get(b.id)) };
 }
+
+// Engine device ids (simulators, emulators, adb reverse) carry their own name; only client addresses go to reverse DNS.
+export const isAddressDevice = id => typeof id === 'string' && !/^(ios-simulator|android-emulator|android-device):/.test(id);
 
 export function incomingRecordIds(records, seen) {
   const ids = new Set(records.map(record => record.id));

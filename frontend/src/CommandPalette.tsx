@@ -4,7 +4,7 @@ import { commandShortcuts } from './ShortcutSheet';
 import './command-palette.css';
 
 export type PaletteCommand = { id: string; title: string; group: string; keywords?: string; shortcut?: string; run: () => void };
-type DeviceLike = { id: string }; type ViewLike = { id: string; name: string };
+type DeviceLike = { id: string; name?: string }; type ViewLike = { id: string; name: string };
 
 const recentKey = 'streamglass.palette.recent.v1';
 const readRecent = (): string[] => { try { const v = JSON.parse(localStorage.getItem(recentKey) ?? '[]'); return Array.isArray(v) ? v.filter(x => typeof x === 'string').slice(0, 6) : []; } catch { return []; } };
@@ -37,7 +37,7 @@ export function buildPaletteCommands(o: {
     { id: 'walkthrough', title: 'Show walkthrough', group: 'Help', keywords: 'tour guide tooltips where help', run: o.showWalkthrough },
     { id: 'shortcut-sheet', title: 'Keyboard shortcuts', group: 'Help', keywords: 'keys help', shortcut: commandShortcuts['shortcut-sheet'], run: o.showShortcuts },
     ...o.savedViews.map(v => ({ id: `view:${v.id}`, title: `Apply saved filter: ${v.name}`, group: 'Saved filters', keywords: 'filter view', run: () => o.applyView(v.id) })),
-    ...o.devices.map(d => ({ id: `device:${d.id}`, title: `Filter to device: ${d.id}`, group: 'Devices', keywords: 'only show', run: () => o.selectDevice(d.id) })),
+    ...o.devices.map(d => ({ id: `device:${d.id}`, title: `Filter to device: ${d.name ?? d.id}`, group: 'Devices', keywords: 'only show', run: () => o.selectDevice(d.id) })),
   ];
 }
 

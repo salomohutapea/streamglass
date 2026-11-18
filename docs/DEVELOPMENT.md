@@ -45,7 +45,11 @@ GitHub Actions workflows live in `.github/workflows/` and run app verification/r
 
 **Update notifications.** Packaged builds check the latest GitHub release at launch and every six hours, and show a banner when a newer version exists; "View release" opens the release page in the browser. This is a notification, not an automatic install: Electron's `autoUpdater` (Squirrel.Mac) only installs updates signed with the same Apple Developer ID, which unsigned builds do not have. Once releases are signed and notarized, replace the notifier in `electron/updater.mjs` with `autoUpdater` or `electron-updater`. Set `STREAMGLASS_DISABLE_UPDATE_CHECK=1` to turn the check off; development runs never check.
 
-The release build is unsigned and not notarized; see the Local releases section for what users see on first launch.
+The release build is unsigned and not notarized; its checksum file is distributed alongside the artifacts and cannot independently authenticate them. Distribution authentication requires a separately trusted signing identity and verification process. See the Local releases section for what users see on first launch.
+
+The macOS packaging hook sets Electron fuses before either signature is applied. Packaged builds disable Run as Node, Node environment options and Node inspector arguments. They load the app from the integrity-checked ASAR. The hook applies an ad-hoc signature after the fuse changes. Electron-builder replaces it for Developer ID builds.
+
+MCP wildcard validation uses the pinned [Public Suffix List snapshot](../backend/data/public_suffix_list.dat), including its private suffix section. Refresh it from the [official list](https://publicsuffix.org/list/public_suffix_list.dat) during dependency maintenance and retain its version, upstream commit and MPL-2.0 license headers. Packaged builds use the bundled snapshot and do not fetch it at runtime. If the list is unavailable, MCP refuses wildcard patterns that depend on it. Exact hostnames remain available.
 
 ## Local releases
 

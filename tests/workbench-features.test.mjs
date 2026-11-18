@@ -114,19 +114,18 @@ c.commit()`, path.join(directory, 'captures.sqlite3')], { input: JSON.stringify(
         item.click(item, win, {});
       }, `setup-${platform}`);
       await page.getByRole('dialog', { name: 'Connect a device' }).waitFor();
-      const selectedPlatform = { macos: 'This Mac', 'ios-simulator': 'iOS Simulator', 'ios-device': 'iOS Device', 'android-emulator': 'Android Emulator', 'android-device': 'Android Device' }[platform];
-      assert.equal(await page.getByRole('dialog', { name: 'Connect a device' }).getByRole('heading', { level: 3 }).first().textContent(), selectedPlatform, label);
+      const dialog = page.getByRole('dialog', { name: 'Connect a device' });
+      const [selectedPlatform, selectedPage] = { macos: ['This Mac', null], 'ios-simulator': ['iOS', 'Simulator'], 'ios-device': ['iOS', 'Real device'], 'android-emulator': ['Android', 'Emulator'], 'android-device': ['Android', 'Real device'] }[platform];
+      assert.equal(await dialog.getByRole('group', { name: 'Platform' }).getByRole('button', { name: selectedPlatform, exact: true }).getAttribute('aria-pressed'), 'true', label);
+      if (selectedPage) assert.equal(await dialog.getByRole('tab', { name: new RegExp(`^${selectedPage}`) }).getAttribute('aria-selected'), 'true', label);
       if (platform === 'android-device') {
-        const dialog = page.getByRole('dialog', { name: 'Connect a device' });
-        assert.equal(await dialog.getByText('No ADB needed.', {exact:false}).isVisible(), true);
-        const helpers = dialog.locator('details.optional-adb');
-        assert.equal(await helpers.getAttribute('open'), null);
-        assert.equal(await dialog.getByRole('combobox', {name:'ADB device', exact:true}).isVisible(), false);
-        assert.equal(await dialog.getByRole('button', {name:'Enable proxy', exact:true}).isVisible(), false);
-        await helpers.locator('summary').click();
+        assert.equal(await dialog.getByText('No developer options, cables or debug tools needed.', {exact:false}).isVisible(), true);
+        const shortcuts = dialog.locator('details.ds-sec', { hasText: 'Developer shortcuts' });
+        assert.equal(await shortcuts.getAttribute('open'), null);
+        assert.equal(await dialog.getByText('Set proxy and certificate in one click over Wi-Fi', {exact:true}).isVisible(), false);
+        await shortcuts.locator('summary').click();
         // Collapsibles animate open, so wait for the content rather than checking at once.
-        await dialog.getByRole('combobox', {name:'ADB device', exact:true}).waitFor({state:'visible'});
-        assert.equal(await dialog.getByRole('button', {name:'Enable proxy', exact:true}).isDisabled(), true);
+        await dialog.getByText('Set proxy and certificate in one click over Wi-Fi', {exact:true}).waitFor({state:'visible'});
       }
       await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
     }

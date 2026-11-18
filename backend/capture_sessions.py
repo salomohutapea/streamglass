@@ -14,7 +14,7 @@ MAX_STORAGE = 1024 * 1024 * 1024
 MAX_RECORD = 32 * 1024 * 1024
 MAX_WIRE = MAX_SESSION + 65536
 FIELDS = ("id", "url", "method", "statusCode", "device", "startedAt", "endedAt", "durationMs", "state",
-          "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "annotation", "pinned", "isSSE")
+          "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "annotation", "pinned", "isSSE", "deviceId", "deviceName")
 
 
 def initialize(service):
@@ -62,6 +62,9 @@ def validate_record(value):
             raise ValueError(f"Invalid capture {key}")
     for key in ("error", "interruptionReason", "host", "captureWarning"):
         if value.get(key) is not None and not isinstance(value[key], str):
+            raise ValueError(f"Invalid capture {key}")
+    for key in ("deviceId", "deviceName", "deviceKind"):
+        if value.get(key) is not None and (not isinstance(value[key], str) or len(value[key]) > 256):
             raise ValueError(f"Invalid capture {key}")
     if "annotation" in value:
         annotation(value["annotation"])

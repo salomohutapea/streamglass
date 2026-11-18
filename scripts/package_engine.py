@@ -11,6 +11,7 @@ subprocess.run([
     '--name', 'streamglass-engine', '--distpath', str(root / 'engine-dist'),
     '--paths', str(root), '--additional-hooks-dir', str(root / 'scripts/pyinstaller-hooks'),
     '--copy-metadata', 'mitmproxy', '--collect-all', 'mitmproxy', '--collect-all', 'mitmproxy_rs',
-    '--collect-all', 'cryptography', '--collect-all', 'certifi',
+    '--collect-all', 'cryptography', '--collect-all', 'certifi', '--collect-data', 'publicsuffix2',
+    '--add-data', f'{root / "backend/data/public_suffix_list.dat"}:backend/data',
     '--hidden-import', 'backend', str(root / 'scripts/engine_entry.py'),
 ], cwd=root, check=True)

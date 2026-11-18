@@ -33,9 +33,36 @@ DEFAULT_INSPECTED_MIB = 1024
 INSPECTED_MIB_RANGE = (256, 4096)
 from .lan_guard import DEVICE_TTL_SECONDS
 SSL_INTERRUPTION_REASON = "Encrypted tunnel interrupted to enable SSL inspection; reconnecting requests will be inspected."
+WAKE_RESET_REASON = "Connection reset after the Mac woke from sleep; the client reconnects with a fresh connection."
+
+
+# Loopback clients (simulators, emulators, adb reverse) share one address; the desktop's process lookup names the device.
+# Device identity is display and filter data only: LAN-guard policy keys on the client address, never on these fields.
+DEVICE_KINDS = {"ios-simulator": ("iosSimulator", "ios"), "android-emulator": ("androidEmulator", "android"),
+                "android-device": ("androidDevice", "android")}
+DEVICE_ID = re.compile(r"(ios-simulator|android-emulator|android-device):[A-Za-z0-9._:@-]{1,200}\Z")
+NO_DEVICE = {"deviceId": None, "deviceName": None, "deviceKind": None}
+
+
+def device_value(value):
+    """Validated device identity from the desktop's lookup; only loopback clients can carry one."""
+    if not isinstance(value, dict) or value.get("clientIsLocal") is not True or not isinstance(value.get("device"), dict):
+        return dict(NO_DEVICE)
+    device = value["device"]
+    identifier, name = device.get("id"), device.get("name")
+    match = DEVICE_ID.match(identifier) if isinstance(identifier, str) else None
+    if not match or not isinstance(name, str) or not 0 < len(name.strip()) <= 128 or any(ord(c) < 32 or ord(c) == 127 for c in name):
+        return dict(NO_DEVICE)
+    kind, platform = DEVICE_KINDS[match.group(1)]
+    if device.get("kind", kind) != kind or device.get("platform", platform) != platform:
+        return dict(NO_DEVICE)
+    return {"deviceId": identifier, "deviceName": name.strip(), "deviceKind": kind}
 
 
 def device_platform(record):
+    for kind, platform in DEVICE_KINDS.values():
+        if record.get("deviceKind") == kind:
+            return platform
     headers = record.get("request", {}).get("headers", [])
     agent = " ".join(value for name, value in headers if name.lower() == "user-agent").lower()
     if "android" in agent:
@@ -141,10 +168,13 @@ def apply_message(message, value, request=False, headers_only=False):
         if not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", method):
             raise ValueError("Invalid method")
         url = str(value.get("url", message.url))
-        from urllib.parse import urlsplit
         parsed = urlsplit(url)
         if parsed.scheme not in ("http", "https") or not parsed.hostname or any(c in url for c in "\r\n\x00"):
             raise ValueError("URL must be an absolute HTTP(S) URL")
+        if url != message.url and (
+                "\\" in url or parsed.username is not None or parsed.password is not None
+                or re.search(r"[\x00-\x20\x7f]", url)):
+            raise ValueError("Edited URL cannot contain user information, backslashes, whitespace or control characters")
     else:
         status = int(value.get("statusCode", message.status_code))
         if not 200 <= status <= 599 and not (status == 101 and message.status_code == 101):
@@ -438,7 +468,7 @@ class Service:
 
     def state_rows(self):
         """Table rows, newest first, plus each application's icon once; rows carry no icon data."""
-        keys = ("id", "url", "method", "statusCode", "device", "startedAt", "endedAt", "durationMs", "state", "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "clientIsLocal", "pinned", "annotation", "tlsFailure")
+        keys = ("id", "url", "method", "statusCode", "device", "startedAt", "endedAt", "durationMs", "state", "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "clientIsLocal", "pinned", "annotation", "tlsFailure", "deviceId", "deviceName")
         records, icons = [], {}
         fields_cache, current = self.field_cache, self.productivity["fields"]
         for r in sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True):
@@ -627,19 +657,48 @@ class Service:
     def client_connected(self, client):
         if not self.lan_guard.client_connected(client):
             return
+        if not self.settings["capturePaused"]:
+            self.start_application_lookup(client)
+
+    def start_application_lookup(self, client):
+        if client.id in self.applications:
+            return self.applications[client.id]
         url = os.environ.get("STREAMGLASS_SCRIPT_URL")
-        if (self.settings["capturePaused"] or not url or client.id in self.applications
-                or sum(entry["task"] is not None for entry in self.applications.values()) >= 16):
-            return
+        if not url or sum(entry["task"] is not None for entry in self.applications.values()) >= 16:
+            return None
         if len(self.applications) >= MAX_RECORDS:
             oldest = next(iter(self.applications))
             entry = self.applications.pop(oldest)
             if entry["task"]:
                 entry["task"].cancel()
-        entry = {"records": set(), "value": {"application": None, "clientIsLocal": None},
+        entry = {"records": set(), "value": {"application": None, "clientIsLocal": None, **NO_DEVICE},
                  "task": None, "disconnected": False}
         self.applications[client.id] = entry
         entry["task"] = asyncio.create_task(self.resolve_application(client, entry, url))
+        return entry
+
+    async def android_alias_route(self, client):
+        entry = self.start_application_lookup(client)
+        if entry is None:
+            return False
+        if task := entry["task"]:
+            await asyncio.wait({task}, timeout=2)
+        if entry["value"]["deviceKind"] != "androidEmulator":
+            return False
+        entry["androidAliasRouted"] = True
+        tunnel_id = self.tunnels.get(client.id)
+        if tunnel_id in self.records and self.annotate_android_alias(self.records[tunnel_id]):
+            self.save(self.records[tunnel_id])
+        for flow_id, flow in self.flows.items():
+            if flow.client_conn.id == client.id and (record := self.records.get(flow_id)) and self.annotate_android_alias(record):
+                self.save(record)
+        return True
+
+    def annotate_android_alias(self, record):
+        if record.get("host") == "10.0.2.2" and "annotation" not in record:
+            record["annotation"] = {"note": "Routed to this Mac (127.0.0.1), preserving the original URL.", "color": ""}
+            return True
+        return False
 
     @staticmethod
     def application_value(value):
@@ -688,7 +747,8 @@ class Service:
                         try:
                             await response.content.readexactly(384 * 1024 + 1)
                         except asyncio.IncompleteReadError as exc:
-                            entry["value"] = self.application_value(json.loads(exc.partial))
+                            value = json.loads(exc.partial)
+                            entry["value"] = {**self.application_value(value), **device_value(value)}
             for record_id in entry["records"]:
                 if record := self.records.get(record_id):
                     record.update(entry["value"])
@@ -702,9 +762,11 @@ class Service:
                 self.applications.pop(client.id, None)
 
     def attribute_record(self, client, record):
-        record.update(application=None, clientIsLocal=None)
+        record.update(application=None, clientIsLocal=None, **NO_DEVICE)
         if entry := self.applications.get(client.id):
             record.update(entry["value"])
+            if entry.get("androidAliasRouted"):
+                self.annotate_android_alias(record)
             if entry["task"]:
                 entry["records"].intersection_update(self.records)
                 if len(entry["records"]) >= MAX_RECORDS:
@@ -744,6 +806,17 @@ class Service:
                     continue
 
     def http_connect(self, flow):
+        from .lan_guard import is_lan_client
+        if is_lan_client(flow.client_conn):
+            # mitmproxy awaits hook return values; local registration stays synchronous.
+            return self._lan_http_connect(flow)
+        self._capture_connect(flow)
+
+    async def _lan_http_connect(self, flow):
+        if await self.lan_guard.check_flow(flow):
+            self._capture_connect(flow)
+
+    def _capture_connect(self, flow):
         # Connections outlive captures, including when capture is paused or deleted.
         self.active_tunnels[flow.client_conn.id] = flow
         if self.settings["capturePaused"]:
@@ -859,6 +932,8 @@ class Service:
             self.tls_ok_devices.add(str(data.context.client.peername[0]))
 
     async def requestheaders(self, flow):
+        if not await self.lan_guard.check_flow(flow):
+            return
         if self.settings["capturePaused"]:
             flow.metadata["streamglass_passthrough"] = True
             return
@@ -1260,6 +1335,51 @@ class Service:
 
     def running(self):
         self.proxy_ready.set()
+
+    async def stop_proxy(self, reason):
+        from .repeat_replay import stop_jobs
+        await stop_jobs(self)
+        if not self.master:
+            return
+        for flow_id, flow in list(self.flows.items()):
+            flow.kill()
+            self.cancel(flow_id, reason)
+        self.streams.clear()
+        self.flows.clear()
+        await self.master.addons.get("proxyserver").servers.update([])
+        self.master.shutdown()
+        # A listener that already crashed still has to be released before a new one starts.
+        await asyncio.gather(self.proxy_task, return_exceptions=True)
+        self.master = None
+
+    async def recover_after_wake(self):
+        """Drop connections that went stale during system sleep, as an app restart would.
+
+        Keep-alive client connections and their upstream sockets can be half-open after sleep or a network change;
+        clients keep reusing them and nothing reaches the server. Connections holding a paused breakpoint stay open.
+        A listener that stopped while the Mac slept is restarted on the same port.
+        """
+        if not self.settings["proxyEnabled"]:
+            return {"closedConnections": 0, "restartedListener": False}
+        proxyserver = self.master.addons.get("proxyserver") if self.master else None
+        if not self.master or self.proxy_task.done() or not proxyserver.listen_addrs():
+            await self.stop_proxy(WAKE_RESET_REASON)
+            await self.start_proxy()
+            return {"closedConnections": 0, "restartedListener": True}
+        paused = {gate["recordId"] for gate in self.pending.values() if not gate["future"].done()}
+        held = {flow.client_conn.id for flow in self.flows.values() if flow.id in paused}
+        closed = 0
+        for handler in list(proxyserver.connections.values()):
+            client = handler.client
+            if client.id in held or client not in handler.transports or not handler.transports[client].handler:
+                continue
+            for flow_id, flow in list(self.flows.items()):
+                if flow.client_conn.id == client.id:
+                    self.cancel(flow_id, WAKE_RESET_REASON)
+            # Tunnel records finish as complete through client_disconnected.
+            handler.close_connection(client)
+            closed += 1
+        return {"closedConnections": closed, "restartedListener": False}
 
     async def start_proxy(self):
         if not self.settings["proxyEnabled"]:

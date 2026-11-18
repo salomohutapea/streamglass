@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
+import { isDeepStrictEqual } from 'node:util';
 import { APPROVAL, registerTrafficRuleTools } from './mcp-traffic-rules.mjs';
 
 // All MCP sessions share this queue because the HTTP rule API replaces the list.
@@ -47,13 +49,39 @@ export function redirectTarget({ scheme, host, port }) {
   const name = String(host).replace(/^\[|\]$/g, '').toLowerCase();
   return `${scheme}://${name.includes(':') ? `[${name}]` : name}:${port || (scheme === 'https' ? 443 : 80)}`;
 }
-const urlTarget = value => { const url = new URL(value); return redirectTarget({ scheme: url.protocol.slice(0, -1), host: url.hostname, port: Number(url.port) }); };
-const enabledRedirects = config => new Set((config.mapRemoteRules ?? []).filter(rule => rule.enabled).map(redirectTarget));
+const ruleEffect = ({ id, name, group, enabled, ...effect }) => effect;
+function changedEnabledRules(before = [], after = []) {
+  return after.filter((rule, index) => {
+    if (!rule.enabled) {
+      const previous = before.find(item => item.id === rule.id);
+      return !previous || !isDeepStrictEqual(ruleEffect(previous), ruleEffect(rule));
+    }
+    const previous = before.findIndex(item => item.id === rule.id && item.enabled);
+    return previous < 0 || !isDeepStrictEqual(ruleEffect(before[previous]), ruleEffect(rule))
+      || !isDeepStrictEqual(before.slice(0, previous).filter(item => item.enabled).map(item => item.id),
+        after.slice(0, index).filter(item => item.enabled).map(item => item.id));
+  });
+}
+const scope = rule => `${rule.method || '*'} ${rule.pattern}`;
+const mapLocalNeedsApproval = rule => rule.statusCode >= 300 && rule.statusCode < 400
+  || Boolean(rule.bodyBase64 || rule.headers?.length || rule.eventDelaysMs?.length);
+function fixtureBody(rule) {
+  const body = Buffer.from(rule.bodyBase64 ?? '', 'base64');
+  const metadata = { bytes: body.length, sha256: createHash('sha256').update(body).digest('hex') };
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(body.subarray(0, 4096), { stream: body.length > 4096 });
+    if (!text.includes('\0')) {
+      metadata.textPreview = text.slice(0, 1000);
+      metadata.previewTruncated = Buffer.byteLength(metadata.textPreview) < body.length;
+    }
+  } catch { /* Binary data is identified by size and digest. */ }
+  return JSON.stringify(metadata, null, 2);
+}
 const denied = () => new Error('Declined in Streamglass. The user did not approve this action; do not retry it without asking them.');
 
 /** confirm({kind, title, detail, targets?}) asks the user in the app and resolves true only when they approve.
- * isApproved(target) reports redirect servers the user approved earlier. Without confirm, gated actions are refused. */
-export function registerTools(server, { baseUrl, token, workspaces, confirm = async () => false, isApproved = () => false }) {
+ * Without confirm, gated actions are refused. */
+export function registerTools(server, { baseUrl, token, workspaces, confirm = async () => false, signApproval }) {
   const base = new URL(baseUrl);
   if (base.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(base.hostname) || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !token) {
     throw new Error('MCP requires an authenticated loopback management endpoint');
@@ -85,17 +113,25 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
   async function approve(request) {
     if (!await confirm(request)) throw denied();
   }
-  async function approveRedirects(targets, detail) {
-    const pending = [...new Set(targets)].filter(target => !isApproved(target));
-    if (pending.length) await approve({ kind: 'redirect', title: 'Redirect traffic to another server', detail: [...detail, ...pending.map(target => `Server: ${target}`)], targets: pending });
-  }
   async function updateTrafficTools(edit) {
     const { config, revision } = await api('/api/traffic-tools');
-    const before = enabledRedirects(config);
     const updated = (await edit(structuredClone(config))) ?? config;
-    // Matching requests, with their cookies and authorization headers, would go to these servers.
-    const added = [...enabledRedirects(updated)].filter(target => !before.has(target));
-    if (added.length) await approveRedirects(added, ['Matching requests, including their cookies and authorization headers, will be sent to:']);
+    const redirects = changedEnabledRules(config.mapRemoteRules, updated.mapRemoteRules);
+    const fixtures = changedEnabledRules(config.mapLocalRules, updated.mapLocalRules).filter(mapLocalNeedsApproval);
+    const responseRules = rules => rules?.filter(rule => rule.phase === 'response');
+    const rewrites = changedEnabledRules(responseRules(config.rewriteRules), responseRules(updated.rewriteRules));
+    if (redirects.length || fixtures.length || rewrites.length) {
+      const describe = (type, rule) => `${type} • ${rule.name || rule.id}\nMatches: ${scope(rule)}\nState: ${rule.enabled ? 'enabled' : 'disabled'}`;
+      const lines = [
+        ...redirects.map(rule => `${describe('Map Remote', rule)}\nServer: ${redirectTarget(rule)}\nPath mapping: ${JSON.stringify([rule.pathFrom || '', rule.pathTo || ''])}\nKeep original Host: ${Boolean(rule.keepHost)}\nHeader operations: ${JSON.stringify((rule.headerOps ?? []).map(({ op, name }) => [op, name]))}`),
+        ...fixtures.map(rule => `${describe('Map Local', rule)}\nHTTP status: ${rule.statusCode}\nHeaders: ${JSON.stringify(rule.headers ?? [])}\nFixture body: ${fixtureBody(rule)}`),
+        ...rewrites.map(rule => `${describe('Response Rewrite', rule)}\nHTTP status: ${rule.statusCode || 'unchanged'}\nHeader operations: ${JSON.stringify(rule.headerOps ?? [])}\nBody replacement: ${rule.bodyFind ? JSON.stringify([rule.bodyFind, rule.bodyReplace ?? '']) : 'none'}`),
+      ];
+      const source = lines.join('\n\n');
+      if (source.length > 100000) throw new Error('Approval details are too large. Edit fewer rules at once.');
+      await approve({ kind: redirects.length ? 'redirect' : 'response', title: 'Change how matching traffic is handled',
+        detail: ['Review every affected rule below. Redirects and replacement content may cause clients to send data elsewhere.'], source });
+    }
     const result = await api('/api/traffic-tools', 'PUT', { revision, config: updated });
     return result.revision;
   }
@@ -201,9 +237,11 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
   tool('set_scenarios', 'Replace local request experiment rules. Enabled rules affect matching traffic.', {
     rules: z.array(scenarioRule).max(100).refine(rules => new Set(rules.map(rule => rule.id)).size === rules.length, 'Scenario IDs must be unique'),
   }, false, a => serializeMutation(async () => { const result = await api('/api/scenarios', 'PUT', a); return { saved: true, count: result.rules.length }; }), true);
-  tool('create_capture_fixture', 'Create a disabled Map Local fixture from a complete retained capture; timedSse retains event delays.', {
+  tool('create_capture_fixture', `Create a disabled Map Local fixture from a complete retained capture; timedSse retains event delays. ${APPROVAL}`, {
     recordId: id, name: z.string().trim().min(1).max(256), timedSse: z.boolean().default(false),
   }, false, a => serializeMutation(async () => {
+    await approve({ kind: 'response', title: 'Save a captured response as a fixture',
+      detail: [`Fixture: ${a.name}`, `Capture ID: ${a.recordId}`, 'The fixture will be saved disabled for later review.'] });
     const fixture = await api(`/api/records/${encodeURIComponent(a.recordId)}/fixture`, 'POST', { name: a.name, timedSse: a.timedSse });
     return { id: fixture.id, name: fixture.name, enabled: fixture.enabled, statusCode: fixture.statusCode };
   }));
@@ -231,11 +269,11 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
   });
   tool('get_settings', 'Read complete proxy and capture settings, including TLS domain patterns, as paginated JSON text.', { offset, maxChars }, true,
     async a => textPage(JSON.stringify((await state()).settings), a.offset, a.maxChars));
-  tool('list_captures', `List retained capture metadata, newest first. Filters are optional. Each item includes durationMs (total) and serverMs (request sent to response headers received, i.e. backend time). Use minServerMs/minDurationMs and sortBy to find slow requests. SSE items include sseStatus (${SSE_STATUSES.join(', ')}); filter with sseStatus, e.g. client-closed for streams the client disconnected.`, { offset, limit, device: z.string().max(256).optional(), state: z.string().max(64).optional(), sseOnly: z.boolean().default(false),
+  tool('list_captures', `List retained capture metadata, newest first. Filters are optional. Each item includes durationMs (total) and serverMs (request sent to response headers received, i.e. backend time). Use minServerMs/minDurationMs and sortBy to find slow requests. SSE items include sseStatus (${SSE_STATUSES.join(', ')}); filter with sseStatus, e.g. client-closed for streams the client disconnected.`, { offset, limit, device: z.string().max(256).optional().describe('Device id: the capture deviceId when present (ios-simulator:…, android-emulator:…, android-device:…), otherwise its client address'), state: z.string().max(64).optional(), sseOnly: z.boolean().default(false),
     sseStatus: z.enum(SSE_STATUSES).optional(),
     minServerMs: z.number().min(0).max(86400000).optional(), minDurationMs: z.number().min(0).max(86400000).optional(), sortBy: z.enum(['newest', 'serverMs', 'durationMs']).default('newest') }, true,
     async a => {
-      const records = (await state()).records.filter(r => (!a.device || r.device === a.device) && (!a.state || r.state === a.state) && (!a.sseOnly || r.isSSE) && (!a.sseStatus || r.sseStatus === a.sseStatus)
+      const records = (await state()).records.filter(r => (!a.device || (r.deviceId ?? r.device) === a.device) && (!a.state || r.state === a.state) && (!a.sseOnly || r.isSSE) && (!a.sseStatus || r.sseStatus === a.sseStatus)
         && (a.minServerMs === undefined || (r.serverMs ?? -1) >= a.minServerMs) && (a.minDurationMs === undefined || (r.durationMs ?? -1) >= a.minDurationMs));
       if (a.sortBy !== 'newest') records.sort((x, y) => (y[a.sortBy] ?? -1) - (x[a.sortBy] ?? -1));
       return page(records.map(withoutApplicationIcon), a.offset, a.limit);
@@ -289,7 +327,7 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
     return { format: a.format, ...textPage(typeof content === 'string' ? content : JSON.stringify(content, null, 2), a.offset, a.maxChars) };
   });
   tool('delete_capture', 'Delete one retained capture. Does not drop its live connection or release pending breakpoints.', { recordId: id }, false, a => api(`/api/records/${encodeURIComponent(a.recordId)}`, 'DELETE'), true);
-  tool('clear_captures', 'Delete all retained captures or those for one device. Does not drop live connections or release pending breakpoints.', { scope: z.enum(['all', 'device']), device: z.string().min(1).max(256).optional() }, false, a => {
+  tool('clear_captures', 'Delete all retained captures or those for one device. Does not drop live connections or release pending breakpoints.', { scope: z.enum(['all', 'device']), device: z.string().min(1).max(256).optional().describe('Device id: the capture deviceId when present (ios-simulator:…, android-emulator:…, android-device:…), otherwise its client address') }, false, a => {
     if ((a.scope === 'device') !== Boolean(a.device)) throw new Error('device must be supplied exactly when scope is device');
     return api(`/api/records${a.scope === 'device' ? `?${new URLSearchParams({ device: a.device })}` : ''}`, 'DELETE');
   }, true);
@@ -299,11 +337,17 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
     if (!r) throw new Error('Rule not found');
     return textPage(JSON.stringify(r), a.offset, a.maxChars);
   });
-  tool('upsert_rule', `Create or fully replace one rule. JavaScript runs in the existing script sandbox on matching traffic. breakpoint=false selects automatic scripts; true pauses traffic. New or changed JavaScript ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`, { rule: ruleSchema }, false,
+  tool('upsert_rule', `Create or fully replace one rule. JavaScript runs in the existing script sandbox on matching traffic. breakpoint=false selects automatic scripts; true pauses traffic. New code or a change to where it runs ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`, { rule: ruleSchema }, false,
     a => serializeMutation(async () => { const current = await state(); const rules = current.rules; const index = rules.findIndex(r => r.id === a.rule.id);
-      // A script can rewrite a request's URL and headers, so new code runs only after the user approves it.
-      if (a.rule.script && a.rule.script !== rules[index]?.script) await approve({ kind: 'script', title: 'Run JavaScript on matching traffic', detail: [`Rule: ${a.rule.name || a.rule.id}`, `Matches: ${a.rule.method || '*'} ${a.rule.pattern}`, `Stages: ${a.rule.stages.join(', ')}`, `Script (${a.rule.script.length} characters):`, a.rule.script.slice(0, 1200)] });
-      if (index < 0) rules.push(a.rule); else rules[index] = a.rule;
+      const previous = rules[index];
+      const scriptScope = rule => [rule?.script, rule?.pattern, rule?.method || '*', [...new Set(rule?.stages)].sort(), rule?.breakpoint, rule?.folderId];
+      if (a.rule.script && (a.rule.script !== previous?.script || (a.rule.enabled &&
+          (!previous?.enabled || !isDeepStrictEqual(scriptScope(a.rule), scriptScope(previous)))))) {
+        await approve({ kind: 'script', title: 'Run JavaScript on matching traffic', detail: [
+          `Rule: ${a.rule.name || a.rule.id}`, `Matches: ${scope(a.rule)}`, `Stages: ${a.rule.stages.join(', ')}`,
+          `Mode: ${a.rule.breakpoint ? 'breakpoint' : 'automatic'}`, `Script (${a.rule.script.length} characters):`], source: a.rule.script });
+      }
+      if (index < 0) rules.push(a.rule); else rules[index] = { ...a.rule, ...(previous.order === undefined ? {} : { order: previous.order }) };
       const result = await api('/api/rules', 'PUT', { revision: current.rulesRevision, rules }); return { id: a.rule.id, saved: true, revision: result.revision }; }), true);
   tool('delete_rule', 'Delete one rule by id.', { ruleId: id }, false, a => serializeMutation(async () => {
     const current = await state(); if (!current.rules.some(r => r.id === a.ruleId)) throw new Error('Rule not found');
@@ -319,17 +363,24 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
     const gate = (await state()).pending.find(g => g.token === a.gateToken); if (!gate) throw new Error('Breakpoint is no longer pending');
     return textPage(JSON.stringify(gate), a.offset, a.maxChars);
   });
-  tool('resolve_pending', `Continue a paused breakpoint with its existing value or an edited value, or drop the connection. Existing HTTP validators enforce message restrictions. An edited url that points to another scheme, host or port than the paused request, and to a server the user has not approved before, ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`, {
+  tool('resolve_pending', `Continue a paused breakpoint with its existing value or an edited value, or drop the connection. Changing the destination server or editing an HTTP response or SSE event ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`, {
     gateToken: id, action: z.enum(['continue', 'drop']), value: z.record(z.string(), z.unknown()).optional() }, false, async a => {
     if (a.value && Buffer.byteLength(JSON.stringify(a.value), 'utf8') > 192 * 1024) throw new Error('Edited value exceeds 192 KiB; use the local editor for larger edits');
     if (a.action === 'drop' && a.value) throw new Error('drop does not accept an edited value');
-    if (typeof a.value?.url === 'string') {
-      const gate = (await state()).pending.find(g => g.token === a.gateToken);
-      let target;
-      try { target = urlTarget(a.value.url); } catch { throw new Error('Edited url must be an absolute HTTP(S) URL'); }
-      if (gate && target !== urlTarget(gate.value?.url ?? gate.url)) await approveRedirects([target], [`Paused request: ${gate.method} ${gate.value?.url ?? gate.url}`, 'The edited request, including its cookies and authorization headers, will be sent to:']);
+    const path = `/api/pending/${encodeURIComponent(a.gateToken)}`;
+    let approval;
+    if (a.value !== undefined) {
+      ({ approval } = await api(`${path}/approval`, 'POST', a.value));
+      if (approval) await approve(approval.kind === 'redirect'
+        ? { kind: 'redirect', title: 'Redirect one paused request', detail: [`Original server: ${approval.sourceServer}`, `New server: ${approval.server}`,
+          'The edited request, including its cookies and authorization headers, will be sent there.'] }
+        : { kind: 'response', title: approval.kind === 'event' ? 'Edit one paused SSE event' : 'Edit one paused response',
+          detail: ['Review the changed status, headers or content below. An edited response can redirect the client.'],
+          source: JSON.stringify(approval.changes, null, 2) });
     }
-    return api(`/api/pending/${encodeURIComponent(a.gateToken)}`, 'POST', { action: a.action, ...(a.value === undefined ? {} : { value: a.value }) });
+    return api(path, 'POST', { action: a.action, mcp: true, ...(a.value === undefined ? {} : {
+      value: a.value, approval: approval ? signApproval?.(approval.stamp) : undefined,
+    }) });
   }, true);
   tool('update_settings', `Pause capture and bypass breakpoints/scripts (release waiting messages unchanged), enable/disable the proxy listener, or change TLS inspection domain patterns. Disabling proxy interrupts active connections; changing TLS patterns can reconnect tunnels. Broad TLS patterns such as * or *.com are refused. Does not change OS proxy or install a CA. Adding TLS patterns ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`, {
     capturePaused: z.boolean().optional(), proxyEnabled: z.boolean().optional(), tlsDomains: z.array(z.string().min(1).max(255).regex(/^[a-zA-Z0-9.*_:\-]+$/)).max(1000).optional() }, false, a => serializeMutation(async () => {
@@ -338,7 +389,13 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
       const added = [...new Set(a.tlsDomains)].filter(domain => !current.has(domain));
       const broad = added.filter(broadTlsPattern);
       if (broad.length) throw new Error(`Refused broad TLS pattern ${broad.join(', ')}: AI clients may only unlock named sites such as api.example.com or *.example.com. The user can add other patterns in Settings.`);
-      if (added.length) await approve({ kind: 'unlock', title: 'Decrypt HTTPS traffic for more sites', detail: ['Requests, responses, cookies and tokens for these sites become readable to Streamglass and connected AI clients:', ...added] });
+      if (added.length) {
+        await api('/api/mcp/tls-patterns', 'POST', added);
+        const source = added.join('\n');
+        if (source.length > 100000) throw new Error('Approval details are too large. Add fewer TLS patterns at once.');
+        await approve({ kind: 'unlock', title: 'Decrypt HTTPS traffic for more sites', detail: ['Requests, responses, cookies and tokens for the sites below become readable to Streamglass and connected AI clients:'], source });
+      }
+      return api('/api/settings', 'PUT', { ...a, mcpTlsBaseline: [...current] });
     }
     return api('/api/settings', 'PUT', a);
   }), true);

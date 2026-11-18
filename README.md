@@ -54,7 +54,7 @@ The script asks where to install Streamglass:
 - the current folder;
 - or a folder you type.
 
-It defaults to the folder where Streamglass is already installed. It downloads the latest release and checks it against the release's `SHA256SUMS.txt`. It then quits a running Streamglass, replaces the app in that folder and opens the new copy.
+It defaults to the folder where Streamglass is already installed. It downloads the latest release and checks it against the release's `SHA256SUMS.txt`. The checksum detects download corruption, but does not authenticate the release: an attacker who can replace both files can replace the checksum too. Set `STREAMGLASS_SHA256` to a digest obtained independently for the target zip to require a pinned match. The installer then quits a running Streamglass, replaces the app in that folder and opens the new copy.
 
 To update, run the same command and pick the same folder. If that version is already installed, it just opens the app. Releases are unsigned, so the script removes the macOS quarantine flag, which lets the app open without a Gatekeeper prompt. Only run it if you trust this repository's releases.
 

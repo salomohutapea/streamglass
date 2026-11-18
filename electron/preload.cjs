@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   readClipboardText: () => ipcRenderer.invoke('read-clipboard-text'),
   getMcpConnection: () => ipcRenderer.invoke('mcp-connection'),
   setMcpEnabled: (enabled) => ipcRenderer.invoke('mcp-enabled', enabled),
+  rotateMcpToken: () => ipcRenderer.invoke('mcp-rotate-token'),
   forgetMcpRedirect: (target) => ipcRenderer.invoke('mcp-forget-redirect', target),
   getApprovals: () => ipcRenderer.invoke('approvals'),
   resolveApproval: (input) => ipcRenderer.invoke('resolve-approval', input),
@@ -39,6 +40,22 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   listDevices: (options) => ipcRenderer.invoke('list-devices', options),
   setupSite: (input) => ipcRenderer.invoke('setup-site', input),
   deviceAction: (action) => ipcRenderer.invoke('device-action', action),
+  deviceInventory: (input) => ipcRenderer.invoke('device-inventory', input),
+  watchDevices: (input) => ipcRenderer.invoke('watch-devices', input),
+  connectDevice: (input) => ipcRenderer.invoke('connect-device', input),
+  disconnectDevice: (input) => ipcRenderer.invoke('disconnect-device', input),
+  revertAllDevices: (input) => ipcRenderer.invoke('revert-all-devices', input),
+  setDeviceOptions: (input) => ipcRenderer.invoke('set-device-options', input),
+  confirmUserCert: (input) => ipcRenderer.invoke('confirm-user-cert', input),
+  reopenCertInstaller: (input) => ipcRenderer.invoke('reopen-cert-installer', input),
+  startAdbPairing: (input) => ipcRenderer.invoke('start-adb-pairing', input),
+  cancelAdbPairing: (input) => ipcRenderer.invoke('cancel-adb-pairing', input),
+  onDeviceInventory: (callback) => {
+    const listener = (_event, inventory) => callback(inventory);
+    ipcRenderer.on('device-inventory', listener);
+    return () => ipcRenderer.removeListener('device-inventory', listener);
+  },
+
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   getUpdate: (force) => ipcRenderer.invoke('update-status', force),
   getAboutInfo: () => ipcRenderer.invoke('about-info'),
