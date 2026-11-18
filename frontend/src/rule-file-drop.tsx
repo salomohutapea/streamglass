@@ -19,12 +19,11 @@ export async function readDroppedRuleBundles(files: File[]): Promise<unknown[]> 
   return bundles;
 }
 
-export function importedRuleNotice(result: RuleImportResult) {
-  const count = [
-    result.breakpoints && `${result.breakpoints} breakpoint${result.breakpoints === 1 ? '' : 's'}`,
-    result.scripts && `${result.scripts} script${result.scripts === 1 ? '' : 's'}`,
-  ].filter(Boolean).join(' and ');
-  return `Imported ${count} as disabled rules.`;
+export type RuleImportNotice = { id: number; count: number };
+
+export function importedRuleNotice(kind: keyof RuleImportResult, count: number) {
+  const noun = kind === 'scripts' ? 'script' : 'breakpoint';
+  return `Imported ${count} ${noun}${count === 1 ? '' : 's'} as ${count === 1 ? 'a disabled rule' : 'disabled rules'}.`;
 }
 
 export function useRuleFileDrop(canAccept: () => boolean, importFiles: (files: File[]) => void) {

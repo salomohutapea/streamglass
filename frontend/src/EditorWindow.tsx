@@ -9,7 +9,7 @@ import { confirmAction } from './confirm-dialog';
 import ScriptEditor from './ScriptEditor';
 import { upsertRule } from './rule-order.mjs';
 import './editor-window.css';
-import { importedRuleNotice, readDroppedRuleBundles, ruleFileLimit, RuleFileDropIndicator, useRuleFileDrop, type RuleImportResult } from './rule-file-drop';
+import { importedRuleNotice, readDroppedRuleBundles, ruleFileLimit, RuleFileDropIndicator, useRuleFileDrop, type RuleImportNotice, type RuleImportResult } from './rule-file-drop';
 
 type Rule = { id: string; name?: string; enabled: boolean; pattern: string; method: string; stages: string[]; script?: string; breakpoint?: boolean; folderId?: string; order?: number };
 type RuleFolder = { id: string; name: string; kind: 'breakpoints' | 'scripts'; parentId?: string; enabled?: boolean; expanded?: boolean; order?: number };
@@ -109,7 +109,8 @@ export default function EditorWindow() {
   const [query, setQuery] = useState('');
   const [folderForm, setFolderForm] = useState<{ id?: string; parentId?: string | null; name: string } | null>(null);
   const [share, setShare] = useState<{ rules: Rule[]; folders: RuleFolder[] } | null>(null);
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState<RuleImportNotice | null>(null);
+  const seenNotice = useRef(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [seedLoading, setSeedLoading] = useState(Boolean(recordId));
@@ -150,6 +151,27 @@ export default function EditorWindow() {
       .then(value => { if (active) setConnection(value); }).catch(error => { if (active) setError(errorMessage(error)); });
     return () => { active = false; window.removeEventListener('storage', theme); };
   }, [title]);
+
+  useEffect(() => {
+    const desktop = window.streamglass;
+    if (!desktop || recordId) return;
+    let active = true;
+    function receive(value: RuleImportNotice | null) {
+      if (!active || !value || value.id <= seenNotice.current) return;
+      seenNotice.current = value.id;
+      setQuery('');
+      setNotice(value);
+    }
+    const unsubscribe = desktop.onRuleImportNotice(receive);
+    void desktop.ruleImportNotice().then(receive).catch(error => { if (active) setError(errorMessage(error)); });
+    return () => { active = false; unsubscribe(); };
+  }, []);
+
+  function dismissNotice() {
+    if (!notice) return;
+    setNotice(null);
+    void window.streamglass?.ruleImportNotice(notice.id).catch(error => setError(errorMessage(error)));
+  }
 
   const api = useCallback(async (path: string, method = 'GET', body?: unknown) => {
     if (!connection) throw new Error('Backend is connecting');
@@ -217,23 +239,20 @@ export default function EditorWindow() {
     catch (error) { setError(errorMessage(error)); return false; }
     finally { revision.current++; working.current = false; setBusy(false); }
   }
-  async function showOtherKind(reason: 'dragged' | 'imported') {
-    try { await window.streamglass?.showOtherRuleKind(reason); }
+  async function showOtherKind() {
+    try { await window.streamglass?.showOtherRuleKind(); }
     catch (error) { setError(errorMessage(error)); }
   }
 
   async function importRules(files?: File[]) {
     const desktop = window.streamglass;
     if (!desktop || working.current) return;
-    setNotice('');
     await configRequest(async () => {
       const result = files
         ? await api('/api/rules/import', 'POST', await readDroppedRuleBundles(files)) as RuleImportResult
         : await desktop.importRuleFiles();
       if (!result) return;
-      setQuery('');
-      setNotice(importedRuleNotice(result));
-      if (result[otherKind]) await showOtherKind('imported');
+      await desktop.reportRuleImport(result);
     });
   }
 
@@ -249,7 +268,7 @@ export default function EditorWindow() {
     if (!id) return;
     event.preventDefault();
     if (canDrop && !working.current && data?.rules.some(rule => rule.id === id && (rule.breakpoint === false) === (otherKind === 'scripts'))) {
-      void showOtherKind('dragged');
+      void showOtherKind();
     }
   }
   // The folder route re-sorts the stored rules in the same write.
@@ -284,7 +303,7 @@ export default function EditorWindow() {
     {ruleFileDrop.over && canDrop && !busy && <RuleFileDropIndicator/>}
     <header className="editor-window-heading window-header"><h1>{title}</h1><span role="img" aria-label="Applies to all connected devices" title="Applies to all connected devices"><Globe size={14}/></span></header>
     {error && <Banner tone="error" className="editor-error" actions={<button onClick={() => setError('')}>Dismiss</button>}>{error}</Banner>}
-    {notice && <Banner tone="info" actions={<button onClick={() => setNotice('')}>Dismiss</button>}>{notice}</Banner>}
+    {notice && <Banner tone="info" actions={<button onClick={dismissNotice}>Dismiss</button>}>{importedRuleNotice(kind, notice.count)}</Banner>}
     {share && <ShareRules {...share} onClose={() => setShare(null)}/>}
     <div className={`editor-window-content${!editing && !seedLoading ? ' is-browser' : ''}`}>
       {seedLoading ? <p className="muted">Loading…</p> : editing ? <fieldset className="editor-fields form" disabled={busy}>

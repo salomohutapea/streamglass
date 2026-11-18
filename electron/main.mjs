@@ -632,17 +632,48 @@ async function start() {
     if (!kind) throw new Error('This action requires a rules window');
     return kind;
   }
-  handle('show-other-rule-kind', async (event, reason) => {
-    if (!['imported', 'dragged'].includes(reason)) throw new Error('Invalid rule notice');
+  const ruleImportNotices = new WeakMap();
+  let ruleImportNoticeId = 0;
+  const ruleWindowTitle = kind => kind === 'scripts' ? 'JavaScript rules' : 'Breakpoint rules';
+
+  handle('rule-import-notice', (event, dismissId) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    ruleEditorKind(owner);
+    const notice = ruleImportNotices.get(owner);
+    if (notice && notice.id === dismissId) ruleImportNotices.delete(owner);
+    return ruleImportNotices.get(owner) ?? null;
+  });
+
+  handle('report-rule-import', async (event, result) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const source = owner === mainWindow ? null : ruleEditorKind(owner);
+    if (!result || !['breakpoints', 'scripts'].every(kind => Number.isInteger(result[kind]) && result[kind] >= 0)
+        || result.breakpoints + result.scripts > 500) throw new Error('Invalid imported rule counts');
+    const kinds = source === 'scripts' ? ['scripts', 'breakpoints'] : ['breakpoints', 'scripts'];
+    for (const kind of kinds) {
+      if (!result[kind]) continue;
+      if (kind !== source) openEditor({ type: kind });
+      const destination = editorWindows.get(`${kind}:`);
+      const notice = { id: ++ruleImportNoticeId, count: result[kind] };
+      // The renderer also reads this snapshot on mount, after subscribing to updates.
+      ruleImportNotices.set(destination, notice);
+      destination.webContents.send('rule-import-notice', notice);
+      if (source && kind !== source) {
+        await dialog.showMessageBox(destination, {
+          type: 'info', message: `Rules imported into ${ruleWindowTitle(kind)}`,
+          detail: 'Imported rules are disabled. Review them before enabling.',
+        });
+      }
+    }
+  });
+
+  handle('show-other-rule-kind', async event => {
     const source = ruleEditorKind(BrowserWindow.fromWebContents(event.sender));
     const type = source === 'scripts' ? 'breakpoints' : 'scripts';
-    const title = type === 'scripts' ? 'JavaScript rules' : 'Breakpoint rules';
     openEditor({ type });
-    const destination = editorWindows.get(`${type}:`);
-    await dialog.showMessageBox(destination, {
-      type: 'info',
-      message: reason === 'imported' ? `Rules imported into ${title}` : `This rule belongs in ${title}`,
-      detail: reason === 'imported' ? 'Imported rules are disabled. Review them before enabling.' : 'The rule stays in its current folder.',
+    await dialog.showMessageBox(editorWindows.get(`${type}:`), {
+      type: 'info', message: `This rule belongs in ${ruleWindowTitle(type)}`,
+      detail: 'The rule stays in its current folder.',
     });
   });
   handle('import-rule-files', async event => {

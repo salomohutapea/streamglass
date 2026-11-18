@@ -38,7 +38,14 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   toolsAction: (input) => ipcRenderer.invoke('tools-action', input),
   pickMapLocalFile: () => ipcRenderer.invoke('pick-map-local-file'),
   importRuleFiles: () => ipcRenderer.invoke('import-rule-files'),
-  showOtherRuleKind: reason => ipcRenderer.invoke('show-other-rule-kind', reason),
+  showOtherRuleKind: () => ipcRenderer.invoke('show-other-rule-kind'),
+  reportRuleImport: result => ipcRenderer.invoke('report-rule-import', result),
+  ruleImportNotice: dismissId => ipcRenderer.invoke('rule-import-notice', dismissId),
+  onRuleImportNotice: callback => {
+    const listener = (_event, notice) => callback(notice);
+    ipcRenderer.on('rule-import-notice', listener);
+    return () => ipcRenderer.removeListener('rule-import-notice', listener);
+  },
   exportFile: (file) => ipcRenderer.invoke('export-file', file),
   exportAllCaptures: () => ipcRenderer.invoke('export-all-captures'),
   sessionFile: (input) => ipcRenderer.invoke('session-file', input),
