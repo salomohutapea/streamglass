@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import hashlib
 import hmac
 import json
 import shlex
@@ -13,14 +14,16 @@ from .service import MAX_BODY, is_sse
 from .sse import exported
 from .sse_status import sse_status
 from .search import search as search_records
-from .custom_fields import evaluate as evaluate_fields
+from .custom_fields import evaluate_full as evaluate_fields_full
 
 
-def create_app(service):
+def create_app(service, *, allow_dev_origin=False, mcp_approval_key=None):
     @web.middleware
     async def boundary(request, handler):
         origin = request.headers.get("Origin")
-        allowed = {"app://streamglass", "http://127.0.0.1:5173", "http://localhost:5173", f"http://127.0.0.1:{service.port}", f"http://localhost:{service.port}"}
+        allowed = {"app://streamglass", f"http://127.0.0.1:{service.port}", f"http://localhost:{service.port}"}
+        if allow_dev_origin:
+            allowed.update(("http://127.0.0.1:5173", "http://localhost:5173"))
         if request.host not in (f"127.0.0.1:{service.port}", f"localhost:{service.port}"):
             return web.json_response({"error": {"code": "host_denied", "message": "Invalid management host"}}, status=403)
         if origin and origin not in allowed:
@@ -37,8 +40,6 @@ def create_app(service):
             return cors(web.Response(status=204))
         authorization = request.headers.get("Authorization", "")
         supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
-        if request.path == "/api/ws":
-            supplied = request.query.get("token", supplied)
         if not hmac.compare_digest(supplied.encode("utf-8"), service.token.encode("utf-8")):
             return cors(web.json_response({"error": {"code": "unauthorized", "message": "Management token required"}}, status=401))
         try:
@@ -114,6 +115,12 @@ def create_app(service):
 
     async def settings(request):
         changes = await request.json()
+        if isinstance(changes, dict) and "mcpTlsBaseline" in changes:
+            baseline = changes.pop("mcpTlsBaseline")
+            if not isinstance(baseline, list) or not all(isinstance(item, str) for item in baseline):
+                raise ValueError("Expected the prior TLS domain patterns")
+            if set(baseline) != set(service.settings["tlsDomains"]):
+                return web.json_response({"error": {"code": "revision_conflict", "message": "TLS patterns changed. Read settings again before editing."}}, status=409)
         if isinstance(changes, dict) and "running" in changes:
             changes["proxyEnabled"] = changes.pop("running")
         if not isinstance(changes, dict) or set(changes) - {"capturePaused", "proxyEnabled", "proxyPort", "listenHost", "tlsDomains", "lanDevices", "lanDeviceExpiry", "lanAllowedDestinations", "inspectedStorageMiB"}:
@@ -131,7 +138,7 @@ def create_app(service):
         if "lanDeviceExpiry" in changes:
             if type(changes["lanDeviceExpiry"]) is not bool:
                 raise ValueError("lanDeviceExpiry must be boolean")
-            # Turning expiry back on gives every approved device a fresh seven days instead of dropping old ones at once.
+            # Turning expiry back on gives every approved device a fresh 24 hours instead of dropping old ones at once.
             if changes["lanDeviceExpiry"] and not service.settings.get("lanDeviceExpiry", True):
                 service.settings["lanDeviceApprovals"] = {}
         if "proxyEnabled" in changes and type(changes["proxyEnabled"]) is not bool:
@@ -155,18 +162,7 @@ def create_app(service):
             service.set_capture_paused(changes["capturePaused"])
         service.settings.update(changes)
         if changed_listener or changes.get("proxyEnabled", previous["proxyEnabled"]) != previous["proxyEnabled"]:
-            from .repeat_replay import stop_jobs
-            await stop_jobs(service)
-            if service.master:
-                for flow_id, flow in list(service.flows.items()):
-                    flow.kill()
-                    service.cancel(flow_id, "Proxy stopped by user")
-                service.streams.clear()
-                service.flows.clear()
-                await service.master.addons.get("proxyserver").servers.update([])
-                service.master.shutdown()
-                await service.proxy_task
-                service.master = None
+            await service.stop_proxy("Proxy stopped by user")
             try:
                 await service.start_proxy()
             except Exception:
@@ -185,7 +181,13 @@ def create_app(service):
         if "inspectedStorageMiB" in changes and service.evict("inspected"):
             service.db.commit()  # a smaller budget applies now, not at the next capture
         service.persist_config()
+        if "lanDevices" in changes:
+            service.lan_guard.close_devices(set(previous["lanDevices"]) - set(service.settings["lanDevices"]))
         return web.json_response({**service.state()["settings"], "interruptedConnections": interrupted})
+
+    async def wake(request):
+        # Called by the desktop app when the Mac resumes from sleep.
+        return web.json_response(await service.recover_after_wake())
 
     def validate_rules(rules, folders):
         if not isinstance(rules, list) or len(rules) > 500:
@@ -229,6 +231,41 @@ def create_app(service):
         # Kept in the order the folder tree shows, which is the order rules are tried in.
         service.persist_config(rules=ordered_rules(rules, service.folders))
         return web.json_response({"rules": service.rules, "revision": service.rules_revision})
+
+    async def import_rules(request):
+        bundles = await request.json()
+        if not isinstance(bundles, list) or not 1 <= len(bundles) <= 500:
+            raise ValueError("Choose one or more Streamglass rule files")
+        portable_keys = {"name", "pattern", "method", "stages", "breakpoint", "script"}
+        imported = []
+        order = max(
+            [len(service.rules) + 1]
+            + [folder.get("order", 0) for folder in service.folders if not folder.get("parentId")]
+            + [rule.get("order", 0) for rule in service.rules if not rule.get("folderId")]
+        )
+        for bundle in bundles:
+            if (not isinstance(bundle, dict) or set(bundle) != {"format", "version", "rules"}
+                    or bundle["format"] != "streamglass-rules"
+                    or type(bundle["version"]) is not int or bundle["version"] != 1
+                    or not isinstance(bundle["rules"], list) or not bundle["rules"]):
+                raise ValueError("Expected a Streamglass rule file (version 1)")
+            if len(service.rules) + len(imported) + len(bundle["rules"]) > 500:
+                raise ValueError("Import would exceed the profile limit of 500 rules")
+            for rule in bundle["rules"]:
+                if (not isinstance(rule, dict) or set(rule) - portable_keys
+                        or not isinstance(rule.get("name", ""), str)):
+                    raise ValueError("Invalid shared rule")
+                imported.append({
+                    "method": "*", "breakpoint": True, **rule,
+                    "id": str(uuid.uuid4()), "enabled": False, "order": order,
+                })
+
+        from .rule_folders import ordered_rules
+        rules = validate_rules(service.rules + imported, service.folders)
+        # Merge into the current state synchronously so a concurrent editor never loses its changes.
+        service.persist_config(rules=ordered_rules(rules, service.folders))
+        scripts = sum(rule["breakpoint"] is False for rule in imported)
+        return web.json_response({"breakpoints": len(imported) - scripts, "scripts": scripts})
 
     async def workspace_config(request):
         def snapshot():
@@ -290,7 +327,8 @@ def create_app(service):
         value = service.records.get(record_id)
         if not value:
             raise web.HTTPNotFound()
-        return web.json_response({"id": record_id, "rev": service.record_revs.get(record_id, 0), "fields": evaluate_fields(service, value, full=True)})
+        revision = service.record_revs.get(record_id, 0)
+        return web.json_response({"id": record_id, "rev": revision, "fields": await evaluate_fields_full(service, value, notify=True)})
 
     async def folder(request):
         """Create, change or delete a rule folder. PATCH takes any of name, parentId (null for the top level), enabled,
@@ -349,11 +387,106 @@ def create_app(service):
         service.persist_config(rules=ordered_rules(rules, folders), folders=folders)
         return web.json_response(result, status=200 if existing else 201)
 
-    async def resume(request):
-        gate = service.pending.get(request.match_info["token"])
+    def pending_gate(token):
+        gate = service.pending.get(token)
         if not gate or gate["future"].done():
-            return web.json_response({"error": {"code": "stale_gate", "message": "Breakpoint is no longer pending"}}, status=409)
+            return None
+        return gate
+
+    def stale_gate():
+        return web.json_response({"error": {"code": "stale_gate", "message": "Breakpoint is no longer pending"}}, status=409)
+
+    def checked_gate_edit(gate, value, *, require_flow=False):
+        if not isinstance(value, dict):
+            raise ValueError("Edited value must be an object")
+        if gate["value"].get("bodyUnavailable") and any(
+                value.get(key, gate["value"].get(key, "")) != gate["value"].get(key, "")
+                for key in ("body", "bodyBase64")):
+            raise ValueError("Body editing is unavailable for streamed messages; edit only headers and status.")
+        from .service import apply_message
+        from .sse import serialize
+        if gate["stage"] == "event":
+            return serialize(gate["value"]), serialize(value)
+        flow = service.flows.get(gate["recordId"])
+        if not flow:
+            if require_flow:
+                raise web.HTTPConflict(reason="Breakpoint connection is no longer active")
+            return None, None
+        request_edit = gate["stage"] == "request"
+        message = flow.request if request_edit else flow.response
+        edited = copy.deepcopy(message)
+        from .large_body import CAPTURE_KEY, apply_streamed_headers
+        if not request_edit and CAPTURE_KEY in flow.metadata:
+            apply_streamed_headers(edited, value)
+        else:
+            headers_only = (bool(gate["value"].get("bodyUnavailable")) or gate["recordId"] in service.streams
+                            or (not request_edit and "text/event-stream" in message.headers.get("content-type", "").lower()))
+            apply_message(edited, value, request_edit, headers_only=headers_only)
+        return message, edited
+
+    def body_summary(body):
+        if body is None:
+            return {"available": False}
+        sample = body[:4096].decode("utf-8", errors="replace")[:1000]
+        return {"bytes": len(body), "sha256": hashlib.sha256(body).hexdigest(),
+                "textPreview": sample if "\x00" not in sample and "\ufffd" not in sample else None,
+                "previewTruncated": len(body) > len(sample.encode("utf-8"))}
+
+    def response_changes(original, edited):
+        names = dict.fromkeys(name.lower() for name in (*original.headers.keys(), *edited.headers.keys()))
+        changed = [name for name in names if original.headers.get_all(name) != edited.headers.get_all(name)]
+        headers = []
+        for name in sorted(changed, key=lambda item: item not in {"location", "refresh"})[:12]:
+            values = edited.headers.get_all(name)
+            preview = [value[:512] for value in values[:2]]
+            headers.append({"name": name[:160], "values": preview,
+                            "truncated": len(name) > 160 or len(values) > len(preview) or any(len(value) > 512 for value in values[:2])})
+        return {"status": [original.status_code, edited.status_code], "headers": headers,
+                "omittedHeaders": max(0, len(changed) - len(headers)),
+                "body": body_summary(edited.raw_content) if original.raw_content != edited.raw_content else "unchanged"}
+
+    def gate_approval(gate_token, gate, value, original, edited):
+        if original is None:
+            return None
+        if gate["stage"] == "event":
+            if original == edited:
+                return None
+            detail = {"kind": "event", "changes": body_summary(edited)}
+        elif gate["stage"] == "request":
+            origin = (original.scheme, original.host, original.port)
+            target = (edited.scheme, edited.host, edited.port)
+            if origin == target:
+                return None
+
+            def server_name(address):
+                scheme, host, port = address
+                host = f"[{host}]" if ":" in host else host
+                return f"{scheme}://{host}:{port}"
+
+            detail = {"kind": "redirect", "sourceServer": server_name(origin), "server": server_name(target)}
+        else:
+            if (original.status_code, original.headers.fields, original.raw_content) == (
+                    edited.status_code, edited.headers.fields, edited.raw_content):
+                return None
+            detail = {"kind": "response", "changes": response_changes(original, edited)}
+        stamp = json.dumps([gate_token, detail, value], sort_keys=True, separators=(",", ":")).encode()
+        return {**detail, "stamp": hashlib.sha256(stamp).hexdigest()}
+
+    async def pending_approval(request):
+        token = request.match_info["token"]
+        value = await request.json()
+        gate = pending_gate(token)
+        if gate is None:
+            return stale_gate()
+        original, edited = checked_gate_edit(gate, value, require_flow=True)
+        return web.json_response({"approval": gate_approval(token, gate, value, original, edited)})
+
+    async def resume(request):
+        token = request.match_info["token"]
         decision = await request.json()
+        gate = pending_gate(token)
+        if gate is None:
+            return stale_gate()
         if decision.get("action") == "drop":
             flow = service.flows.get(gate["recordId"])
             if flow:
@@ -363,27 +496,20 @@ def create_app(service):
             value = decision.get("value", gate["value"])
             if not isinstance(value, dict):
                 raise ValueError("Edited value must be an object")
-            if gate["value"].get("bodyUnavailable") and any(
-                    value.get(key, gate["value"].get(key, "")) != gate["value"].get(key, "")
-                    for key in ("body", "bodyBase64")):
-                raise ValueError("Body editing is unavailable for streamed messages; edit only headers and status.")
             if decision.get("decoded") is not None:
                 from .codecs import prepare_decoded
                 value = await prepare_decoded(service, gate, decision["decoded"], value)
-                if service.pending.get(request.match_info["token"]) is not gate or gate["future"].done():
-                    raise web.HTTPConflict(reason="Breakpoint is no longer pending")
-            from .service import apply_message
-            from .sse import serialize
-            flow = service.flows.get(gate["recordId"])
-            if gate["stage"] == "event":
-                serialize(value)
-            elif flow:
-                message = flow.request if gate["stage"] == "request" else flow.response
-                from .large_body import CAPTURE_KEY, apply_streamed_headers
-                if gate["stage"] == "response" and CAPTURE_KEY in flow.metadata:
-                    apply_streamed_headers(copy.deepcopy(message), value)
-                else:
-                    apply_message(copy.deepcopy(message), value, gate["stage"] == "request", headers_only=bool(gate["value"].get("bodyUnavailable")) or gate["recordId"] in service.streams or (gate["stage"] == "response" and "text/event-stream" in flow.response.headers.get("content-type", "").lower()))
+                if pending_gate(token) is not gate:
+                    return stale_gate()
+            mcp_edit = decision.get("mcp") is True and "value" in decision
+            original, edited = checked_gate_edit(gate, value, require_flow=mcp_edit)
+            if mcp_edit:
+                approval = gate_approval(token, gate, value, original, edited)
+                if approval:
+                    supplied = decision.get("approval")
+                    expected = hmac.digest(mcp_approval_key, approval["stamp"].encode(), "sha256").hex() if mcp_approval_key else ""
+                    if not isinstance(supplied, str) or len(supplied) != 64 or not hmac.compare_digest(supplied.encode(), expected.encode()):
+                        return web.json_response({"error": {"code": "approval_required", "message": "Approve this breakpoint edit before continuing"}}, status=403)
             gate["future"].set_result(value)
         else:
             raise ValueError("action must be continue or drop")
@@ -391,7 +517,7 @@ def create_app(service):
 
     async def delete(request):
         record_id, device = request.match_info.get("id"), request.query.get("device")
-        ids = [key for key, value in service.records.items() if (not record_id or key == record_id) and (not device or value["device"] == device)]
+        ids = [key for key, value in service.records.items() if (not record_id or key == record_id) and (not device or (value.get("deviceId") or value["device"]) == device)]
         for key in ids:
             service.forget_record(key)
         service.db.commit()
@@ -469,8 +595,9 @@ def create_app(service):
         return socket
 
     app.add_routes([web.get("/api/state", state), web.get("/api/pending", pending), web.get("/api/workspace-config", workspace_config), web.put("/api/workspace-config", workspace_config), web.get("/api/traffic-tools", traffic_tools), web.put("/api/traffic-tools", traffic_tools), web.post("/api/records/{id}/pin", pin), web.get("/api/search", search), web.get("/api/records/{id}", record), web.get("/api/records/{id}/fields", record_fields),
-                    web.put("/api/settings", settings), web.post("/api/lan-devices", lan_device), web.put("/api/rules", rules),
+                    web.put("/api/settings", settings), web.post("/api/wake", wake), web.post("/api/lan-devices", lan_device), web.put("/api/rules", rules), web.post("/api/rules/import", import_rules),
                     web.post("/api/folders", folder), web.patch("/api/folders/{id}", folder), web.delete("/api/folders/{id}", folder),
+                    web.post("/api/pending/{token}/approval", pending_approval),
                     web.post("/api/pending/{token}", resume), web.delete("/api/records", delete),
                     web.delete("/api/records/{id}", delete), web.get("/api/export/{id}", export),
                     web.get("/api/export-all", export_all), web.get("/api/certificate", certificate), web.get("/api/ws", websocket)])

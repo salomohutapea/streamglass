@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {placeField,orderLike,moveField,moveFieldBy,urlWildcard,changeSource,newField,newLocation,wildcardMatches,locationMatches,pickInto,fieldName,fieldChips,chipText,chipTitle,needsFullValues,prettyValue,fieldsColumnValue,fieldsForTab,stateText} from './custom-fields.mjs';
+import {placeField,orderLike,moveField,moveFieldBy,urlWildcard,changeSource,newField,newLocation,wildcardMatches,locationMatches,pickInto,fieldName,fieldChips,chipText,chipTitle,needsFullValues,prettyValue,fieldsColumnValue,fieldsForTab,stateText,withScript,scriptTooLong,FIELD_SCRIPT_LIMIT} from './custom-fields.mjs';
 
 const found = (patch = {}) => ({id: 'a', name: 'searchId', locations: [{source: 'response', path: '$.searchId'}], values: ['8f3a'], count: 1, state: 'found', limited: false, ...patch});
 
@@ -122,4 +122,14 @@ test('per-field saves keep fields changed elsewhere and the local position', () 
   assert.equal(ids(placeField(server, [], {id: 'n'})), 'a b x n');
   assert.equal(ids(orderLike(server, [{id: 'b'}, {id: 'a'}])), 'b a x');
   assert.equal(ids(orderLike([{id: 'x'}, {id: 'a'}, {id: 'b'}], [{id: 'b'}, {id: 'a'}])), 'b a x');
+});
+
+test('field scripts: empty removes the key, any text is kept, over the limit is flagged', () => {
+  const base = {id: 'a', name: 'n', locations: []};
+  assert.deepEqual(withScript(base, ''), base);
+  assert.equal('script' in withScript({...base, script: 'x'}, ''), false);
+  assert.equal(withScript(base, ' \n').script, ' \n');
+  assert.equal(scriptTooLong({...base, script: 'x'.repeat(FIELD_SCRIPT_LIMIT)}), false);
+  assert.equal(scriptTooLong({...base, script: 'x'.repeat(FIELD_SCRIPT_LIMIT + 1)}), true);
+  assert.equal(scriptTooLong(base), false);
 });

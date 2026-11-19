@@ -1,0 +1,2 @@
+/* Settings and Connect a device windows (see AuxWindow in App.tsx). Base layout lives in style.css. */
+.aux-settings .modal-body>.form{flex:1;min-height:0;display:flex;flex-direction:column}

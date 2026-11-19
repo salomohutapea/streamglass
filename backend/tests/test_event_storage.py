@@ -1,6 +1,8 @@
+import json
 import random
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from backend.service import Service, MAX_RECORDS, json_event_data, MAX_JSON_EVENT_CHARS
 from backend.sse import exported, wire_event
@@ -94,6 +96,51 @@ class EventStorageTests(unittest.TestCase):
         self.assertIn("stream", self.service.retention_index()["groups"]["limited"]["ids"])
         self.service.settings["tlsDomains"] = ["api.example.test"]
         self.assertNotIn("stream", self.service.retention_index()["groups"]["limited"]["ids"])
+
+    def test_retention_reorders_old_records_and_tracks_pin_changes(self):
+        service = self.service
+        with patch("backend.service.MAX_RECORDS", 3):
+            service.save({**stream("pinned", started=1), "pinned": True})
+            service.save(stream("first", events=1, started=2))
+            service.save(stream("second", started=3))
+            service.save({**service.records["first"], "startedAt": 4})
+            service.save(stream("new", started=5))
+            self.assertEqual(set(service.records), {"pinned", "first", "new"})
+            service.save({**service.records["pinned"], "pinned": False})
+            service.save(stream("newer", started=6))
+            self.assertEqual(set(service.records), {"first", "new", "newer"})
+            service.forget_record("new")
+            service.save(stream("after-delete", started=7))
+            self.assertEqual(set(service.records), {"first", "newer", "after-delete"})
+            group = service.retention_index()["groups"]["limited"]
+            self.assertEqual(group["size"], sum(service.record_sizes.values()))
+
+    def test_delta_only_serializes_dirty_rows_and_tracks_icon_removal(self):
+        service = self.service
+        service.save({**stream("old", started=1), "application": {"id": "app", "icon": "old"}})
+        service.save({**stream("current", started=2), "application": {"id": "app", "icon": "current"}})
+        _, body = service.state_json()
+        snapshot = json.loads(body)
+        self.assertEqual(snapshot["applicationIcons"], {"app": "current"})
+        since = f"{snapshot['instance']}:{snapshot['revision']}"
+
+        service.save({**service.records["old"], "annotation": "updated"})
+        with patch.object(service, "state_rows", wraps=service.state_rows) as build:
+            _, body = service.state_json(since)
+            self.assertEqual([record["id"] for record in build.call_args.args[0]], ["old"])
+        delta = json.loads(body)
+        self.assertEqual(delta["ids"], ["current", "old"])
+        self.assertEqual([row["annotation"] for row in delta["rows"]], ["updated"])
+        self.assertNotIn("applicationIcons", delta)
+
+        service.forget_record("current")
+        service.records["old"]["state"] = "paused"
+        service.changed()  # Gates and derived data can update rows without saving a capture.
+        _, body = service.state_json(since)
+        delta = json.loads(body)
+        self.assertEqual(delta["ids"], ["old"])
+        self.assertEqual(delta["rows"][0]["state"], "paused")
+        self.assertEqual(delta["applicationIcons"], {"app": "old"})
 
     def test_exports_restore_raw_base64(self):
         event = {"sequence": 1, "raw": "data: é\n\n"}

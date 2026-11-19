@@ -61,3 +61,31 @@ test('custom field MCP tools edit one field through the revision-checked prefere
   await call('get_capture_fields',{recordId:'capture'});
   assert.equal(requests.at(-1).path,'/api/records/capture/fields');
 });
+
+test('MCP approval is required for scripted custom fields through both write tools', async t => {
+  const previous = globalThis.fetch;
+  t.after(() => { globalThis.fetch = previous; });
+  const config = {journey:{paths:[],headers:[],inventoryPath:''},fields:[],assertions:[],views:[]};
+  const prompts = [];
+  const tools = new Map();
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(options.method, 'GET');
+    return Response.json({revision:1,config});
+  };
+  registerTools({registerTool(name, spec, handler){tools.set(name, {spec,handler});}}, {
+    baseUrl:'http://127.0.0.1:47821',token:'fixture-secret',
+    confirm:async prompt=>{prompts.push(prompt);return false;},
+  });
+  const field = {id:'one',name:'Label',script:'function onCustomField(values) { return values; }',
+    locations:[{pattern:'*',method:'*',source:'response',path:'$.label'}]};
+  for (const [name, input] of [
+    ['upsert_custom_field', {field}],
+    ['set_productivity_preferences', {revision:1,config:{...config,fields:[field]}}],
+  ]) {
+    const {spec,handler} = tools.get(name);
+    const result = await handler(z.object(spec.inputSchema).parse(input), {});
+    assert.equal(result.isError,true);
+    assert.match(result.content[0].text,/Declined in Streamglass/);
+  }
+  assert.deepEqual(prompts.map(prompt=>prompt.source),[field.script,field.script]);
+});

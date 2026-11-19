@@ -1,5 +1,8 @@
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
+import { isDeepStrictEqual } from 'node:util';
+import { diagnoseConnection, matchesCaptureScope } from './mcp-diagnostics.mjs';
 import { APPROVAL, registerTrafficRuleTools } from './mcp-traffic-rules.mjs';
 
 // All MCP sessions share this queue because the HTTP rule API replaces the list.
@@ -7,6 +10,11 @@ const mutations = new Map();
 const id = z.string().min(1).max(256);
 const offset = z.number().int().min(0).default(0);
 const limit = z.number().int().min(1).max(100).default(25);
+const captureScope = {
+  device: z.string().max(256).optional().describe('Exact capture deviceId, or the client address for captures without a deviceId'),
+  host: z.string().trim().min(1).max(255).optional().describe('Exact destination hostname or IP, without scheme, port, or path'),
+  since: z.number().finite().nonnegative().optional().describe('Earliest capture activity as Unix seconds'),
+};
 const maxChars = z.number().int().min(256).max(32768).default(8192);
 const textPage = (text, start = 0, size = 8192) => ({ text: text.slice(start, start + size), offset: start,
   totalChars: text.length, nextOffset: start + size < text.length ? start + size : null, truncated: start > 0 || start + size < text.length });
@@ -39,6 +47,10 @@ const SSE_STATUSES = ['connecting', 'open', 'streaming', 'server-closed', 'clien
 // An AI client may unlock (TLS-inspect) named sites only: the last two labels of the host must be literal, so "*",
 // "*.com" and "*.*" are refused. The desktop settings still accept any pattern the user types.
 export function broadTlsPattern(pattern) {
+  if (pattern.includes('*')) {
+    const match = /^\*\.[a-z0-9_-]+(?:\.[a-z0-9_-]+)+(?::([0-9]{1,5}))?$/i.exec(pattern);
+    return !match || (!!match[1] && (Number(match[1]) < 1 || Number(match[1]) > 65535));
+  }
   const labels = pattern.replace(/:[^.]*$/, '').split('.');
   return labels.length < 2 || labels.slice(-2).some(label => !label || label.includes('*'));
 }
@@ -47,13 +59,39 @@ export function redirectTarget({ scheme, host, port }) {
   const name = String(host).replace(/^\[|\]$/g, '').toLowerCase();
   return `${scheme}://${name.includes(':') ? `[${name}]` : name}:${port || (scheme === 'https' ? 443 : 80)}`;
 }
-const urlTarget = value => { const url = new URL(value); return redirectTarget({ scheme: url.protocol.slice(0, -1), host: url.hostname, port: Number(url.port) }); };
-const enabledRedirects = config => new Set((config.mapRemoteRules ?? []).filter(rule => rule.enabled).map(redirectTarget));
+const ruleEffect = ({ id, name, group, enabled, ...effect }) => effect;
+function changedEnabledRules(before = [], after = []) {
+  return after.filter((rule, index) => {
+    if (!rule.enabled) {
+      const previous = before.find(item => item.id === rule.id);
+      return !previous || !isDeepStrictEqual(ruleEffect(previous), ruleEffect(rule));
+    }
+    const previous = before.findIndex(item => item.id === rule.id && item.enabled);
+    return previous < 0 || !isDeepStrictEqual(ruleEffect(before[previous]), ruleEffect(rule))
+      || !isDeepStrictEqual(before.slice(0, previous).filter(item => item.enabled).map(item => item.id),
+        after.slice(0, index).filter(item => item.enabled).map(item => item.id));
+  });
+}
+const scope = rule => `${rule.method || '*'} ${rule.pattern}`;
+const mapLocalNeedsApproval = rule => rule.statusCode >= 300 && rule.statusCode < 400
+  || Boolean(rule.bodyBase64 || rule.headers?.length || rule.eventDelaysMs?.length);
+function fixtureBody(rule) {
+  const body = Buffer.from(rule.bodyBase64 ?? '', 'base64');
+  const metadata = { bytes: body.length, sha256: createHash('sha256').update(body).digest('hex') };
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(body.subarray(0, 4096), { stream: body.length > 4096 });
+    if (!text.includes('\0')) {
+      metadata.textPreview = text.slice(0, 1000);
+      metadata.previewTruncated = Buffer.byteLength(metadata.textPreview) < body.length;
+    }
+  } catch { /* Binary data is identified by size and digest. */ }
+  return JSON.stringify(metadata, null, 2);
+}
 const denied = () => new Error('Declined in Streamglass. The user did not approve this action; do not retry it without asking them.');
 
 /** confirm({kind, title, detail, targets?}) asks the user in the app and resolves true only when they approve.
- * isApproved(target) reports redirect servers the user approved earlier. Without confirm, gated actions are refused. */
-export function registerTools(server, { baseUrl, token, workspaces, confirm = async () => false, isApproved = () => false }) {
+ * Without confirm, gated actions are refused. */
+export function registerTools(server, { baseUrl, token, workspaces, confirm = async () => false, signApproval }) {
   const base = new URL(baseUrl);
   if (base.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(base.hostname) || base.pathname !== '/' || base.search || base.hash || base.username || base.password || !token) {
     throw new Error('MCP requires an authenticated loopback management endpoint');
@@ -85,17 +123,25 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
   async function approve(request) {
     if (!await confirm(request)) throw denied();
   }
-  async function approveRedirects(targets, detail) {
-    const pending = [...new Set(targets)].filter(target => !isApproved(target));
-    if (pending.length) await approve({ kind: 'redirect', title: 'Redirect traffic to another server', detail: [...detail, ...pending.map(target => `Server: ${target}`)], targets: pending });
-  }
   async function updateTrafficTools(edit) {
     const { config, revision } = await api('/api/traffic-tools');
-    const before = enabledRedirects(config);
     const updated = (await edit(structuredClone(config))) ?? config;
-    // Matching requests, with their cookies and authorization headers, would go to these servers.
-    const added = [...enabledRedirects(updated)].filter(target => !before.has(target));
-    if (added.length) await approveRedirects(added, ['Matching requests, including their cookies and authorization headers, will be sent to:']);
+    const redirects = changedEnabledRules(config.mapRemoteRules, updated.mapRemoteRules);
+    const fixtures = changedEnabledRules(config.mapLocalRules, updated.mapLocalRules).filter(mapLocalNeedsApproval);
+    const responseRules = rules => rules?.filter(rule => rule.phase === 'response');
+    const rewrites = changedEnabledRules(responseRules(config.rewriteRules), responseRules(updated.rewriteRules));
+    if (redirects.length || fixtures.length || rewrites.length) {
+      const describe = (type, rule) => `${type} • ${rule.name || rule.id}\nMatches: ${scope(rule)}\nState: ${rule.enabled ? 'enabled' : 'disabled'}`;
+      const lines = [
+        ...redirects.map(rule => `${describe('Map Remote', rule)}\nServer: ${redirectTarget(rule)}\nPath mapping: ${JSON.stringify([rule.pathFrom || '', rule.pathTo || ''])}\nKeep original Host: ${Boolean(rule.keepHost)}\nHeader operations: ${JSON.stringify((rule.headerOps ?? []).map(({ op, name }) => [op, name]))}`),
+        ...fixtures.map(rule => `${describe('Map Local', rule)}\nHTTP status: ${rule.statusCode}\nHeaders: ${JSON.stringify(rule.headers ?? [])}\nFixture body: ${fixtureBody(rule)}`),
+        ...rewrites.map(rule => `${describe('Response Rewrite', rule)}\nHTTP status: ${rule.statusCode || 'unchanged'}\nHeader operations: ${JSON.stringify(rule.headerOps ?? [])}\nBody replacement: ${rule.bodyFind ? JSON.stringify([rule.bodyFind, rule.bodyReplace ?? '']) : 'none'}`),
+      ];
+      const source = lines.join('\n\n');
+      if (source.length > 100000) throw new Error('Approval details are too large. Edit fewer rules at once.');
+      await approve({ kind: redirects.length ? 'redirect' : 'response', title: 'Change how matching traffic is handled',
+        detail: ['Review every affected rule below. Redirects and replacement content may cause clients to send data elsewhere.'], source });
+    }
     const result = await api('/api/traffic-tools', 'PUT', { revision, config: updated });
     return result.revision;
   }
@@ -140,28 +186,50 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
   tool('get_productivity_preferences', 'Read correlation configuration or a bounded page of custom fields, assertions or saved filters (section views). A custom field has an id, a name and 1-10 locations; each location highlights a value from the request or response body, SSE event data, or a header of APIs matching its URL wildcard and method, and values from all matching locations are merged.', {section:z.enum(['journey','fields','assertions','views']),offset,limit}, true, async a=>{
     const value=await api('/api/productivity');return {revision:value.revision,...(a.section==='journey'?{journey:value.config.journey}:page(value.config[a.section],a.offset,a.limit))};
   });
-  tool('set_productivity_preferences', 'Replace read-only analysis preferences and saved filters (views) using the expected revision. A custom field has 1-10 locations and shows the merged values found in any matching location; in a location, pattern is a URL wildcard, method is * or an HTTP method, source is request/response/event (path is a JSONPath) or requestHeader/responseHeader (path is a header name). Existing engine validation rejects unsupported JSONPaths and stale writes.', {
+  const customFieldScript = z.string().max(16384).optional().describe('Optional onCustomField(values, context) JavaScript to transform extracted display values. A new script or changed scope requires approval.');
+  async function approveFieldScripts(before, after) {
+    const prior = new Map(before.map(field => [field.id, field]));
+    for (const field of after) {
+      const previous = prior.get(field.id);
+      if (!field.script?.trim() || isDeepStrictEqual(field, previous)) continue;
+      await approve({kind:'script',title:'Run JavaScript on custom field values',detail:[
+        `Field: ${field.name}`,
+        ...field.locations.map(location => `${location.method} ${location.pattern} · ${location.source} ${location.path}`),
+      ],source:field.script});
+    }
+  }
+  tool('set_productivity_preferences', 'Replace read-only analysis preferences and saved filters (views) using the expected revision. A custom field has 1-10 locations and an optional onCustomField script. Engine validation rejects unsupported JSONPaths and stale writes.', {
     revision:z.number().int().nonnegative(),
     config:z.object({journey:z.object({paths:z.array(z.string().max(512)).max(10),headers:z.array(z.string().max(128)).max(10),inventoryPath:z.string().max(512)}).strict(),
-      fields:z.array(z.object({id:z.string().min(1).max(128),name:z.string().min(1).max(100),locations:z.array(z.object({pattern:z.string().min(1).max(4096),method:z.string().min(1).max(64),source:z.enum(['request','response','event','requestHeader','responseHeader']),path:z.string().min(1).max(512)}).strict()).min(1).max(10)}).strict()).max(50),
+      fields:z.array(z.object({id:z.string().min(1).max(128),name:z.string().min(1).max(100),script:customFieldScript,locations:z.array(z.object({pattern:z.string().min(1).max(4096),method:z.string().min(1).max(64),source:z.enum(['request','response','event','requestHeader','responseHeader']),path:z.string().min(1).max(512)}).strict()).min(1).max(10)}).strict()).max(50),
       assertions:z.array(z.object({id:z.string().min(1).max(128),name:z.string().min(1).max(100),enabled:z.boolean(),pattern:z.string().min(1).max(4096),method:z.string().min(1).max(64),kind:z.enum(['first-data','required-field','duplicate-event-id','terminal-event']),path:z.string().max(512),source:z.enum(['request','response','event']),eventName:z.string().max(128),timeoutMs:z.number().int().min(1).max(3600000)}).strict()).max(50),
       views:z.array(z.object({id:z.string().min(1).max(128),name:z.string().min(1).max(100),filter:z.string().max(1024),scope:z.enum(['url','request','response','event']),mode:z.enum(['contains','not_contains','equals','starts_with','ends_with','wildcard']),conditions:z.array(z.object({joiner:z.enum(['and','or']),scope:z.enum(['url','request','response','event']),mode:z.enum(['contains','not_contains','equals','starts_with','ends_with','wildcard']),filter:z.string().max(1024)}).strict()).max(7).optional(),protocols:z.array(z.enum(['HTTP','HTTPS','SSE'])).max(3),statuses:z.array(z.number().int().min(1).max(5)).max(5),contentTypes:z.array(z.enum(['json','form','xml','js','css','document','media','other'])).max(8).optional(),device:z.string().min(1).max(256),application:z.string().max(1024).nullable(),library:z.enum(['all','sse','pinned'])}).strict()).max(50)}).strict(),
-  }, false, a=>serializeMutation(()=>api('/api/productivity','PUT',a)));
+  }, false, a=>serializeMutation(async()=>{
+    if (a.config.fields.some(field => field.script?.trim())) {
+      const {revision,config}=await api('/api/productivity');
+      if (revision !== a.revision) throw new Error('Productivity preferences changed; refresh and retry.');
+      await approveFieldScripts(config.fields,a.config.fields);
+    }
+    return api('/api/productivity','PUT',a);
+  }));
   // Custom fields are stored in the productivity preferences; these edit one field and reuse its revision-checked PUT.
   const fieldSource=z.enum(['request','response','event','requestHeader','responseHeader']);
   const fieldLocation=z.object({pattern:z.string().min(1).max(4096).describe('URL wildcard matched against the full URL, e.g. https://api.example.com/v2/search*'),
     method:z.string().min(1).max(64).default('*').describe('* or one HTTP method'),source:fieldSource.describe('request/response body or SSE event data (path is a JSONPath such as $.data.searchId), or requestHeader/responseHeader (path is a header name)'),path:z.string().min(1).max(512)}).strict();
   const fieldShape=z.object({id:id.max(128).optional().describe('Omit to create a new field'),name:z.string().min(1).max(100),
+    script:customFieldScript,
     locations:z.array(fieldLocation).min(1).max(10).describe('Where to read the value. One field can read the same value from several APIs or places, for example SSE event data on a stream API and the response body on a poll API; a capture matches a location by URL wildcard and method, and the distinct values from all matching locations are merged into one list')}).strict();
   async function updateFields(edit){
     const {revision,config}=await api('/api/productivity');
-    const result=await api('/api/productivity','PUT',{revision,config:{...config,fields:edit(config.fields)}});
+    const fields=edit(config.fields);
+    await approveFieldScripts(config.fields,fields);
+    const result=await api('/api/productivity','PUT',{revision,config:{...config,fields}});
     return {revision:result.revision,fields:result.config.fields};
   }
   tool('list_custom_fields', 'List custom fields: values highlighted in the traffic table and inspector. Each field has 1-10 locations (URL wildcard, method, source, path) read from a request/response body, SSE event data or a header; values from every matching location are merged.', {offset,limit}, true, async a=>{
     const value=await api('/api/productivity');return {revision:value.revision,...page(value.config.fields,a.offset,a.limit)};
   });
-  tool('upsert_custom_field', 'Create a custom field, or fully replace the one with the same id. One field can be read from several APIs or places (locations), for example a searchId in SSE event data on the stream API and in the response body on the poll API; the distinct values found in all matching locations are merged. It shows in the table Fields column and at the top of the inspector for matching captures, after the engine evaluates them in the background. Engine validation rejects unsupported JSONPaths and header names; at most 50 fields.', {field:fieldShape}, false,
+  tool('upsert_custom_field', 'Create or fully replace a custom field. Matching locations are merged and the optional onCustomField script transforms the displayed values. Adding or changing a script or its field scope requires user approval. At most 50 fields.', {field:fieldShape}, false,
     a=>serializeMutation(async()=>{
       const field={...a.field,id:a.field.id??crypto.randomUUID()};
       const result=await updateFields(fields=>fields.some(f=>f.id===field.id)?fields.map(f=>f.id===field.id?field:f):[...fields,field]);
@@ -201,9 +269,11 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
   tool('set_scenarios', 'Replace local request experiment rules. Enabled rules affect matching traffic.', {
     rules: z.array(scenarioRule).max(100).refine(rules => new Set(rules.map(rule => rule.id)).size === rules.length, 'Scenario IDs must be unique'),
   }, false, a => serializeMutation(async () => { const result = await api('/api/scenarios', 'PUT', a); return { saved: true, count: result.rules.length }; }), true);
-  tool('create_capture_fixture', 'Create a disabled Map Local fixture from a complete retained capture; timedSse retains event delays.', {
+  tool('create_capture_fixture', `Create a disabled Map Local fixture from a complete retained capture; timedSse retains event delays. ${APPROVAL}`, {
     recordId: id, name: z.string().trim().min(1).max(256), timedSse: z.boolean().default(false),
   }, false, a => serializeMutation(async () => {
+    await approve({ kind: 'response', title: 'Save a captured response as a fixture',
+      detail: [`Fixture: ${a.name}`, `Capture ID: ${a.recordId}`, 'The fixture will be saved disabled for later review.'] });
     const fixture = await api(`/api/records/${encodeURIComponent(a.recordId)}/fixture`, 'POST', { name: a.name, timedSse: a.timedSse });
     return { id: fixture.id, name: fixture.name, enabled: fixture.enabled, statusCode: fixture.statusCode };
   }));
@@ -229,13 +299,15 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
     return { settings: { ...settings, tlsDomainsCount: tlsDomains.length }, captures: s.records.length, pending: s.pending.length, rules: s.rules.length, folders: s.folders.length,
       limits: { pageItems: 100, contentChars: 32768, watchDurationMs: 30000 } };
   });
+  tool('diagnose_connection', 'Troubleshoot device connectivity, LAN approval, TLS, and paused traffic. Returns current proxy state and bounded metadata from retained captures, defaulting to the last 15 minutes. Use an exact capture device ID or client IP; without either, evidence may come from other devices. No headers, bodies, or active probes.', captureScope, true,
+    async scope => diagnoseConnection(await state(), scope));
   tool('get_settings', 'Read complete proxy and capture settings, including TLS domain patterns, as paginated JSON text.', { offset, maxChars }, true,
     async a => textPage(JSON.stringify((await state()).settings), a.offset, a.maxChars));
-  tool('list_captures', `List retained capture metadata, newest first. Filters are optional. Each item includes durationMs (total) and serverMs (request sent to response headers received, i.e. backend time). Use minServerMs/minDurationMs and sortBy to find slow requests. SSE items include sseStatus (${SSE_STATUSES.join(', ')}); filter with sseStatus, e.g. client-closed for streams the client disconnected.`, { offset, limit, device: z.string().max(256).optional(), state: z.string().max(64).optional(), sseOnly: z.boolean().default(false),
+  tool('list_captures', `List retained capture metadata, newest first. Filters are optional. Each item includes durationMs (total) and serverMs (request sent to response headers received, i.e. backend time). Use minServerMs/minDurationMs and sortBy to find slow requests. SSE items include sseStatus (${SSE_STATUSES.join(', ')}); filter with sseStatus, e.g. client-closed for streams the client disconnected.`, { offset, limit, ...captureScope, state: z.string().max(64).optional(), sseOnly: z.boolean().default(false),
     sseStatus: z.enum(SSE_STATUSES).optional(),
     minServerMs: z.number().min(0).max(86400000).optional(), minDurationMs: z.number().min(0).max(86400000).optional(), sortBy: z.enum(['newest', 'serverMs', 'durationMs']).default('newest') }, true,
     async a => {
-      const records = (await state()).records.filter(r => (!a.device || r.device === a.device) && (!a.state || r.state === a.state) && (!a.sseOnly || r.isSSE) && (!a.sseStatus || r.sseStatus === a.sseStatus)
+      const records = (await state()).records.filter(r => matchesCaptureScope(r, a) && (!a.state || r.state === a.state) && (!a.sseOnly || r.isSSE) && (!a.sseStatus || r.sseStatus === a.sseStatus)
         && (a.minServerMs === undefined || (r.serverMs ?? -1) >= a.minServerMs) && (a.minDurationMs === undefined || (r.durationMs ?? -1) >= a.minDurationMs));
       if (a.sortBy !== 'newest') records.sort((x, y) => (y[a.sortBy] ?? -1) - (x[a.sortBy] ?? -1));
       return page(records.map(withoutApplicationIcon), a.offset, a.limit);
@@ -289,7 +361,7 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
     return { format: a.format, ...textPage(typeof content === 'string' ? content : JSON.stringify(content, null, 2), a.offset, a.maxChars) };
   });
   tool('delete_capture', 'Delete one retained capture. Does not drop its live connection or release pending breakpoints.', { recordId: id }, false, a => api(`/api/records/${encodeURIComponent(a.recordId)}`, 'DELETE'), true);
-  tool('clear_captures', 'Delete all retained captures or those for one device. Does not drop live connections or release pending breakpoints.', { scope: z.enum(['all', 'device']), device: z.string().min(1).max(256).optional() }, false, a => {
+  tool('clear_captures', 'Delete all retained captures or those for one device. Does not drop live connections or release pending breakpoints.', { scope: z.enum(['all', 'device']), device: z.string().min(1).max(256).optional().describe('Device id: the capture deviceId when present (ios-simulator:…, android-emulator:…, android-device:…), otherwise its client address') }, false, a => {
     if ((a.scope === 'device') !== Boolean(a.device)) throw new Error('device must be supplied exactly when scope is device');
     return api(`/api/records${a.scope === 'device' ? `?${new URLSearchParams({ device: a.device })}` : ''}`, 'DELETE');
   }, true);
@@ -299,11 +371,17 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
     if (!r) throw new Error('Rule not found');
     return textPage(JSON.stringify(r), a.offset, a.maxChars);
   });
-  tool('upsert_rule', `Create or fully replace one rule. JavaScript runs in the existing script sandbox on matching traffic. breakpoint=false selects automatic scripts; true pauses traffic. New or changed JavaScript ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`, { rule: ruleSchema }, false,
+  tool('upsert_rule', `Create or fully replace one rule. JavaScript runs in the existing script sandbox on matching traffic. breakpoint=false selects automatic scripts; true pauses traffic. New code or a change to where it runs ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`, { rule: ruleSchema }, false,
     a => serializeMutation(async () => { const current = await state(); const rules = current.rules; const index = rules.findIndex(r => r.id === a.rule.id);
-      // A script can rewrite a request's URL and headers, so new code runs only after the user approves it.
-      if (a.rule.script && a.rule.script !== rules[index]?.script) await approve({ kind: 'script', title: 'Run JavaScript on matching traffic', detail: [`Rule: ${a.rule.name || a.rule.id}`, `Matches: ${a.rule.method || '*'} ${a.rule.pattern}`, `Stages: ${a.rule.stages.join(', ')}`, `Script (${a.rule.script.length} characters):`, a.rule.script.slice(0, 1200)] });
-      if (index < 0) rules.push(a.rule); else rules[index] = a.rule;
+      const previous = rules[index];
+      const scriptScope = rule => [rule?.script, rule?.pattern, rule?.method || '*', [...new Set(rule?.stages)].sort(), rule?.breakpoint, rule?.folderId];
+      if (a.rule.script && (a.rule.script !== previous?.script || (a.rule.enabled &&
+          (!previous?.enabled || !isDeepStrictEqual(scriptScope(a.rule), scriptScope(previous)))))) {
+        await approve({ kind: 'script', title: 'Run JavaScript on matching traffic', detail: [
+          `Rule: ${a.rule.name || a.rule.id}`, `Matches: ${scope(a.rule)}`, `Stages: ${a.rule.stages.join(', ')}`,
+          `Mode: ${a.rule.breakpoint ? 'breakpoint' : 'automatic'}`, `Script (${a.rule.script.length} characters):`], source: a.rule.script });
+      }
+      if (index < 0) rules.push(a.rule); else rules[index] = { ...a.rule, ...(previous.order === undefined ? {} : { order: previous.order }) };
       const result = await api('/api/rules', 'PUT', { revision: current.rulesRevision, rules }); return { id: a.rule.id, saved: true, revision: result.revision }; }), true);
   tool('delete_rule', 'Delete one rule by id.', { ruleId: id }, false, a => serializeMutation(async () => {
     const current = await state(); if (!current.rules.some(r => r.id === a.ruleId)) throw new Error('Rule not found');
@@ -319,17 +397,24 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
     const gate = (await state()).pending.find(g => g.token === a.gateToken); if (!gate) throw new Error('Breakpoint is no longer pending');
     return textPage(JSON.stringify(gate), a.offset, a.maxChars);
   });
-  tool('resolve_pending', `Continue a paused breakpoint with its existing value or an edited value, or drop the connection. Existing HTTP validators enforce message restrictions. An edited url that points to another scheme, host or port than the paused request, and to a server the user has not approved before, ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`, {
+  tool('resolve_pending', `Continue a paused breakpoint with its existing value or an edited value, or drop the connection. Changing the destination server or editing an HTTP response or SSE event ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`, {
     gateToken: id, action: z.enum(['continue', 'drop']), value: z.record(z.string(), z.unknown()).optional() }, false, async a => {
     if (a.value && Buffer.byteLength(JSON.stringify(a.value), 'utf8') > 192 * 1024) throw new Error('Edited value exceeds 192 KiB; use the local editor for larger edits');
     if (a.action === 'drop' && a.value) throw new Error('drop does not accept an edited value');
-    if (typeof a.value?.url === 'string') {
-      const gate = (await state()).pending.find(g => g.token === a.gateToken);
-      let target;
-      try { target = urlTarget(a.value.url); } catch { throw new Error('Edited url must be an absolute HTTP(S) URL'); }
-      if (gate && target !== urlTarget(gate.value?.url ?? gate.url)) await approveRedirects([target], [`Paused request: ${gate.method} ${gate.value?.url ?? gate.url}`, 'The edited request, including its cookies and authorization headers, will be sent to:']);
+    const path = `/api/pending/${encodeURIComponent(a.gateToken)}`;
+    let approval;
+    if (a.value !== undefined) {
+      ({ approval } = await api(`${path}/approval`, 'POST', a.value));
+      if (approval) await approve(approval.kind === 'redirect'
+        ? { kind: 'redirect', title: 'Redirect one paused request', detail: [`Original server: ${approval.sourceServer}`, `New server: ${approval.server}`,
+          'The edited request, including its cookies and authorization headers, will be sent there.'] }
+        : { kind: 'response', title: approval.kind === 'event' ? 'Edit one paused SSE event' : 'Edit one paused response',
+          detail: ['Review the changed status, headers or content below. An edited response can redirect the client.'],
+          source: JSON.stringify(approval.changes, null, 2) });
     }
-    return api(`/api/pending/${encodeURIComponent(a.gateToken)}`, 'POST', { action: a.action, ...(a.value === undefined ? {} : { value: a.value }) });
+    return api(path, 'POST', { action: a.action, mcp: true, ...(a.value === undefined ? {} : {
+      value: a.value, approval: approval ? signApproval?.(approval.stamp) : undefined,
+    }) });
   }, true);
   tool('update_settings', `Pause capture and bypass breakpoints/scripts (release waiting messages unchanged), enable/disable the proxy listener, or change TLS inspection domain patterns. Disabling proxy interrupts active connections; changing TLS patterns can reconnect tunnels. Broad TLS patterns such as * or *.com are refused. Does not change OS proxy or install a CA. Adding TLS patterns ${APPROVAL.charAt(0).toLowerCase()}${APPROVAL.slice(1)}`, {
     capturePaused: z.boolean().optional(), proxyEnabled: z.boolean().optional(), tlsDomains: z.array(z.string().min(1).max(255).regex(/^[a-zA-Z0-9.*_:\-]+$/)).max(1000).optional() }, false, a => serializeMutation(async () => {
@@ -338,7 +423,12 @@ export function registerTools(server, { baseUrl, token, workspaces, confirm = as
       const added = [...new Set(a.tlsDomains)].filter(domain => !current.has(domain));
       const broad = added.filter(broadTlsPattern);
       if (broad.length) throw new Error(`Refused broad TLS pattern ${broad.join(', ')}: AI clients may only unlock named sites such as api.example.com or *.example.com. The user can add other patterns in Settings.`);
-      if (added.length) await approve({ kind: 'unlock', title: 'Decrypt HTTPS traffic for more sites', detail: ['Requests, responses, cookies and tokens for these sites become readable to Streamglass and connected AI clients:', ...added] });
+      if (added.length) {
+        const source = added.join('\n');
+        if (source.length > 100000) throw new Error('Approval details are too large. Add fewer TLS patterns at once.');
+        await approve({ kind: 'unlock', title: 'Decrypt HTTPS traffic for more sites', detail: ['Requests, responses, cookies and tokens for the sites below become readable to Streamglass and connected AI clients:'], source });
+      }
+      return api('/api/settings', 'PUT', { ...a, mcpTlsBaseline: [...current] });
     }
     return api('/api/settings', 'PUT', a);
   }), true);

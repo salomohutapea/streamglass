@@ -37,8 +37,13 @@ async function fixture(t) {
     if (req.url === '/api/records/capture') { if (record.delayMs) await new Promise(resolve => setTimeout(resolve, record.delayMs)); return res.end(JSON.stringify(record)); }
     if (req.url.startsWith('/api/export/')) return res.end(JSON.stringify(record.request));
     if (req.method === 'DELETE' && req.url.startsWith('/api/records')) return res.end(JSON.stringify({ deleted: 1 }));
+    if (req.url.endsWith('/approval')) return res.end(JSON.stringify({ approval: controls.gateApproval?.(body) ?? null }));
     if (req.url.startsWith('/api/pending/')) return res.end(JSON.stringify({ ok: true }));
-    if (req.url === '/api/settings') { Object.assign(state.settings, body); return res.end(JSON.stringify(state.settings)); }
+    if (req.url === '/api/settings') {
+      const { mcpTlsBaseline, ...settings } = body;
+      Object.assign(state.settings, settings);
+      return res.end(JSON.stringify(state.settings));
+    }
     res.statusCode = 400; res.end(JSON.stringify({ error: { message: 'Invalid management-secret' } }));
   });
   await new Promise(resolve => http.listen(0, '127.0.0.1', resolve));
@@ -46,11 +51,11 @@ async function fixture(t) {
   const bootstrap = { baseUrl: `http://127.0.0.1:${http.address().port}`, token: 'management-secret' };
   // Approvals are recorded; by default the user allows each one, as tests of the gated tools need.
   const approvals = [];
-  function client({ allow = true, approved = [] } = {}) {
+  function client({ allow = true } = {}) {
     const tools = new Map();
     registerTools({ registerTool(name, config, handler) { tools.set(name, { config, handler }); } }, { ...bootstrap,
       confirm: async request => { approvals.push(request); return typeof allow === 'function' ? allow(request) : allow; },
-      isApproved: target => approved.includes(target) });
+      signApproval: stamp => `signed:${stamp}` });
     return { tools, async call(name, args = {}, extra = {}) {
       const tool = tools.get(name);
       const result = await tool.handler(z.object(tool.config.inputSchema).parse(args), { signal: new AbortController().signal, ...extra });
@@ -190,12 +195,12 @@ test('SSE watch cancellation stops polling and large events are explicitly trunc
 test('mutations forward only validated settings, scoped deletion and pending decisions', async t => {
   const f = await fixture(t), c = f.client();
   await c.call('update_settings', { capturePaused: true, proxyEnabled: false, tlsDomains: ['*.example.test'] });
-  assert.deepEqual(f.requests.at(-1).body, { capturePaused: true, proxyEnabled: false, tlsDomains: ['*.example.test'] });
+  assert.deepEqual(f.requests.at(-1).body, { capturePaused: true, proxyEnabled: false, tlsDomains: ['*.example.test'], mcpTlsBaseline: [] });
   assert.equal((await c.call('clear_captures', { scope: 'device' })).isError, true);
   await c.call('clear_captures', { scope: 'device', device: 'iPhone:4321' });
   assert.equal(f.requests.at(-1).url, '/api/records?device=iPhone%3A4321');
   await c.call('resolve_pending', { gateToken: 'gate', action: 'continue', value: { headers: [['x-test', 'ok']] } });
-  assert.deepEqual(f.requests.at(-1).body, { action: 'continue', value: { headers: [['x-test', 'ok']] } });
+  assert.deepEqual(f.requests.at(-1).body, { action: 'continue', mcp: true, value: { headers: [['x-test', 'ok']] } });
   const count = f.requests.length;
   const oversized = await c.call('resolve_pending', { gateToken: 'gate', action: 'continue', value: { body: 'x'.repeat(200000) } });
   assert.equal(oversized.isError, true); assert.equal(f.requests.length, count);
@@ -315,10 +320,10 @@ test('unlocking HTTPS sites needs approval and refuses broad patterns', async t 
   assert.equal(refused.isError, true);
   assert.match(refused.value, /Declined/);
   assert.equal(f.requests.slice(before).some(r => r.url === '/api/settings'), false);
-  assert.deepEqual(f.approvals.at(-1).detail.slice(1), ['api.example.test']);
+  assert.equal(f.approvals.at(-1).source, 'api.example.test');
   assert.equal(f.approvals.at(-1).kind, 'unlock');
   const c = f.client();
-  for (const pattern of ['*', '*.com', '*.*', 'api.*', '*:443', 'localhost']) {
+  for (const pattern of ['*', '*.com', '*.*', 'api.*', '*:443', '*example.com', 'example.com:*', '*.example.com:0', 'localhost']) {
     const result = await c.call('update_settings', { tlsDomains: ['old.example.test', pattern] });
     assert.equal(result.isError, true, pattern);
     assert.match(result.value, /broad TLS pattern/, pattern);
@@ -329,7 +334,7 @@ test('unlocking HTTPS sites needs approval and refuses broad patterns', async t 
   assert.equal(f.approvals.length, count);
   await c.call('update_settings', { tlsDomains: ['*.example.test'] });
   assert.equal(f.approvals.length, count + 1);
-  assert.deepEqual(f.requests.at(-1).body, { tlsDomains: ['*.example.test'] });
+  assert.deepEqual(f.requests.at(-1).body, { tlsDomains: ['*.example.test'], mcpTlsBaseline: [] });
 });
 
 test('sending a request needs approval each time', async t => {
@@ -346,21 +351,23 @@ test('sending a request needs approval each time', async t => {
   assert.equal(f.requests.length, before);
 });
 
-test('redirecting traffic to an unapproved server needs approval; approved servers do not', async t => {
+test('new and widened redirects need approval even when the destination is the same', async t => {
   const f = await fixture(t);
   const rule = (id, host, enabled = true) => ({ id, name: id, enabled, pattern: 'https://api.example.com/*', method: '*', scheme: 'https', host, port: 0, pathFrom: '', pathTo: '', keepHost: false, headerOps: [] });
   const denied = f.client({ allow: false });
   const refused = await denied.call('upsert_map_remote_rule', { rule: rule('r', 'collector.example.net') });
   assert.equal(refused.isError, true);
   assert.equal(f.traffic().mapRemoteRules, undefined);
-  assert.deepEqual(f.approvals.at(-1).targets, ['https://collector.example.net:443']);
-  // A disabled rule redirects nothing; enabling it later asks.
-  assert.equal((await denied.call('upsert_map_remote_rule', { rule: rule('r', 'collector.example.net', false) })).value.saved, true);
+  assert.match(f.approvals.at(-1).source, /Server: https:\/\/collector\.example\.net:443/);
+  // Creating an inactive rule and activating it are distinct decisions.
+  assert.equal((await denied.call('upsert_map_remote_rule', { rule: rule('r', 'collector.example.net', false) })).isError, true);
+  assert.equal((await f.client().call('upsert_map_remote_rule', { rule: rule('r', 'collector.example.net', false) })).value.saved, true);
   assert.equal((await denied.call('set_map_remote_rule_enabled', { ruleId: 'r', enabled: true })).isError, true);
   assert.equal((await denied.call('set_traffic_rule_group_enabled', { group: '', enabled: true })).isError, true);
   assert.equal(f.traffic().mapRemoteRules[0].enabled, false);
-  const approved = f.client({ allow: false, approved: ['https://collector.example.net:443'] });
-  assert.equal((await approved.call('set_map_remote_rule_enabled', { ruleId: 'r', enabled: true })).value.enabled, true);
+  assert.equal((await f.client().call('set_map_remote_rule_enabled', { ruleId: 'r', enabled: true })).value.enabled, true);
+  assert.equal((await denied.call('upsert_map_remote_rule', { rule: { ...rule('r', 'collector.example.net'), pattern: '*' } })).isError, true);
+  assert.equal(f.traffic().mapRemoteRules[0].pattern, 'https://api.example.com/*');
   const count = f.approvals.length;
   // Unrelated edits while a redirect is already enabled do not ask again.
   assert.equal((await denied.call('set_network_profile', { enabled: true, delayMs: 10, downloadKbps: 0, uploadKbps: 0, hostPattern: '*', deviceId: '' })).value.saved, true);
@@ -370,17 +377,34 @@ test('redirecting traffic to an unapproved server needs approval; approved serve
 test('new JavaScript and redirected breakpoint edits need approval', async t => {
   const f = await fixture(t);
   const denied = f.client({ allow: false });
-  const script = { id: 's', pattern: '*', stages: ['request'], breakpoint: false, script: 'export function onRequest(r) { return r; }' };
+  const script = { id: 's', pattern: 'https://api.example.test/*', stages: ['request'], breakpoint: false,
+    script: ' '.repeat(1500) + 'export function onRequest(r) { return r; }' };
   assert.equal((await denied.call('upsert_rule', { rule: script })).isError, true);
   assert.deepEqual(f.state.rules, []);
   assert.equal(f.approvals.at(-1).kind, 'script');
+  assert.equal(f.approvals.at(-1).source, script.script);
   assert.equal((await f.client().call('upsert_rule', { rule: script })).value.saved, true);
+  assert.equal((await denied.call('upsert_rule', { rule: { ...script, pattern: '*' } })).isError, true);
   const count = f.approvals.length;
   assert.equal((await denied.call('upsert_rule', { rule: { ...script, enabled: false } })).value.saved, true);
   assert.equal(f.approvals.length, count);
-  f.state.pending = [{ token: 'gate', recordId: 'capture', stage: 'request', method: 'GET', url: 'https://api.example.test/a', value: { url: 'https://api.example.test/a' } }];
+  f.controls.gateApproval = value => value.url.includes('collector.example.net')
+    ? { kind: 'redirect', server: 'https://collector.example.net:443', stamp: 'server-stamp' } : null;
   const before = f.requests.length;
   assert.equal((await denied.call('resolve_pending', { gateToken: 'gate', action: 'continue', value: { url: 'https://collector.example.net/a' } })).isError, true);
-  assert.equal(f.requests.slice(before).some(r => r.url.startsWith('/api/pending/')), false);
+  assert.equal(f.requests.slice(before).some(r => r.url === '/api/pending/gate'), false);
   assert.equal((await denied.call('resolve_pending', { gateToken: 'gate', action: 'continue', value: { url: 'https://api.example.test/b?x=1' } })).value.ok, true);
+  await f.client().call('resolve_pending', { gateToken: 'gate', action: 'continue', value: { url: 'https://collector.example.net/a' } });
+  assert.equal(f.requests.at(-1).body.approval, 'signed:server-stamp');
+});
+
+test('an enabled response fixture needs approval before it is saved', async t => {
+  const f = await fixture(t);
+  const rule = { id: 'fixture', name: 'Fixture', enabled: true, pattern: 'https://api.example.test/*',
+    method: 'GET', statusCode: 200, headers: [['Content-Type', 'text/html']], bodyBase64: 'aGVsbG8=' };
+  const result = await f.client({ allow: false }).call('upsert_map_local_rule', { rule });
+  assert.equal(result.isError, true);
+  assert.deepEqual(f.traffic().mapLocalRules, []);
+  assert.equal(f.approvals.at(-1).kind, 'response');
+  assert.match(f.approvals.at(-1).source, /"textPreview": "hello"/);
 });

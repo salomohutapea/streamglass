@@ -61,3 +61,11 @@ td.fields-cell{max-width:0}
 .custom-field-item.drop-before::before,.custom-field-item.drop-after::after{content:"";position:absolute;left:26px;right:0;height:2px;border-radius:1px;background:var(--accent)}
 .custom-field-item.drop-before::before{top:-5px}
 .custom-field-item.drop-after::after{bottom:-5px}
+
+.custom-field-script{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.custom-field-script-toggle{display:flex;align-items:center;gap:6px;font-size:12px}
+.custom-field-script-help{margin:0;font-size:11px;line-height:1.5}
+.custom-field-script-help code,.custom-field-script-example{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.custom-field-script-example{margin:0;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--muted);font-size:11px;overflow-x:auto;white-space:pre}
+/* Compact editor: ScriptEditor sizes itself inline (min 280px), so the cap needs !important. */
+.custom-field-script-editor .json-monaco{height:150px!important;max-height:150px}

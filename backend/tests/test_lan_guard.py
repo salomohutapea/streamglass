@@ -37,19 +37,19 @@ class LanGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.service.settings["listenHost"], "127.0.0.1")
         self.assertEqual(self.service.settings["lanDevices"], [])
 
-    def test_approval_expires_after_seven_days(self):
+    def test_approval_expires_after_24_hours(self):
         guard = self.service.lan_guard
         guard.decide("192.168.1.30", True)
         approved = self.service.settings["lanDeviceApprovals"]["192.168.1.30"]
-        self.assertEqual(guard.prune(now=approved + DEVICE_TTL_SECONDS - 1), [])
+        self.assertEqual(guard.prune(now=approved + 24 * 60 * 60 - 1), [])
         self.assertTrue(guard.client_connected(client("192.168.1.30")))
-        self.assertEqual(guard.prune(now=approved + DEVICE_TTL_SECONDS), ["192.168.1.30"])
+        self.assertEqual(guard.prune(now=approved + 24 * 60 * 60), ["192.168.1.30"])
         self.assertEqual(self.service.settings["lanDevices"], [])
         self.assertEqual(self.service.settings["lanDeviceApprovals"], {})
         phone = client("192.168.1.30")
         self.assertFalse(guard.client_connected(phone))
         self.assertTrue(phone.error)
-        # The expiry is persisted, and allowing again starts a new seven days.
+        # The expiry is persisted, and allowing again starts a new 24-hour window.
         self.service.db.close()
         reopened = Service(self.directory.name, "synthetic-management-token", 47821)
         self.assertEqual(reopened.settings["lanDevices"], [])
@@ -79,7 +79,7 @@ class LanGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(guard.prune(now=approved + DEVICE_TTL_SECONDS * 3), [])
         self.assertEqual(self.service.settings["lanDevices"], ["192.168.1.30"])
         self.assertEqual((await self.client.put("/api/settings", headers=self.headers, json={"lanDeviceExpiry": "yes"})).status, 400)
-        # Turning it on again starts a fresh seven days rather than removing the device immediately.
+        # Turning it on again starts a fresh 24-hour window rather than removing the device immediately.
         self.assertEqual((await self.client.put("/api/settings", headers=self.headers, json={"lanDeviceExpiry": True})).status, 200)
         self.assertEqual(guard.prune(), [])
         self.assertEqual(self.service.settings["lanDevices"], ["192.168.1.30"])
@@ -128,6 +128,32 @@ class LanGuardTests(unittest.IsolatedAsyncioTestCase):
             self.service.lan_guard.client_connected(client(f"10.1.0.{index}"))
         self.assertEqual(len(self.service.lan_guard.summary()), 32)
 
+    def test_pending_requests_survive_retries_and_new_addresses(self):
+        guard = self.service.lan_guard
+        for index in range(32):
+            guard.client_connected(client(f"10.1.0.{index}"))
+        guard.client_connected(client("10.1.0.0"))
+        guard.client_connected(client("10.2.0.1"))
+        self.assertEqual([item["address"] for item in guard.summary()], [f"10.1.0.{index}" for index in range(32)])
+        guard.decide("10.1.0.1", False)
+        guard.client_connected(client("10.2.0.1"))
+        self.assertIn("10.2.0.1", guard.requests)
+
+    def test_revocation_and_expiry_close_active_clients(self):
+        guard = self.service.lan_guard
+        phone = client("192.168.1.30")
+        closed = []
+        handler = SimpleNamespace(client=phone, close_connection=closed.append)
+        proxy = SimpleNamespace(connections={phone.id: handler})
+        self.service.master = SimpleNamespace(addons=SimpleNamespace(get=lambda _: proxy))
+        guard.decide(phone.peername[0], True)
+        guard.decide(phone.peername[0], False)
+        self.assertEqual(closed, [phone])
+        guard.decide(phone.peername[0], True)
+        guard.prune(now=self.service.settings["lanDeviceApprovals"][phone.peername[0]] + DEVICE_TTL_SECONDS)
+        self.assertEqual(closed, [phone, phone])
+        self.service.master = None
+
     async def test_settings_validate_devices_and_destinations(self):
         for body in ({"lanDevices": ["127.0.0.1"]}, {"lanDevices": ["phone"]}, {"lanAllowedDestinations": ["*"]},
                      {"lanAllowedDestinations": ["0.0.0.0/0"]}, {"lanAllowedDestinations": ["bad host"]}, {"lanAllowedDestinations": "10.0.0.0/8"}):
@@ -157,13 +183,14 @@ class LanGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sorted(self.service.records), ["r1", "r2"])
 
     def test_restricted_addresses(self):
-        for value in ("127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "::1", "fd00::1", "fe80::1", "0.0.0.0", "224.0.0.1", "::ffff:10.0.0.1"):
+        for value in ("127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "::1", "fd00::1", "fe80::1", "fec0::1", "64:ff9b::a00:1", "64:ff9b:1::1", "0.0.0.0", "224.0.0.1", "::ffff:10.0.0.1"):
             self.assertTrue(restricted(_address(value)), value)
-        for value in ("93.184.216.34", "2606:4700::1111"):
+        for value in ("93.184.216.34", "2606:4700::1111", "64:ff9b::808:808"):
             self.assertFalse(restricted(_address(value)), value)
 
     async def test_lan_device_cannot_reach_private_or_own_addresses(self):
         guard = self.service.lan_guard
+        guard.decide("192.168.1.30", True)
         for host in ("127.0.0.1", "10.0.0.5", "192.168.1.20", "169.254.169.254", "[::1]"):
             data = connection("192.168.1.30", host)
             await guard.server_connect(data)
@@ -176,6 +203,7 @@ class LanGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(local.server.error)
 
     async def test_names_are_checked_by_resolved_address(self):
+        self.service.lan_guard.decide("192.168.1.30", True)
         async def resolve(host, port, **_):
             return [(None, None, None, "", ("10.9.8.7" if host == "internal.example.test" else "93.184.216.34", port))]
         with patch.object(asyncio.get_running_loop(), "getaddrinfo", resolve):
@@ -187,6 +215,7 @@ class LanGuardTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(allowed.server.error)
 
     async def test_allowed_destinations_are_reachable(self):
+        self.service.lan_guard.decide("192.168.1.30", True)
         self.service.settings["lanAllowedDestinations"] = validate_destinations(["*.staging.example.test", "10.20.0.0/16"])
         async def resolve(host, port, **_):
             return [(None, None, None, "", ("10.99.0.1", port))]
@@ -200,6 +229,7 @@ class LanGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(data.server.error)
 
     def test_connected_peer_is_checked_again(self):
+        self.service.lan_guard.decide("192.168.1.30", True)
         # A name that passed server_connect but connected to a private address (DNS rebinding) is refused.
         data = connection("192.168.1.30", "rebind.example.test", peer=("10.0.0.5", 443))
         self.service.lan_guard.server_connected(data)
@@ -207,6 +237,14 @@ class LanGuardTests(unittest.IsolatedAsyncioTestCase):
         fine = connection("192.168.1.30", "public.example.test", peer=("93.184.216.34", 443))
         self.service.lan_guard.server_connected(fine)
         self.assertIsNone(fine.server.error)
+
+    async def test_revoked_device_cannot_open_a_new_upstream_connection(self):
+        guard = self.service.lan_guard
+        guard.decide("192.168.1.30", True)
+        guard.decide("192.168.1.30", False)
+        data = connection("192.168.1.30", "93.184.216.34")
+        await guard.server_connect(data)
+        self.assertIn("Device is not approved", data.server.error)
 
     def test_validators(self):
         self.assertEqual(validate_devices(["::ffff:192.168.1.2"]), ["192.168.1.2"])

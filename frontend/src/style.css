@@ -13,9 +13,13 @@ th:first-child{width:104px}th:nth-child(3){width:100px}th:last-child{width:28px}
 
 .device-name small{display:block;margin-top:2px;font-size:10px;font-weight:400;color:var(--muted)}
 #device-label-form input[type=color]{width:54px;height:32px;padding:3px;cursor:pointer}
-.incoming-row td{animation:incoming-request .5s ease-out}
-@keyframes incoming-request{from{box-shadow:inset 0 0 0 999px color-mix(in srgb,var(--accent) 13%,transparent)}to{box-shadow:inset 0 0 0 999px transparent}}
-@media(prefers-reduced-motion:reduce){.incoming-row td{animation:none}}
+/* New rows flash with a fading tint: one overlay per row, run by the compositor as an opacity animation. An animated
+   box-shadow on every cell repainted the whole table each frame while traffic flowed. The row is the overlay's
+   containing block, so it spans every cell and the first cell's overflow clip doesn't cut it. */
+.incoming-row{position:relative}
+.incoming-row td:first-child::after{content:"";position:absolute;inset:0;background:color-mix(in srgb,var(--accent) 13%,transparent);opacity:0;pointer-events:none;animation:incoming-request .5s ease-out}
+@keyframes incoming-request{from{opacity:1}to{opacity:0}}
+@media(prefers-reduced-motion:reduce){.incoming-row td:first-child::after{animation:none}}
 
 .sidebar{overflow-y:auto}.application-icon{width:18px;height:18px;object-fit:contain;flex-shrink:0}.application-name{overflow:hidden;text-overflow:ellipsis;text-align:left}.application-row>span:last-child{margin-left:auto}.sidebar-bottom{flex-shrink:0}
 .sidebar-section-toggle{display:flex;align-items:center;gap:5px;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-transform:inherit;letter-spacing:inherit}.sidebar-section-toggle:hover{background:transparent;color:var(--text)}.sidebar-section-toggle svg{width:12px;height:12px;transition:transform .15s}.sidebar-section-toggle[aria-expanded=true] svg{transform:rotate(90deg)}
@@ -33,7 +37,7 @@ th:first-child{width:104px}th:nth-child(3){width:100px}th:last-child{width:28px}
 .traffic-footer .active-tools{display:flex;gap:4px;overflow:auto}.active-tools button{font-size:10px;padding:2px 6px;border-radius:9px;color:var(--accent);white-space:nowrap}.traffic-footer{gap:8px}.traffic-footer>span{white-space:nowrap}
 .traffic td:last-child{white-space:nowrap}.traffic th:last-child{width:62px}
 .workspace.inspector-below{display:grid;grid-template-columns:clamp(160px,var(--sidebar-width),calc(100vw - 588px)) 4px minmax(0,1fr);grid-template-rows:minmax(80px,1fr) 4px minmax(180px,var(--inspector-height))}
-.inspector-below>.sidebar{grid-column:1;grid-row:1/4;width:auto}.inspector-below>.splitter:first-of-type{grid-column:2;grid-row:1/4}.inspector-below>.traffic{grid-column:3;grid-row:1;min-height:0}.inspector-below>.splitter:last-of-type{grid-column:3;grid-row:2;width:100%;height:4px;cursor:row-resize;border:0}.inspector-below>.inspector{grid-column:3;grid-row:3;width:auto;max-width:none;min-width:0;min-height:0}
+.inspector-below>.sidebar{grid-column:1;grid-row:1/4;width:auto}.inspector-below>.splitter:first-of-type{grid-column:2;grid-row:1/4}.inspector-below>.traffic{grid-column:3;grid-row:1;min-height:0}.inspector-below>.splitter:last-of-type{grid-column:3;grid-row:2;width:100%;height:4px;cursor:row-resize;border:0;border-bottom:1px solid var(--line)}.inspector-below>.inspector{grid-column:3;grid-row:3;width:auto;max-width:none;min-width:0;min-height:0}
 dialog[aria-label="Traffic tools"]{width:min(740px,calc(100vw - 40px))}dialog[aria-label="Traffic tools"] .modal-body{display:flex;flex-direction:column;gap:12px}dialog[aria-label="Traffic tools"] fieldset{border:1px solid var(--line);border-radius:6px;margin:0;padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:12px}dialog[aria-label="Traffic tools"] legend{color:var(--muted);padding:0 6px}dialog[aria-label="Traffic tools"] fieldset label{display:flex;flex-direction:column;gap:6px;min-width:0}dialog[aria-label="Traffic tools"] fieldset label:has(input[type=checkbox]){flex-direction:row;align-items:center;grid-column:1/-1}dialog[aria-label="Traffic tools"] label:has(textarea){grid-column:1/-1}dialog[aria-label="Traffic tools"] textarea{min-height:90px;font-family:monospace}dialog[aria-label="Traffic tools"] ol{padding:0;list-style:none;margin:0;display:flex;flex-direction:column;gap:6px}dialog[aria-label="Traffic tools"] li{display:flex;gap:4px;align-items:center;padding:6px;background:var(--raised);border-radius:5px}dialog[aria-label="Traffic tools"] li label{display:flex;gap:6px;align-items:center;flex:1;overflow-wrap:anywhere}dialog[aria-label="Traffic tools"] .tabs button[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
 .tools-suspended{align-self:center;color:var(--muted);font-size:10px;white-space:nowrap}.active-tools:has(.tools-suspended) button{color:var(--muted);border-style:dashed}
 
@@ -55,7 +59,7 @@ button{border-radius:6px}
 
 .sidebar{width:48px;padding:10px 6px 0;overflow:hidden;position:relative;z-index:20;background:var(--bg);border-right:1px solid var(--line)}
 .sidebar:hover,.sidebar:has(:focus-visible){width:216px;margin-right:-168px;overflow:auto;background:var(--panel);box-shadow:0 8px 30px #0006}
-:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) .nav-row,:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) .device-row .nav-row{font-size:0;gap:0;justify-content:center;padding:8px 0}
+:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) .nav-row,:root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) .device-row .nav-row{font-size:0;gap:0;justify-content:center;padding:8px 0;border-radius:6px}
 :root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) :is(.nav-row svg,.application-icon){width:16px;height:16px}
 :root:not([data-sidebar-pinned]) .sidebar:not(:hover):not(:has(:focus-visible)) :is(.sidebar-heading,.sidebar-note,.connect-button,.sidebar-bottom,.pending-label,.application-name,.device-name,.device-row>.icon-button,.nav-row>span:last-child){display:none}
 .splitter[aria-label="Resize sidebar"]{display:none}
@@ -222,13 +226,16 @@ body.column-resizing,body.column-resizing *{cursor:col-resize!important;user-sel
 .detached .pane-title.window-header{height:var(--titlebar-height);font-size:inherit;color:var(--text)}
 .window-header :is(summary,details){-webkit-app-region:no-drag}
 /* Settings: the section list and the selected section scroll separately inside a fixed-height dialog. */
-dialog.modal-settings{width:min(780px,calc(100vw - 60px))}
-dialog.modal-settings .modal-body{display:flex;flex-direction:column;padding:0;height:min(640px,calc(100vh - 190px));max-height:none;overflow:hidden}
-dialog.modal-settings .modal-error{margin:12px 20px 0}
-dialog.modal-settings .settings-layout{flex:1;min-height:0;grid-template-columns:150px minmax(0,1fr);gap:0}
-dialog.modal-settings .settings-nav{overflow:auto;padding:12px 8px;border-right:1px solid var(--line);background:var(--sidebar)}
-dialog.modal-settings .settings-nav button{padding:6px 10px}
-dialog.modal-settings .settings-pane{overflow:auto;min-height:0;padding:18px 22px}
+/* Settings and Connect a device are windows of their own (AuxWindow), not dialogs. */
+.aux-window{height:100dvh;display:flex;flex-direction:column;background:var(--panel)}
+.aux-window>.modal-body{flex:1;min-height:0;max-height:none}
+.aux-window>.modal-foot{flex-shrink:0}
+.aux-settings .modal-body{display:flex;flex-direction:column;padding:0;overflow:hidden}
+.aux-settings .modal-error{margin:12px 20px 0}
+.aux-settings .settings-layout{flex:1;min-height:0;grid-template-columns:150px minmax(0,1fr);gap:0}
+.aux-settings .settings-nav{overflow:auto;padding:12px 8px;border-right:1px solid var(--line);background:var(--sidebar)}
+.aux-settings .settings-nav button{padding:6px 10px}
+.aux-settings .settings-pane{overflow:auto;min-height:0;padding:18px 22px}
 /* Sidebar rhythm: one row height, one icon box and one section gap for every list (library, applications,
    devices, domains). */
 .sidebar .sidebar-heading{height:26px;padding:0 8px;margin:0}
@@ -248,9 +255,9 @@ dialog.modal-settings .settings-pane{overflow:auto;min-height:0;padding:18px 22p
    state, and Settings lists its sections in a scrolling row above the content. */
 @media(max-width:860px){header.toolbar{gap:8px;padding:0 10px}.toolbar-group{gap:6px}.status-capsule{padding:0 4px 0 10px}}
 @media(max-width:760px){.status-capsule :is(strong,.brand-logo,.status-sep,.status-address){display:none}.tool-capsule{gap:0}}
-@media(max-width:620px){dialog.modal-settings .settings-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}dialog.modal-settings .settings-nav{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:8px}dialog.modal-settings .settings-nav button{flex-shrink:0}dialog{max-width:calc(100vw - 24px)}}
+@media(max-width:620px){.aux-settings .settings-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}.aux-settings .settings-nav{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:8px}.aux-settings .settings-nav button{flex-shrink:0}dialog{max-width:calc(100vw - 24px)}}
 /* The section list already names the open section. */
-dialog.modal-settings .settings-pane .form>h3:first-child{display:none}
+.aux-settings .settings-pane .form>h3:first-child{display:none}
 /* Short windows keep at least half the height for the table. */
 @media(max-height:640px){.workspace.inspector-below{grid-template-rows:minmax(100px,1fr) 4px minmax(120px,min(var(--inspector-height),50%))}}
 ::-webkit-scrollbar-corner{background:transparent}
@@ -340,3 +347,24 @@ details[open]:not(.menu)::details-content{block-size:auto}
 /* Fields whose inner input drops its own outline show focus on the field itself. */
 :is(.capture-picker-search,.list-search,.filter-input,.search,.header-search,.filter-condition,.sidebar-filter,.tt-search):focus-within{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
 .column-resizer:focus-visible{background:var(--accent)}
+/* Column picker: separate each row so adjacent enabled items keep distinct rounded highlights. */
+.record-context-menu[aria-label="Table columns"]{display:flex;flex-direction:column;gap:2px}
+.record-context-menu[aria-label="Table columns"]>button{border-radius:5px;flex-shrink:0}
+/* Header cells own no left padding; the sort button carries it so hover fills edge to edge. */
+.traffic th[data-column]{padding-left:0}
+.traffic th[data-column]>button{padding-left:10px}
+.traffic th[data-column]:first-child>button{padding-left:12px}
+.traffic th[data-column]>button:hover{background:var(--hover)}
+
+/* Inspector summary: method and encryption state as pills on one center line. */
+.request-summary{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.request-summary>.request-url{flex:0 0 100%;margin-top:4px}
+.request-summary>.status.summary-badge,.request-summary>.method.summary-badge{margin-left:0;display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;border:1px solid var(--line-strong);background:var(--raised);font-size:10px;font-weight:600;line-height:1}
+.request-summary>.method.summary-badge{color:var(--accent)}
+.request-summary>.status.summary-badge.encrypted{color:var(--muted)}
+.request-summary>.summary-badge svg{width:11px;height:11px}
+/* Sidebar content: equal left/right inset for the filter, rows and TLS link. */
+/* Reserve scrollbar space symmetrically only where the sidebar can scroll; the collapsed rail keeps its full width for icons. */
+.sidebar:hover,.sidebar:has(:focus-visible),:root[data-sidebar-pinned] .sidebar{scrollbar-gutter:stable both-edges}
+.sidebar-filter{margin:0 0 4px}
+.sidebar .sidebar-tls-link{padding-left:8px;padding-right:8px}

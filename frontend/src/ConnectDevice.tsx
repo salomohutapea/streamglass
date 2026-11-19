@@ -1,86 +1,178 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Bot, Check, Copy, Laptop, Loader2, MonitorSmartphone, ShieldAlert, Smartphone, TabletSmartphone } from 'lucide-react';
-import { encodeQr } from './qr-code.mjs';
-import { LanDeviceList, type LanExpiry, type LanRequest } from './SecurityPrompts';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import type { AndroidDevice, DeviceInventory, DeviceRequest, IosSimulator, SetupSite } from './device-setup-types';
+import { type SetupRecord } from './device-setup-evidence.mjs';
+import { AnimatedHeight, Callout, Segmented, SubTabs, WifiIcon } from './device-setup-ui';
+import DeviceCard from './DeviceCard';
+import AutomatedPage from './AutomatedPage';
+import RealDevicePage from './RealDevicePage';
+import DeviceOptions from './DeviceOptions';
+import ThisMacPage, { type ThisMacSetup } from './ThisMacPage';
+import type { LanApproval } from './WifiGuide';
 import './connect-device.css';
 
-type Rec = { id: string; clientIsLocal?: boolean };
-/** LAN approval state and actions, so a phone can be allowed without leaving the wizard. */
-export type LanApproval = { devices: string[]; requests: LanRequest[]; busy: boolean; expiry?: LanExpiry; onDecide(address: string, allow: boolean): void; onRemoveDevice(address: string): void };
-const cards: Array<{ key: string; label: string; hint: string; Icon: typeof Laptop }> = [
-  { key: 'mac', label: 'This Mac', hint: 'System proxy', Icon: Laptop },
-  { key: 'iosSimulator', label: 'iOS Simulator', hint: 'Xcode', Icon: MonitorSmartphone },
-  { key: 'iosDevice', label: 'iOS Device', hint: 'iPhone, iPad', Icon: TabletSmartphone },
-  { key: 'androidEmulator', label: 'Android Emulator', hint: '10.0.2.2', Icon: Bot },
-  { key: 'androidDevice', label: 'Android Device', hint: 'Wi-Fi', Icon: Smartphone },
-];
-const stepNames = ['Platform', 'Set up', 'Verify'];
+export type { LanApproval } from './WifiGuide';
+export { QrCode } from './device-setup-ui';
 
-export function QrCode({ text, label }: { text: string; label: string }) {
-  const qr = useMemo(() => { try { return encodeQr(text); } catch { return null; } }, [text]);
-  if (!qr) return null;
-  const quiet = 3, side = qr.size + quiet * 2;
-  let path = '';
-  qr.modules.forEach((row, r) => { let c = 0; while (c < qr.size) { if (!row[c]) { c++; continue; } const start = c; while (c < qr.size && row[c]) c++; path += `M${start + quiet} ${r + quiet}h${c - start}v1h${start - c}z`; } });
-  return <svg className="qr-code" role="img" aria-label={label} viewBox={`0 0 ${side} ${side}`} shapeRendering="crispEdges"><rect width={side} height={side} fill="#fff"/><path d={path} fill="#000"/></svg>;
-}
+const unavailable = 'Device automation is not available in this desktop version. You can still use the Wi-Fi guide.';
+type Device = AndroidDevice | IosSimulator;
+type Platform = 'mac' | 'ios' | 'android';
+type Props = { initialStep?: number; onDone(): void; platform: string; onPlatform(key: string): void; lanAddresses: string[]; port: number; lanEnabled: boolean; records: SetupRecord[]; mac: ThisMacSetup; lan?: LanApproval; onMacProxiesReverted(): Promise<void>; onTlsSettings?(): void; onFilterDevice?(id: string): void };
+const deviceId = (device: Device) => 'serial' in device ? device.serial : device.udid;
+const requestFor = (device: Device): DeviceRequest => ({ platform: 'serial' in device ? 'android' : 'ios-simulator', id: deviceId(device) });
+const online = (device: Device) => 'serial' in device ? device.state === 'device' : device.state === 'Booted';
+const platformFor = (page: string): Platform => page === 'mac' ? 'mac' : page.startsWith('ios') ? 'ios' : 'android';
 
-async function copyValue(value: string) { try { if (window.streamglass?.copyText) await window.streamglass.copyText(value); else await navigator.clipboard.writeText(value); } catch { /* clipboard unavailable */ } }
-
-type SetupSite = { lanEnabled: boolean; port: number | null; running: boolean; fingerprint?: string | null; error?: string };
-const bridge = () => window.streamglass as any;
-
-function PhoneSetup({ platform, ip, port, lanEnabled, section }: { platform: string; ip: string; port: number; lanEnabled: boolean; section: 'qr' | 'reverse' }) {
-  const [site, setSite] = useState<SetupSite | null>(null);
-  const [copied, setCopied] = useState('');
+export default function ConnectDevice({ onDone, platform, onPlatform, lanAddresses, port, lanEnabled, records, mac, lan, onMacProxiesReverted, onTlsSettings, onFilterDevice }: Props) {
+  const top = platformFor(platform);
+  const [inventory, setInventory] = useState<DeviceInventory | null>(null);
+  const [notice, setNotice] = useState<{ page: string; text: string } | null>(null);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [android, setAndroid] = useState<Array<{ id: string; name: string }>>([]);
-  const [serial, setSerial] = useState('');
-  const [metro, setMetro] = useState(false);
-  const [result, setResult] = useState('');
-  const isAndroid = platform === 'androidEmulator' || platform === 'androidDevice';
-  useEffect(() => {
-    let live = true;
-    const poll = () => { void bridge()?.setupSite?.().then((value: SetupSite) => { if (live) setSite(value); }).catch(() => {}); };
-    poll();
-    const timer = setInterval(poll, 3000);
-    return () => { live = false; clearInterval(timer); };
-  }, [lanEnabled]);
-  const refreshAndroid = () => { void bridge()?.listDevices?.().then((inventory: any) => { const list = inventory?.android ?? []; setAndroid(list); setSerial(current => list.some((d: any) => d.id === current) ? current : list[0]?.id ?? ''); }).catch(() => {}); };
-  useEffect(() => { if (isAndroid) refreshAndroid(); }, [isAndroid]);
-  const host = ip.includes(':') ? `[${ip}]` : ip;
-  const setupUrl = ip && site?.running && site.port ? `http://${host}:${site.port}/` : '';
-  const pacUrl = setupUrl ? `${setupUrl}proxy.pac` : '';
-  const copy = (key: string, value: string) => void copyValue(value).then(() => { setCopied(key); setTimeout(() => setCopied(''), 1500); });
-  const enableLan = async () => { setBusy(true); try { setSite(await bridge().setupSite({ enableLan: true })); } catch (error) { setSite({ lanEnabled: false, port: null, running: false, error: error instanceof Error ? error.message : String(error) }); } finally { setBusy(false); } };
-  const reverse = async (action: 'android-reverse' | 'android-reverse-remove') => { setBusy(true); setResult(''); try { const response = await bridge().deviceAction({ action, target: serial, metro }); setResult(response?.message ?? 'Done'); } catch (error) { setResult(error instanceof Error ? error.message : String(error)); } finally { setBusy(false); } };
-  return <>
-    {section === 'qr' && <section className="connect-qr" aria-label="Certificate setup page">{setupUrl ? <><QrCode text={setupUrl} label={`QR code for the certificate setup page ${setupUrl}`}/><div><span className="connect-step-label"><i>1</i>Install the certificate</span><p className="connect-qr-help">Scan with the phone camera to open the setup page, then download and trust the certificate. The phone must be on the same network.</p><p className="connect-qr-url"><span className="muted">Certificate page (not the proxy)</span><code>{setupUrl}</code></p>{site?.fingerprint && <p className="muted ca-fingerprint" title="Must match the setup page on the phone">Certificate SHA-256 <code>{site.fingerprint}</code></p>}<div className="inline"><button type="button" onClick={() => copy('url', setupUrl)}>{copied === 'url' ? <Check size={12}/> : <Copy size={12}/>} {copied === 'url' ? 'Copied' : 'Copy URL'}</button><button type="button" title={`Auto proxy for ${host}:${port}: use instead of typing the address`} aria-label="Copy PAC URL" onClick={() => copy('pac', pacUrl)}>{copied === 'pac' ? <Check size={12}/> : <Copy size={12}/>} {copied === 'pac' ? 'Copied' : 'PAC'}</button></div></div></> : <div>{!lanEnabled || site?.lanEnabled === false ? <><p className="muted">QR needs local network access.</p><button type="button" className="primary" disabled={busy} onClick={() => void enableLan()}>Turn on local network</button></> : !ip ? <p className="muted">No LAN address. Join a network.</p> : <p className="muted">{site?.error || 'Starting…'}</p>}</div>}</section>}
-    {section === 'reverse' && isAndroid && <section className="connect-reverse" aria-label="adb reverse">
-      <h4 title={`USB tunnel. Set the device proxy to 127.0.0.1:${port}. Metro uses localhost:8081.`}>adb reverse</h4>
-      {android.length ? <div className="inline"><label>Device<select value={serial} onChange={e => setSerial(e.target.value)}>{android.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label><label className="inline"><input type="checkbox" checked={metro} onChange={e => setMetro(e.target.checked)}/> Metro 8081</label><button type="button" disabled={busy || !serial || !bridge()} onClick={() => void reverse('android-reverse')}>Reverse</button><button type="button" disabled={busy || !serial || !bridge()} onClick={() => void reverse('android-reverse-remove')}>Remove</button></div> : <p className="muted">No adb device.</p>}
-      <button type="button" onClick={refreshAndroid}>Refresh</button>
-      {result && <pre className="setup-output">{result}</pre>}
-    </section>}
-  </>;
-}
+  const [connectingId, setConnectingId] = useState('');
+  const [site, setSite] = useState<SetupSite | null>(null);
+  const [pairingQr, setPairingQr] = useState('');
+  const [baselines, setBaselines] = useState<Partial<Record<Platform, number>>>(() => ({ [top]: Date.now() }));
+  const lock = useRef(false);
+  const pairingActive = useRef(false);
+  const api = window.streamglass;
 
-export default function ConnectDevice({ initialStep, onDone, platform, onPlatform, lanAddresses, port, lanEnabled, records, details, lan }: { initialStep?: number; onDone: () => void; platform: string; onPlatform: (key: string) => void; lanAddresses: string[]; port: number; lanEnabled: boolean; records: Rec[]; details: ReactNode; lan?: LanApproval }) {
-  const [step, setStep] = useState(initialStep ?? 1);
-  const [baseline, setBaseline] = useState<Set<string> | null>(null);
-  const local = platform === 'mac' || platform === 'iosSimulator';
-  const physical = platform === 'iosDevice' || platform === 'androidDevice';
-  const ip = lanAddresses[0] ?? '';
-  // Phones on Wi-Fi are refused until approved; emulators and adb reverse arrive over loopback and never are.
-  const approval = physical && lanEnabled ? lan : undefined;
-  const asking = approval?.requests.filter(item => !item.denied).sort((a, b) => a.firstSeen - b.firstSeen) ?? [];
-  const arrived = baseline ? records.some(r => !baseline.has(r.id) && (local || !r.clientIsLocal)) : false;
-  const go = (next: number) => { setStep(next); setBaseline(next === 3 ? new Set(records.map(r => r.id)) : null); };
-  return <div className="connect-device">
-    <ol className="connect-steps" aria-label="Connection steps">{stepNames.map((name, i) => <li key={name} className={step === i + 1 ? 'current' : step > i + 1 ? 'done' : ''} aria-current={step === i + 1 ? 'step' : undefined}><button type="button" onClick={() => go(i + 1)} aria-label={`Go to step ${i + 1}: ${name}`}><span>{step > i + 1 ? <Check size={11}/> : i + 1}</span>{name}</button></li>)}</ol>
-    {step === 1 && <div className="connect-cards" role="radiogroup" aria-label="Platform">{cards.map(({ key, label, hint, Icon }) => <button key={key} type="button" role="radio" aria-checked={platform === key} className={platform === key ? 'connect-card selected' : 'connect-card'} onClick={() => { onPlatform(key); go(2); }}><Icon size={22}/><strong>{label}</strong><small>{hint}</small></button>)}</div>}
-    {step === 2 && <div className="form connect-body"><h3>{cards.find(c => c.key === platform)?.label}</h3>{!local && <PhoneSetup section="qr" platform={platform} ip={ip} port={port} lanEnabled={lanEnabled}/>}{details}{platform === 'iosDevice' && <p className="setup-step-required" role="note"><strong>After installing:</strong> Settings → General → About → Certificate Trust Settings → trust Streamglass.</p>}{approval && <section className="connect-approval" aria-label="Approved devices"><h4><ShieldAlert size={13} aria-hidden="true"/>Approved devices</h4><p className="muted">A new phone is refused until you allow it here. Allow only your own test device.{approval.expiry?.enabled ? ' Approvals last 7 days.' : ''}</p><LanDeviceList devices={approval.devices} requests={approval.requests} busy={approval.busy} expiry={approval.expiry} onRemoveDevice={approval.onRemoveDevice} onDecide={approval.onDecide}/></section>}{!local && <PhoneSetup section="reverse" platform={platform} ip={ip} port={port} lanEnabled={lanEnabled}/>}</div>}
-    {step === 3 && <div className="connect-wait" role="status" aria-live="polite">{!arrived && approval && asking[0] ? <div className="connect-asking"><Smartphone size={22} aria-hidden="true"/><strong><span className="mono">{asking[0].address}</span> is trying to connect</strong><p className="muted">It is refused until you allow it. Allow only your own test device.{asking.length > 1 ? ` +${asking.length - 1} more waiting.` : ''}</p><div className="inline"><button type="button" disabled={approval.busy} onClick={() => approval.onDecide(asking[0].address, false)}>Deny</button><button type="button" className="primary" disabled={approval.busy} onClick={() => approval.onDecide(asking[0].address, true)}>Allow device</button></div></div> : arrived ? <><span className="connect-ok"><Check size={22}/></span><strong>Connected</strong></> : <><Loader2 className="spin" size={22}/><strong>Waiting for a request…</strong><p className="muted">{cards.find(c => c.key === platform)?.label}</p><p className="muted connect-hint">{approval ? 'Open an app or page on the device. A new phone asks for approval here first.' : 'Open an app or page on the device.'} Paused capture, certificate pinning or a missing proxy setting can hide requests.</p></>}</div>}
-    <div className="connect-nav"><button type="button" disabled={step === 1} onClick={() => go(step - 1)}>Back</button><div><button type="button" className={step === 3 ? 'primary' : ''} onClick={onDone}>Done</button>{step < 3 && <button type="button" className="primary" onClick={() => go(step + 1)}>Next</button>}</div></div>
+  const baseline = baselines[top] ?? Infinity;
+  const message = notice?.page === platform ? notice.text : '';
+  const setMessage = (text: string) => setNotice({ page: platform, text });
+  const changePlatform = (page: string) => {
+    const next = platformFor(page);
+    const startedAt = Date.now();
+    setBaselines(current => current[next] === undefined ? { ...current, [next]: startedAt } : current);
+    if (page !== platform) setNotice(null);
+    onPlatform(page);
+  };
+  useEffect(() => {
+    const startedAt = Date.now();
+    setBaselines(current => current[top] === undefined ? { ...current, [top]: startedAt } : current);
+  }, [top]);
+  // Each platform opens on its real-device guide; explicit simulator/emulator links still work.
+  const real = platform === 'iosDevice' || platform === 'androidDevice';
+  const metro = !!inventory && (inventory.metro.mode === 'always' || (inventory.metro.mode === 'auto' && inventory.metro.running));
+  const wifiMetro = metro && inventory?.metro.running === true;
+  const ip = inventory?.lan.address ?? lanAddresses[0] ?? '';
+  const proxyPort = inventory?.lan.proxyPort ?? port;
+  const lanOn = inventory?.lan.enabled ?? site?.lanEnabled ?? lanEnabled;
+  const host = ip.includes(':') ? `[${ip}]` : ip;
+  const setupUrl = inventory?.lan.setupUrl || (site?.running && site.port && ip ? `http://${host}:${site.port}/` : '');
+
+  useEffect(() => {
+    const status = inventory?.pairing;
+    if (!pairingActive.current || !status || !['connected', 'error', 'cancelled'].includes(status.status)) return;
+    pairingActive.current = false; setPairingQr('');
+    setMessage(status.message || (status.status === 'connected' ? 'Phone paired. Select Connect on its device card.' : status.status === 'error' ? 'Pairing failed or timed out. Check wireless debugging and try again.' : 'Pairing cancelled.'));
+  }, [inventory?.pairing]);
+
+  // Inventory is watched only while this dialog is open.
+  useEffect(() => {
+    let active = true, revision = 0;
+    const receive = (value: DeviceInventory) => { revision++; if (active) { setInventory(value); setLoading(false); } };
+    let off: (() => void) | undefined;
+    const start = async () => {
+      if (!api?.deviceInventory) { setLoading(false); return; }
+      try {
+        off = api.onDeviceInventory?.(receive);
+        const before = revision;
+        const value = await api.deviceInventory();
+        if (!active) return;
+        if (revision === before) receive(value);
+        await api.watchDevices?.(true);
+        if (!active) await api.watchDevices?.(false);
+      } catch (error) { if (active) { setMessage(String(error)); setLoading(false); } }
+    };
+    void start();
+    return () => { active = false; off?.(); void api?.watchDevices?.(false).catch(() => {}); if (pairingActive.current) void api?.cancelAdbPairing?.().catch(() => {}); };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    const poll = async () => { try { const value = await api?.setupSite?.(); if (active && value) setSite(value); } catch { /* The Wi-Fi guide stays usable without setup-site IPC. */ } };
+    void poll(); const timer = setInterval(() => void poll(), 3000);
+    return () => { active = false; clearInterval(timer); };
+  }, []);
+  const stopPairing = () => { if (!pairingActive.current) return; pairingActive.current = false; setPairingQr(''); void api?.cancelAdbPairing?.().catch(() => {}); };
+  useEffect(() => { if (!(top === 'android' && real)) stopPairing(); }, [top, real]);
+
+  const run = async (action: () => Promise<void>) => {
+    if (lock.current) return;
+    lock.current = true; setBusy(true); setMessage('');
+    try { await action(); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } finally { lock.current = false; setBusy(false); setConnectingId(''); }
+  };
+  const connect = async (device: Device) => {
+    if (!api?.connectDevice) { setMessage(unavailable); return; }
+    setConnectingId(deviceId(device));
+    const result = await api.connectDevice({ ...requestFor(device), metro }); setInventory(result.inventory); setMessage(result.message);
+  };
+  const revert = async (device: Device) => {
+    if (!api?.disconnectDevice) { setMessage(unavailable); return; }
+    const result = await api.disconnectDevice(requestFor(device)); setInventory(result.inventory); setMessage(result.message);
+  };
+  const setOptions = (patch: Parameters<NonNullable<NonNullable<Window['streamglass']>['setDeviceOptions']>>[0]) => void run(async () => {
+    if (!api?.setDeviceOptions) { setMessage(unavailable); return; }
+    setInventory(await api.setDeviceOptions(patch));
+  });
+  const turnOnLan = () => void run(async () => {
+    const next = await api?.setupSite?.({ enableLan: true });
+    if (next) { setSite(next); if (next.error) setMessage(next.error); }
+    if (api?.deviceInventory) setInventory(await api.deviceInventory());
+  });
+  const startPairing = () => void run(async () => {
+    pairingActive.current = true;
+    try { const result = await api?.startAdbPairing?.(); if (result && pairingActive.current) { setPairingQr(result.qrText); if (result.message) setMessage(result.message); } } catch (error) { pairingActive.current = false; throw error; }
+  });
+
+  const proxiedEmulators = inventory?.android.filter(d => d.kind === 'emulator' && d.connection).length ?? 0;
+  const card = (device: Device) => <DeviceCard key={deviceId(device)} soleProxiedEmulator={proxiedEmulators === 1} device={device} records={records} baseline={baseline} metro={metro} options={inventory?.options}
+    connecting={connectingId === deviceId(device)} busy={busy} canConnect={!!api?.connectDevice} canRevert={!!api?.disconnectDevice} canConfirm={!!api?.confirmUserCert} canReopen={!!api?.reopenCertInstaller}
+    actions={{
+      connect: () => void run(() => connect(device)), revert: () => void run(() => revert(device)), filter: id => onFilterDevice?.(id),
+      confirm: () => void run(async () => { const next = await api?.confirmUserCert?.({ platform: 'android', id: deviceId(device) }); if (next) setInventory(next); }),
+      reopen: () => void run(async () => { await api?.reopenCertInstaller?.({ platform: 'android', id: deviceId(device) }); }),
+    }}/>;
+  const automated: Device[] = top === 'ios' ? inventory?.iosSimulators.filter(d => d.state === 'Booted') ?? [] : inventory?.android.filter(d => d.kind === 'emulator') ?? [];
+  const connectAll = () => void run(async () => { for (const device of automated) if (!device.connection && online(device)) await connect(device); });
+  const revertAll = () => void run(async () => {
+    const result = await api?.revertAllDevices?.();
+    if (result) {
+      setInventory(result.inventory);
+      setMessage(result.message);
+      if (top === 'mac') await onMacProxiesReverted();
+    }
+  });
+
+  const lanBar = <div className="ds-lan"><WifiIcon/>{lanOn
+    ? <><div className="ds-proxy-endpoint">
+      <span>Proxy host <code>{ip || 'Unavailable'}</code></span>
+      <span>Proxy port <code>{proxyPort}</code></span>
+    </div><span className="ds-spacer"/><span className="ds-chip ok">Local network access on</span></>
+    : <><span>Real devices reach Streamglass over Wi-Fi. Local network access is off.{ip ? <> This Mac: <code>{ip}</code></> : ' Join the same Wi-Fi network as the phone to get a LAN address.'}</span><span className="ds-spacer"/><button type="button" className="primary ds-sm" disabled={busy || !api?.setupSite} onClick={turnOnLan}>Turn on</button></>}</div>;
+  const metroCallout = metro && <Callout tone="info">{inventory?.metro.running ? 'React Native detected: Metro is running' : 'Metro steps are enabled; waiting for Metro'} on <code>:8081</code>. Connected devices can load the JS bundle from this Mac.</Callout>;
+  const partial = !!inventory && (!api?.connectDevice || !api?.disconnectDevice || !api?.watchDevices || !api?.onDeviceInventory);
+  const platforms = [{ id: 'mac', label: 'This Mac' }, { id: 'ios', label: 'iOS' }, { id: 'android', label: 'Android' }] as const;
+  const pages = top === 'ios' ? [{ id: 'iosDevice', label: 'Real device' }, { id: 'iosSimulator', label: 'Simulator' }] : [{ id: 'androidDevice', label: 'Real device' }, { id: 'androidEmulator', label: 'Emulator' }];
+
+  return <div className="connect-device"><div className="ds-scroll"><AnimatedHeight>
+    <div className="ds-navigation">
+      {top !== 'mac' && <SubTabs label={`${top === 'ios' ? 'iOS' : 'Android'} device type`} value={platform} items={pages} onChange={changePlatform}/>}
+      <div className="ds-platforms"><Segmented label="Platform" value={top} items={[...platforms]} onChange={value => changePlatform(value === 'mac' ? 'mac' : value === 'ios' ? 'iosDevice' : 'androidDevice')}/></div>
+    </div>
+    <div id="ds-page" role={top === 'mac' ? undefined : 'tabpanel'} aria-labelledby={top === 'mac' ? undefined : `ds-tab-${platform}`} className="ds-body">
+      {top !== 'mac' && message && <p className="ds-message" role="status">{message}</p>}
+      {top === 'mac' ? <ThisMacPage {...mac} records={records} port={port} baseline={baseline} busy={busy || mac.busy} onTlsSettings={onTlsSettings}/> : <>
+        {!inventory && <p className="muted" role="status">{loading ? 'Checking connected devices…' : unavailable}</p>}
+        {partial && <p className="muted" role="status">Some device automation is unavailable in this desktop version. The Wi-Fi guide remains available.</p>}
+        {real
+          ? <>{lanBar}<RealDevicePage key={top} os={top as 'ios' | 'android'} inventory={inventory} ip={ip} proxyPort={proxyPort} lanOn={lanOn} setupUrl={setupUrl} fingerprint={site?.fingerprint} siteError={site?.error} records={records} baseline={baseline} metro={wifiMetro} lan={lan} onFilterDevice={onFilterDevice} onRevert={api?.disconnectDevice ? device => void run(() => revert(device)) : undefined}
+            renderCard={card as (device: AndroidDevice) => ReactNode} pairingQr={pairingQr} canPair={!!api?.startAdbPairing} busy={busy} onPair={startPairing} onCancelPair={() => void run(async () => { await api?.cancelAdbPairing?.(); pairingActive.current = false; setPairingQr(''); })} onShortcutsToggle={open => { if (!open) stopPairing(); }}/></>
+          : <><AutomatedPage metroCallout={metroCallout} os={top as 'ios' | 'android'} inventory={inventory} devices={automated} busy={busy} working={!!connectingId} metro={metro} canConnect={!!api?.connectDevice} onConnectAll={connectAll} renderCard={card as (device: Device) => ReactNode}/></>}
+        <DeviceOptions inventory={inventory} metro={metro} disabled={busy || !api?.setDeviceOptions} onChange={setOptions} onTlsSettings={onTlsSettings}/>
+      </>}
+      {top === 'mac' && message && <p className="ds-mac-notice" role="status">{message}</p>}
+    </div>
+  </AnimatedHeight></div>
+    <div className="connect-nav"><button type="button" className="ghost" disabled={busy || mac.busy || !api?.revertAllDevices} onClick={revertAll}>Revert all proxies</button><span className="ds-spacer"/><button type="button" onClick={onDone}>Done</button></div>
   </div>;
 }

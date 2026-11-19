@@ -1,12 +1,16 @@
 export type FieldSource = 'response'|'request'|'event'|'responseHeader'|'requestHeader';
 export type FieldLocation = {pattern:string;method:string;source:FieldSource;path:string};
-export type CustomField = {id:string;name:string;locations:FieldLocation[]};
+export type CustomField = {id:string;name:string;locations:FieldLocation[];script?:string};
 export type FieldResult = {id:string;name:string;locations:{source:FieldSource;path:string}[];values:string[];summaries?:(string|null)[];count:number;state:'found'|'missing'|'pending'|'unknown';limited:boolean;note?:string};
 export type FieldChip = {id:string;name:string;value:string;full:string;more:number;limited:boolean};
 export const fieldSources:{id:FieldSource;label:string;kind:'json'|'header';tab:'request'|'response'|'events'}[];
 export function sourceLabel(id:string):string;
 export function isHeaderSource(id:string):boolean;
 export function urlWildcard(url:string):string;
+export const FIELD_SCRIPT_LIMIT:number;
+export const FIELD_SCRIPT_TEMPLATE:string;
+export function withScript<T extends CustomField>(field:T,script:string):T;
+export function scriptTooLong(field:CustomField):boolean;
 export function newLocation(patch?:Partial<FieldLocation>):FieldLocation;
 export function newField(patch?:Partial<CustomField>,location?:Partial<FieldLocation>):CustomField;
 export function isDefaultLocation(location:FieldLocation):boolean;

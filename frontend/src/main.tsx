@@ -7,7 +7,7 @@ import AboutWindow from './AboutWindow';
 import './style.css';
 import './active-states.css';
 const mode = new URLSearchParams(location.search).get('editor');
-const Surface = new URLSearchParams(location.search).has('about') ? AboutWindow : mode === 'paused' ? PausedWindow : mode && mode !== 'tools' ? EditorWindow : App;
+const Surface = new URLSearchParams(location.search).has('about') ? AboutWindow : mode === 'paused' ? PausedWindow : mode && !['tools', 'settings', 'setup'].includes(mode) ? EditorWindow : App; // App renders the Tools, Settings and device setup windows
 createRoot(document.getElementById('root')!).render(<React.StrictMode><Surface /></React.StrictMode>);
 if (/Mac/.test(navigator.userAgent)) document.documentElement.dataset.titlebar = 'inset';
 // Page zoom (⌘+/⌘-) scales CSS pixels, but the macOS traffic lights stay put. Title bars divide their height and

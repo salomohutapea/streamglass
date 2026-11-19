@@ -13,3 +13,14 @@ test('guest has no Node process or require', async () => {
 test('an infinite hook is terminated', async () => {
   await assert.rejects(executeScript({ source: 'function onRequest() { while (true) {} }', hook: 'onRequest', request: {} }), /interrupt|deadline/i);
 });
+
+test('a custom field hook transforms display values in the existing sandbox', async () => {
+  const input = { hook: 'onCustomField', values: ['hello'], context: {name: 'Greeting'} };
+  const result = await executeScript({
+    ...input,
+    source: 'function onCustomField(values, context) { return [context.name + ": " + values[0].toUpperCase(), typeof process]; }',
+  });
+  assert.deepEqual(result.value, ['Greeting: HELLO', 'undefined']);
+  const unchanged = await executeScript({...input, source: 'function onCustomField(values) { values.pop(); }'});
+  assert.deepEqual(unchanged.value, ['hello']);
+});

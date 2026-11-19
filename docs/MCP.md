@@ -1,6 +1,6 @@
 # Streamglass MCP
 
-Streamglass exposes its running capture engine to local MCP clients. MCP is off by default for new installs. Open **Tools → Agent (MCP)** (also in the Tools menu and the command palette), enable the server, and copy its URL and dedicated bearer token. The app must remain open. The token is independent of the engine management token; treat it like a password because it grants access to retained traffic and editing controls.
+Streamglass exposes its running capture engine to local MCP clients. MCP is off by default for new installs. Open **Settings → Agent (MCP)** (also in the Tools menu and the command palette; Settings opens in its own window), enable the server, and copy its URL and dedicated bearer token. The app must remain open. The token is independent of the engine management token; treat it like a password because it grants access to retained traffic and editing controls.
 
 The endpoint is `http://127.0.0.1:48722/mcp`, using the Streamable HTTP transport; every request requires `Authorization: Bearer <token>`. This is standard MCP JSON-RPC over the official SDK, including initialization, capability negotiation, tools/list, tools/call, notifications and session lifecycle. The deprecated HTTP+SSE transport (`/sse` and `/messages`) was removed in 1.0.9; point older client entries at `/mcp` with `type: "http"`. Captured application SSE events are delivered by the `watch_sse_events` tool.
 
@@ -23,26 +23,35 @@ console.log(JSON.parse(status.content[0].text));
 
 Use the panel's URL if the port differs. Close the client when finished.
 
+## Troubleshooting with an agent
+
+Ask your agent “Why isn’t this device showing traffic?” or “Check the TLS error for `api.example.com`.” Give it the device ID from captures or the LAN client IP if available. The MCP server sends troubleshooting instructions during initialization.
+
+Start with `diagnose_connection`. By default it reads retained evidence from the last 15 minutes, including client- and server-side TLS errors, encrypted tunnels, HTTP responses, and paused breakpoints. It also reports proxy status and recent device approval requests. Set `device` and `host` to narrow the evidence. Use `since` in Unix seconds to look further back. Without device attribution, evidence on shared loopback cannot identify a specific simulator or emulator.
+
+If there is no matching evidence, make a fresh request from the affected device and check again. Use `list_captures` for more history, `get_capture_timing` for timing, or `get_capture` to inspect an exact request or response when relevant. A recent HTTP response confirms that traffic reached Streamglass. Check its status, payload, and any applied rules before deciding what failed. Diagnostics do not probe the network or inspect certificate trust on the device. See [device troubleshooting](DEVICES.md#troubleshooting) for the local setup checks.
+
 ## Available tools
 
 | Tools | Purpose |
 | --- | --- |
 | `get_status`, `get_settings` | Proxy/capture status and counts; paginated complete settings including TLS patterns |
+| `diagnose_connection` | Read-only proxy status, recent request and TLS evidence, LAN approval, and pending breakpoint checks |
 | `list_capture_sessions`, `save_capture_session`, `delete_capture_session` | Manage immutable local capture archives, separately from configuration workspaces |
 | `list_session_captures`, `get_session_capture` | Browse archived metadata and paginated retained content without changing live traffic |
 | `get_capture_analysis` | Read correlation values, custom field values and pass/fail/pending/unknown assertion results |
 | `get_productivity_preferences`, `set_productivity_preferences` | Read or replace journey/custom-field/assertion/view configuration with revision checks (section `fields`; each field has `id`, `name` and `locations` of `pattern`, `method`, `source`, `path`; older flat fields are migrated). Clients must send `fields`; `watches` is no longer accepted |
-| `list_custom_fields`, `upsert_custom_field`, `delete_custom_field` | Add, replace or remove one custom field: `name` plus 1–10 `locations`, each a URL wildcard `pattern`, `method` (default `*`), `source` and a JSONPath or header-name `path`; values from all matching locations are merged. Omit `id` to create. Edits go through the revision-checked preferences API and engine validation; the Tools window picks them up like any other save |
+| `list_custom_fields`, `upsert_custom_field`, `delete_custom_field` | Add, replace or remove a custom field. Supply its `name`, 1–10 `locations` and optionally `script` defining `onCustomField(values, context)`. Omit `id` to create. Both this tool and `set_productivity_preferences` ask for approval before adding or modifying a scripted field. Edits use the same revision-checked preferences API as the Tools window. See [Custom Fields](DAILY_TOOLS.md#custom-fields) for input and return values |
 | `get_capture_fields` | One capture's custom field values in full (up to 64 KiB each); `list_captures` rows carry them cut at 256 characters |
 | `annotate_capture` | Set a capture note and subtle row highlight |
 | `list_replay_jobs`, `start_replay_job`, `cancel_replay_job` | Run explicit bounded sequential replay and page progress/cancel its own connection; starting requires `confirmSend:true` and your approval in the app |
-| `list_captures`, `search_captures` | Page metadata or search retained URL/request/response/event text. `list_captures` items include `durationMs` and `serverMs`; filter with `minServerMs`/`minDurationMs` and sort with `sortBy` (`newest`, `serverMs`, `durationMs`) to find slow requests. SSE items include `sseStatus`; filter with `sseStatus` (for example `client-closed`) |
+| `list_captures`, `search_captures` | Page metadata or search retained URL/request/response/event text. Scope `list_captures` by `device`, exact `host`, or activity time `since` (Unix seconds). Items include `durationMs` and `serverMs`; filter with `minServerMs`/`minDurationMs` and sort with `sortBy` (`newest`, `serverMs`, `durationMs`) to find slow requests. SSE items include `sseStatus`; filter with `sseStatus` (for example `client-closed`) |
 | `get_capture_timing` | Timing breakdown for one capture: connect, TLS, request, server time (request sent to response headers), download and breakpoint pause in ms, epoch-ms timestamps, body sizes, and for SSE the connection status with the original end message and phase times, plus the gap statistics and slowest gaps between events |
 | `get_capture` | Metadata, request or response content |
 | `get_capture_events`, `get_event_content` | Page retained SSE events by sequence; read full individual event text |
 | `watch_sse_events` | Receive new retained events while a stream remains open |
 | `export_capture` | cURL, request, response or events as text, without writing files or executing commands |
-| `delete_capture`, `clear_captures` | Delete retained data by record or explicit all/device scope |
+| `delete_capture`, `clear_captures` | Delete retained data by record or explicit all/device scope. A device is the capture's `deviceId` (simulator, emulator, adb reverse) when present, otherwise its client address; `list_captures` filters the same way |
 | `list_rules`, `get_rule`, `upsert_rule`, `delete_rule` | Inspect and edit breakpoint and JavaScript rules |
 | `list_folders`, `create_folder`, `rename_folder`, `delete_folder` | Manage script/breakpoint folders |
 | `list_pending`, `get_pending`, `resolve_pending` | Inspect a paused message, continue with optional edits or drop its connection |
@@ -75,17 +84,18 @@ Some tools can send traffic or widen what Streamglass can read, so they wait for
 | Action | When approval is required |
 | --- | --- |
 | `replay_request`, `start_replay_job` | Every time, because they send requests |
-| `upsert_map_remote_rule`, `set_map_remote_rule_enabled`, `set_traffic_rule_group_enabled`, or any traffic-tools edit | The change newly enables a redirect to a server (`scheme://host:port`) you have not approved before |
-| `resolve_pending` | The edited request URL has a different scheme, host or port than the paused request, and that server is not already approved |
+| Map Remote, Map Local and response Rewrite | Creating, materially changing or enabling a redirect or response rule requires approval for its match scope, including when a new rule is saved disabled. Changes to rule precedence can also require approval |
+| `resolve_pending` | The edited request changes the upstream server, or the edit changes the HTTP response or SSE event. The prompt shows a bounded change summary and the engine verifies approval for the exact edit |
 | `update_settings` | It adds TLS inspection domains that were not already configured. Removing domains, pausing capture and stopping the proxy need no approval |
-| `upsert_rule` | The rule has new or changed JavaScript, because scripts can rewrite URLs and headers |
+| `upsert_rule` | JavaScript is added, changed, or enabled for a different execution scope. The dialog shows the full source |
+| `create_capture_fixture` | Before saving the disabled fixture |
 | `load_workspace` | Always, because it replaces TLS domains, rules, scripts and traffic tools |
 
-Other tools, including reads, capture deletion, breakpoint, Rewrite, Block and Map Local rules, pausing capture and stopping the proxy, do not ask.
+Reads, capture deletion, ordinary breakpoint definitions, Block rules, pausing capture and stopping the proxy need no prompt.
 
-Approved redirect servers are remembered in `mcp.json` (`approvedRedirects`, at most 200) and listed in **Tools → Agent (MCP)** with a Remove button. Removing one makes the next redirect to it ask again.
+Redirect approvals apply to the edit shown in the prompt. Previously remembered server approvals are retained for reference and no longer grant consent. In **Settings → Agent (MCP)**, **Rotate token** invalidates the old token and disconnects clients. Copy the new configuration to reconnect them.
 
-MCP also refuses broad TLS inspection patterns: the last two host labels must be literal, so `*`, `*.com`, `*.*`, `api.*` and `localhost` are refused while `*.example.com` and `api.example.com` are allowed. The desktop Settings still accept any pattern.
+MCP only accepts a wildcard as the leading `*.` label, followed by at least two literal labels. This check does not identify multi-label public suffixes. Adding any accepted TLS pattern still requires approval. Desktop Settings retain their existing pattern controls.
 
 Capture pause bypasses breakpoints and scripts while traffic continues. Waiting breakpoints continue with their original, unedited value, and unsent script results are discarded. Changes already sent cannot be undone. Requests started while paused and SSE streams already switched to pass-through stay in that mode until completion. Stopping the proxy interrupts active traffic, and the app then restores saved Mac system proxy settings that still point at Streamglass within about 3 seconds. TLS-domain changes can reconnect tunnels. Deleting a capture does not stop its connection or release its paused breakpoints. Pending gate tokens are local breakpoint identifiers, distinct from bearer credentials; stale gates fail instead of resuming another message. Edited message values retain the HTTP API's header/body/base64 and streaming restrictions.
 

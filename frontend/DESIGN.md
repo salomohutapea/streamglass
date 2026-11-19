@@ -4,11 +4,11 @@ Operate mode. A daily debugging utility for engineers inspecting HTTP and SSE tr
 
 System typography at 12px, 11px metadata, 10px column labels; monospace only for payloads, methods, and measured values. Dark charcoal surfaces and muted blue selection keep traffic readable; light mode uses the same hierarchy.
 
-Toolbar 52px, pane toolbars 38px, sidebar expanded at 216px (resizable 180–420px, or collapsed to a 48px rail), inspector initially 440px. Drag separators or focus them and use arrow keys. Rules, scripts, device setup and TLS settings use native dialog focus handling. Lucide icons use a consistent 16px stroke system; icon controls expose names and tooltips. No seeded traffic: empty and connection failure states describe the actual backend state.
+Toolbar 52px, pane toolbars 38px, sidebar expanded at 216px (resizable 180–420px, or collapsed to a 48px rail), inspector initially 440px. Drag separators or focus them and use arrow keys. Rules, scripts, device setup and settings open in separate windows. Lucide icons use a consistent 16px stroke system; icon controls expose names and tooltips. No seeded traffic: empty and connection failure states describe the actual backend state.
 
 Validation: TypeScript and production UI build passed. Actual Electron smoke passed with source and packaged engines, including settings roundtrip, rules, breakpoint editing, and detached inspector. Physical-device setup and exhaustive visual/accessibility checks remain unverified.
 
-Scripts use independent editable wildcard rules with method and stage selectors. Settings is split into Proxy (listen port, local-network access), HTTPS / TLS and Appearance sections; agent (MCP) setup lives in Tools → Agent (MCP), the first item under AI agents. Paused body edits preserve the original byte representation when text is untouched. Failed saves keep their editor open with an inline error.
+Scripts use independent editable wildcard rules with method and stage selectors. Settings is split into Proxy (listen port, local-network access), HTTPS / TLS, Storage, Agent (MCP) and Appearance sections; agent (MCP) setup lives in Settings, not Tools. Settings and Connect a device open in their own windows, not dialogs. Paused body edits preserve the original byte representation when text is untouched. Failed saves keep their editor open with an inline error.
 
 ## Visual design
 
@@ -165,7 +165,7 @@ Selected navigation rows, pressed toggles and list selections use a soft accent 
 outline; tabs use primary text with a 2px accent underline and no fill. Footer status items are bordered chips
 with a small accent dot. Tokens stay in `active-states.css`. Traffic rows alternate `--row-a` and `--row-b`
 (two close neutral greys; selection is the only blue); parity is counted from the end of the list so existing rows keep their shade when a new
-request arrives at the top. Every column has the same 10px left inset. The SSL column shows a closed lock for
+request arrives at the top. Every column has the same 10px left inset (carried by the heading button, so heading hover fills the cell edge to edge). The column menu separates rows by 2px so adjacent checked items keep distinct highlights. The SSL column shows a closed lock for
 an encrypted tunnel, an open lock for inspected HTTPS and a dash for plain HTTP; it is shown once by default
 and can be hidden from the column menu.
 Traffic rows use 3px vertical padding (about 26px per row). The proxy address in the header status capsule is a button that opens Proxy settings.
@@ -187,5 +187,11 @@ below that the track becomes a vertical list, tiles go two-up, and the events ta
 shows delivery as a dot. A step that never happened reads "not reached"; a stream with no events says so instead of
 showing an empty table.
 
-In Connect a device, the certificate page (QR, URL, fingerprint) is step 1 and labelled as not the proxy; the proxy
-address is step 2 with where to enter it.
+Connect a device has This Mac, iOS and Android tabs. Mobile platforms open on Real device before Simulator or
+Emulator. Wi-Fi guides show the LAN address/port separately from the certificate-page QR and reuse inline LAN
+approval. Automated device cards report proxy, certificate, optional Metro and attributed traffic separately;
+certificate installation alone does not verify application trust. Inventory is watched only while the window is
+open. Height changes (tab switches, expanding steps, cards appearing) animate over 200 ms unless reduced motion is requested. The manual Wi-Fi Metro row requires a running Metro server. Automated cards show Metro in Always mode or in Auto while Metro is running. Options persist through the desktop
+bridge. Older bridges keep the manual guide available and explain unavailable automation. Manual Wi-Fi proxy
+settings must be switched off on the phone; automated Revert restores saved settings. Runtime and device
+verification of this redesign have not been performed.

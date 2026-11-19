@@ -146,9 +146,13 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await openSidebar(page);
     assert.equal(await page.getByRole('button', { name: 'Devices', exact: true }).getAttribute('aria-expanded'), 'false');
     await openSidebar(page);
+    const setupOpened = app.waitForEvent('window');
     await page.getByRole('button', { name: 'Connect a device', exact: true }).click();
-    await page.getByRole('dialog', { name: 'Connect a device' }).waitFor();
-    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    const setupWindow = await setupOpened;
+    await setupWindow.getByRole('main', { name: 'Connect a device' }).waitFor();
+    const setupClosed = setupWindow.waitForEvent('close');
+    await setupWindow.getByRole('button', { name: 'Done', exact: true }).click();
+    await setupClosed;
     await openSidebar(page);
     await page.getByRole('button', { name: 'Devices', exact: true }).click();
     await openSidebar(page);
@@ -216,14 +220,18 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await page.reload();
     await page.getByRole('row').filter({ hasText: 'z-search/sse' }).waitFor();
     assert.equal((await menuItem('export-request')).enabled, false);
+    const settingsOpened = app.waitForEvent('window');
     await clickMenu('settings');
-    await page.getByRole('dialog').waitFor();
+    const settings = await settingsOpened;
+    await settings.getByRole('main', { name: 'Settings', exact: true }).waitFor();
     assert.equal((await menuItem('clear-all')).enabled, false);
-    await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
-    assert.equal(await page.getByRole('columnheader', { name: 'Status', exact: true }).count(), 1);
-    assert.equal(await page.getByRole('columnheader', { name: 'Time', exact: false }).count(), 0);
+    const settingsClosed = settings.waitForEvent('close');
+    await settings.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await settingsClosed;
+    assert.equal(await page.getByRole('columnheader', { name: 'Time', exact: false }).count(), 1);
+    assert.equal(await page.getByRole('columnheader', { name: 'Status', exact: true }).count(), 0);
     await page.getByRole('button', { name: 'Choose table columns', exact: true }).click();
-    await page.getByRole('menuitemcheckbox', { name: /Time/ }).click();
+    await page.getByRole('menuitemcheckbox', { name: 'Status', exact: true }).click();
     await page.keyboard.press('Escape');
     assert.match(await page.getByRole('row').filter({ hasText: 'z-search/sse' }).innerText(), /POST\s*\|\s*SSE/);
     for (const time of await rows.locator('.timing').allTextContents()) assert.match(time, /\d{2}:\d{2}:\d{2}/);
@@ -427,94 +435,82 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await page.getByRole('button', { name: 'Enable SSL inspection…', exact: true }).waitFor();
     assert.equal((await menuItem('export-request')).enabled, false);
     assert.equal((await menuItem('breakpoint-new')).enabled, false);
-    const setupBootstrap = await page.evaluate(() => window.streamglass.getBootstrap());
-    await app.evaluate(({ ipcMain }, bootstrap) => {
-      ipcMain.removeHandler('bootstrap');
-      ipcMain.handle('bootstrap', () => ({ ...bootstrap, lanAddresses: ['192.0.2.10', '192.0.2.20'] }));
-    }, setupBootstrap);
-    await page.reload();
-    await page.getByRole('row').filter({ hasText: 'z-search/sse' }).waitFor();
-    await page.evaluate(() => {
-      window.streamglassTestCopied = [];
-      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async value => { window.streamglassTestCopied.push(value); } } });
-    });
-    // Stub device IPC so setup coverage never changes the host proxy or simulator trust.
-    await app.evaluate(({ ipcMain }) => {
-      const inventory = { activeNetworkId: 'USB LAN', monitorEnabled: false, savedProxyTargets: [], networkNotice: 'Detected active network: USB LAN (en6).', proxyPort: 8080,
-        simulatorNotice: 'Select a booted simulator and prepare capture.',
-        simulators: [{ id: 'sim-booted', name: 'Test phone', state: 'Booted' }, { id: 'sim-stopped', name: 'Stopped phone', state: 'Shutdown' }],
-        networkServices: [{ id: 'USB LAN', name: 'USB LAN', interface: 'en6', active: true, proxyEnabled: false, canRestore: false }, { id: 'Wi-Fi', name: 'Wi-Fi', interface: 'en0', proxyEnabled: false, canRestore: false }] };
+    // Stub device IPC so UI coverage never changes the host proxy or simulator trust.
+    await app.evaluate(({ ipcMain }, proxyPort) => {
+      const booted = { udid: 'sim-booted', name: 'Test phone', runtime: 'iOS 18', state: 'Booted', connection: null };
+      const inventory = {
+        adbAvailable: true, simctlAvailable: true, android: [], iosSimulators: [
+          booted, { ...booted, udid: 'sim-stopped', name: 'Stopped phone', state: 'Shutdown' },
+        ],
+        metro: { running: false, port: 8081, mode: 'auto' },
+        lan: { enabled: false, address: '192.0.2.20', proxyPort, setupUrl: null },
+        options: { reapply: true, revertOnQuit: true, autoConnect: false },
+      };
       globalThis.streamglassTestDeviceActions = [];
       globalThis.streamglassTestCopied = [];
-      ipcMain.removeHandler('copy-text');
-      ipcMain.handle('copy-text', (_event, value) => { globalThis.streamglassTestCopied.push(value); });
-      ipcMain.removeHandler('list-devices');
-      ipcMain.removeHandler('device-action');
-      ipcMain.handle('list-devices', () => inventory);
-      ipcMain.handle('device-action', (_event, input) => {
+      const stub = (channel, handler) => {
+        ipcMain.removeHandler(channel);
+        ipcMain.handle(channel, handler);
+      };
+      stub('device-inventory', () => inventory);
+      stub('watch-devices', () => {});
+      stub('copy-text', (_event, value) => { globalThis.streamglassTestCopied.push(value); });
+      stub('connect-device', (_event, input) => {
         globalThis.streamglassTestDeviceActions.push(input);
-        if (input.action.startsWith('mac-') || input.action === 'simulator-prepare') {
-          const networkId = input.action === 'simulator-prepare' ? input.networkTarget || inventory.activeNetworkId : input.target || inventory.activeNetworkId;
-          const network = inventory.networkServices.find(item => item.id === networkId);
-          network.proxyEnabled = input.action !== 'mac-restore-proxy';
-          network.canRestore = input.action !== 'mac-restore-proxy';
-          inventory.monitorEnabled = input.action !== 'mac-restore-proxy';
-          inventory.savedProxyTargets = inventory.monitorEnabled ? [`mac:${network.id}`] : [];
-        }
-        return { message: 'Fixture device action complete', devices: inventory };
+        booted.connection = {
+          proxy: {status: 'ok', value: `127.0.0.1:${proxyPort}`},
+          cert: {status: 'ok', mode: 'simulator'}, metro: {status: 'off'}, connectedAt: Date.now(),
+        };
+        return {ok: true, connection: booted.connection, message: 'Fixture simulator connected', inventory};
       });
-    });
-    await openSidebar(page);
-    await page.getByRole('button', { name: 'Connect device', exact: true }).click();
-    const setup = page.getByRole('dialog');
-    await setup.getByRole('button', { name: 'Next', exact: true }).click();
-    const proxyAddress = setup.getByRole('region', { name: 'HTTP proxy address', exact: true });
-    assert.equal(await proxyAddress.getByRole('textbox', { name: 'Proxy IP address', exact: true }).inputValue(), '127.0.0.1');
-    await setup.getByRole('button', { name: 'Back', exact: true }).click();
-    await setup.getByRole('radio', { name: /^iOS Device/ }).click();
-    const proxyIP = proxyAddress.getByRole('combobox', { name: 'Proxy IP address', exact: true });
-    assert.equal(await proxyIP.inputValue(), '192.0.2.10');
-    assert.deepEqual(await proxyIP.locator('option').allTextContents(), ['192.0.2.10', '192.0.2.20']);
-    await proxyIP.selectOption('192.0.2.20');
+      stub('disconnect-device', (_event, input) => {
+        globalThis.streamglassTestDeviceActions.push(input);
+        booted.connection = null;
+        return {ok: true, message: 'Fixture simulator reverted', inventory};
+      });
+    }, port);
+    const deviceSetupOpened = app.waitForEvent('window');
+    await clickMenu('setup-macos');
+    const setup = await deviceSetupOpened;
+    const setupRoot = setup.getByRole('main', { name: 'Connect a device' });
+    await setupRoot.getByText('Troubleshooting', { exact: true }).click();
+    const proxyAddress = setupRoot.getByRole('region', { name: 'HTTP proxy address', exact: true });
     const displayedPort = await proxyAddress.getByRole('textbox', { name: 'Proxy port', exact: true }).inputValue();
     assert.equal(displayedPort, String(port));
+    assert.equal(await proxyAddress.getByRole('textbox', { name: 'Proxy IP address', exact: true }).inputValue(), '127.0.0.1');
     for (const [label, feedback] of [['Copy IP', 'IP address copied'], ['Copy port', 'Port copied'], ['Copy IP:port', 'IP:port copied']]) {
       await proxyAddress.getByRole('button', { name: label, exact: true }).click();
-      await proxyAddress.getByRole('status').getByText(feedback, { exact: true }).waitFor();
+      await proxyAddress.getByText(feedback, { exact: true }).waitFor();
     }
-    assert.deepEqual(await app.evaluate(() => globalThis.streamglassTestCopied), ['192.0.2.20', displayedPort, `192.0.2.20:${displayedPort}`]);
+    assert.deepEqual(await app.evaluate(() => globalThis.streamglassTestCopied), ['127.0.0.1', displayedPort, `127.0.0.1:${displayedPort}`]);
     await app.evaluate(({ ipcMain }) => { ipcMain.removeHandler('copy-text'); ipcMain.handle('copy-text', () => { throw new Error('Clipboard blocked'); }); });
     await proxyAddress.getByRole('button', { name: 'Copy IP:port', exact: true }).click();
     const manualCopy = proxyAddress.getByRole('textbox', { name: 'Copy proxy value manually', exact: true });
     await manualCopy.waitFor();
-    assert.equal(await manualCopy.inputValue(), `192.0.2.20:${displayedPort}`);
-    assert.equal(await manualCopy.evaluate(input => input.readOnly && input.selectionStart === 0 && input.selectionEnd === input.value.length), true);
-    assert.equal(await setup.getByRole('combobox', { name: 'Network service', exact: true }).count(), 0);
-    await setup.getByRole('button', { name: 'Back', exact: true }).click();
-    await setup.getByRole('radio', { name: /^iOS Simulator/ }).click();
-    assert.equal(await proxyAddress.getByRole('textbox', { name: 'Proxy IP address', exact: true }).inputValue(), '127.0.0.1');
-    const simulator = setup.getByRole('combobox', { name: 'Simulator', exact: true });
-    assert.equal(await setup.getByRole('combobox', { name: 'Mac network service', exact: true }).count(), 0);
-    assert.equal(await simulator.inputValue(), 'sim-booted');
-    const prepare = setup.getByRole('button', { name: 'Prepare simulator capture', exact: true });
-    assert.equal(await setup.getByRole('button', { name: 'Enable Mac capture', exact: true }).count(), 0);
-    assert.equal(await setup.getByRole('button', { name: 'Install certificate', exact: true }).count(), 0);
-    await prepare.click();
-    await page.waitForFunction(() => document.querySelector('.setup-output')?.textContent === 'Fixture device action complete');
-    assert.equal(await simulator.inputValue(), 'sim-booted');
-    assert.equal(await setup.getByRole('button', { name: 'Disable Mac capture', exact: true }).isDisabled(), false);
-    await simulator.selectOption('sim-stopped');
-    assert.equal(await prepare.isDisabled(), true);
-    await setup.getByRole('button', { name: 'Disable Mac capture', exact: true }).click();
-    await page.waitForFunction(() => [...document.querySelectorAll('dialog button')].find(button => button.textContent === 'Disable Mac capture')?.disabled);
+    assert.equal(await manualCopy.inputValue(), `127.0.0.1:${displayedPort}`);
+    await setup.waitForFunction(() => {
+      const input = document.activeElement;
+      return input?.getAttribute('aria-label') === 'Copy proxy value manually'
+        && input.readOnly && input.selectionStart === 0 && input.selectionEnd === input.value.length;
+    });
+
+    await setupRoot.getByRole('button', { name: 'iOS', exact: true }).click();
+    await setupRoot.getByRole('tab', { name: 'Real device', exact: true, selected: true }).waitFor();
+    await setupRoot.getByText('Set the Wi-Fi proxy', { exact: true }).waitFor();
+    await setupRoot.getByRole('tab', { name: 'Simulator', exact: true }).click();
+    await setupRoot.getByText('Test phone', { exact: false }).first().waitFor();
+    assert.equal(await setupRoot.getByText('Stopped phone', { exact: false }).count(), 0);
+    await setupRoot.getByRole('button', { name: 'Connect', exact: true }).click();
+    await setupRoot.getByText('Fixture simulator connected', { exact: true }).waitFor();
+    await setupRoot.getByRole('button', { name: 'Revert', exact: true }).click();
+    await setupRoot.getByText('Fixture simulator reverted', { exact: true }).waitFor();
     assert.deepEqual(await app.evaluate(() => globalThis.streamglassTestDeviceActions), [
-      { action: 'simulator-prepare', target: 'sim-booted', networkTarget: '' }, { action: 'mac-restore-proxy', target: '', networkTarget: undefined },
+      { platform: 'ios-simulator', id: 'sim-booted', metro: false },
+      { platform: 'ios-simulator', id: 'sim-booted' },
     ]);
-    await simulator.selectOption('sim-booted');
-    await setup.getByText('Certificate-only setup for a managed Mac', { exact: true }).click();
-    await setup.getByRole('button', { name: 'Install certificates only', exact: true }).click();
-    assert.deepEqual((await app.evaluate(() => globalThis.streamglassTestDeviceActions)).at(-1), { action: 'simulator-certificates', target: 'sim-booted', networkTarget: undefined });
-    await setup.getByRole('button', { name: 'Close dialog', exact: true }).click();
+    const deviceSetupClosed = setup.waitForEvent('close');
+    await setupRoot.getByRole('button', { name: 'Done', exact: true }).click();
+    await deviceSetupClosed;
     if (process.env.STREAMGLASS_TEST_TABLE_SCREENSHOT) await page.screenshot({ path: process.env.STREAMGLASS_TEST_TABLE_SCREENSHOT });
     if (process.env.STREAMGLASS_TEST_HEADER_SCREENSHOT) {
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(win => !win.webContents.getURL().includes('editor=') && !win.webContents.getURL().includes('record='))?.setContentSize(900, 700));
@@ -543,13 +539,32 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     let unexpectedDialog = false;
     const rejectUnexpectedDialog = async dialog => { unexpectedDialog = true; await dialog.dismiss(); };
     page.on('dialog', rejectUnexpectedDialog);
-    await page.getByRole('row').filter({ hasText: 'a-json' }).getByRole('button', { name: 'Delete request', exact: true }).click();
-    await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 2);
+    const jsonRow = page.getByRole('row').filter({ hasText: 'a-json' });
+    const deleteNotice = page.getByRole('status').filter({ hasText: 'Request deleted' });
+    async function commitDeletion(id) {
+      const [response] = await Promise.all([
+        page.waitForResponse(response => response.request().method() === 'DELETE'
+          && new URL(response.url()).pathname === `/api/records/${id}`),
+        deleteNotice.getByRole('button', { name: 'Dismiss notification', exact: true }).click(),
+      ]);
+      assert.equal(response.ok(), true, `Delete ${id} returned HTTP ${response.status()}`);
+      assert.deepEqual(await response.json(), { deleted: 1 });
+    }
+    await jsonRow.getByRole('button', { name: 'Delete request', exact: true }).click();
+    await jsonRow.waitFor({ state: 'detached' });
     assert.equal(unexpectedDialog, false, 'Single capture delete is immediate');
     assert.match(await page.locator('tbody tr.selected').innerText(), /locked.example.test/, 'Deleting a row must preserve the existing selection');
+    // Settle the first Undo window before exercising the native menu.
+    await commitDeletion('fixture-a');
     await clickMenu('clear-selected');
-    await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 1);
+    await locked.waitFor({ state: 'detached' });
     assert.equal(unexpectedDialog, false, 'Native single capture delete is immediate');
+    await commitDeletion('fixture-lock');
+    // The DELETE response arrives before the renderer has applied the refreshed state.
+    await page.waitForFunction(() => {
+      const captures = document.querySelectorAll('tbody tr[data-record-id]');
+      return captures.length === 1 && captures[0].getAttribute('data-record-id') === 'fixture-z';
+    }, undefined, { polling: 100 });
     page.off('dialog', rejectUnexpectedDialog);
     await page.getByRole('button', { name: 'Delete all records', exact: true }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();

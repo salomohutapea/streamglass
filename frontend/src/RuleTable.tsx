@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
-import { ChevronRight, Folder, FolderOpen, FolderPlus, ListFilter, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent } from 'react';
+import { ArrowDown, ArrowUp, ChevronRight, Folder, FolderOpen, FolderPlus, ListFilter, MoreHorizontal, Pencil, Plus, Share2, Trash2 } from 'lucide-react';
 import { PopupMenu } from './RuleList';
 import { folderPath, type RuleRow, type TreeRef } from './rule-tree.mjs';
 import './rule-list.css';
@@ -9,6 +9,11 @@ export type TableFolder = { id: string; name: string; parentId?: string; enabled
 type Row = RuleRow<TableRule, TableFolder>;
 type Zone = 'before' | 'after' | 'inside';
 const dragType = 'application/x-streamglass-rule-row';
+const rowInset = (depth: number) => 8 + depth * 18;
+export const ruleKindDragType = {
+  scripts: 'application/x-streamglass-script',
+  breakpoints: 'application/x-streamglass-breakpoint',
+};
 const stages: [string, string][] = [['request', 'Request'], ['response', 'Response'], ['event', 'SSE']];
 
 // An untitled rule is named by the last segment of its URL pattern, such as "dateflow" for *flight/dateflow.
@@ -21,12 +26,12 @@ export function ruleLabel(rule: TableRule) {
 
 /** Rules and folders in one compact table. Folders are rows that expand in place; rows drag to reorder or to move into
  *  a folder (Option+Up/Down does the same from the keyboard). Sorting is off while a search is filtering the list. */
-export default function RuleTable({ rows, folders, searching, emptyMessage, folderForm, onFolderForm, onSaveFolder, onToggleRule, onToggleFolder, onExpand, onEdit, onDeleteRule, onDeleteFolder, onAddRule, onPlace, onStep }: {
-  rows: Row[]; folders: TableFolder[]; searching: boolean; emptyMessage: string;
+export default function RuleTable({ kind, rows, folders, searching, emptyMessage, folderForm, onFolderForm, onSaveFolder, onToggleRule, onToggleFolder, onExpand, onEdit, onShare, onDeleteRule, onDeleteFolder, onAddRule, onPlace, onStep }: {
+  kind: keyof typeof ruleKindDragType; rows: Row[]; folders: TableFolder[]; searching: boolean; emptyMessage: string;
   folderForm: { id?: string; parentId?: string | null; name: string } | null;
   onFolderForm(form: { id?: string; parentId?: string | null; name: string } | null): void; onSaveFolder(): void;
   onToggleRule(rule: TableRule, enabled: boolean): void; onToggleFolder(folder: TableFolder, enabled: boolean): void; onExpand(folder: TableFolder, expanded: boolean): void;
-  onEdit(rule: TableRule): void; onDeleteRule(rule: TableRule): void; onDeleteFolder(folder: TableFolder): void; onAddRule(folderId: string | null): void;
+  onEdit(rule: TableRule): void; onShare?(rule: TableRule): void; onDeleteRule(rule: TableRule): void; onDeleteFolder(folder: TableFolder): void; onAddRule(folderId: string | null): void;
   onPlace(dragged: TreeRef, target: TreeRef, zone: Zone): void; onStep(item: TreeRef, direction: 1 | -1): void;
 }) {
   const [drop, setDrop] = useState<{ id: string; zone: Zone } | null>(null);
@@ -43,11 +48,20 @@ export default function RuleTable({ rows, folders, searching, emptyMessage, fold
   };
   const dragProps = (row: Row) => sortable ? {
     draggable: true,
-    onDragStart: (event: DragEvent) => { dragging.current = { type: row.type, id: row.id }; event.dataTransfer.setData(dragType, `${row.type}:${row.id}`); event.dataTransfer.effectAllowed = 'move'; event.currentTarget.classList.add('dragging'); },
+    style: drop?.id === row.id
+      ? { '--rule-drop-inset': `${rowInset(row.depth + (drop.zone === 'inside' ? 1 : 0))}px` } as CSSProperties
+      : undefined,
+    onDragStart: (event: DragEvent) => {
+      dragging.current = { type: row.type, id: row.id };
+      event.dataTransfer.setData(dragType, `${row.type}:${row.id}`);
+      if (row.type === 'rule') event.dataTransfer.setData(ruleKindDragType[kind], row.id);
+      event.dataTransfer.effectAllowed = 'move';
+      event.currentTarget.classList.add('dragging');
+    },
     onDragEnd: (event: DragEvent) => { dragging.current = null; setDrop(null); event.currentTarget.classList.remove('dragging'); },
-    onDragOver: (event: DragEvent) => { if (!event.dataTransfer.types.includes(dragType)) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; const zone = zoneFor(event, row); setDrop(current => current?.id === row.id && current.zone === zone ? current : { id: row.id, zone }); },
+    onDragOver: (event: DragEvent) => { if (!dragging.current || !event.dataTransfer.types.includes(dragType)) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; const zone = zoneFor(event, row); setDrop(current => current?.id === row.id && current.zone === zone ? current : { id: row.id, zone }); },
     onDragLeave: () => setDrop(current => current?.id === row.id ? null : current),
-    onDrop: (event: DragEvent) => { event.preventDefault(); const source = dragging.current; const zone = zoneFor(event, row); setDrop(null); dragging.current = null; if (source) onPlace(source, { type: row.type, id: row.id }, zone); },
+    onDrop: (event: DragEvent) => { const source = dragging.current; if (!source || !event.dataTransfer.types.includes(dragType)) return; event.preventDefault(); const zone = zoneFor(event, row); setDrop(null); dragging.current = null; onPlace(source, { type: row.type, id: row.id }, zone); },
   } : {};
   const onRowKey = (event: KeyboardEvent, row: Row) => {
     if (event.target !== event.currentTarget) return;
@@ -58,11 +72,11 @@ export default function RuleTable({ rows, folders, searching, emptyMessage, fold
   };
   const openMenu = (row: Row, x: number, y: number, opener: HTMLElement | null) => { setMoving(false); setMenu({ x, y, row, opener }); };
   const close = () => setMenu(null);
-  const indent = (depth: number) => ({ paddingLeft: 8 + depth * 18 });
+  const indent = (depth: number) => ({ paddingLeft: rowInset(depth) });
   const form = (depth: number, key: string) => <tr key={key} className="rule-folder-form-row"><td colSpan={7} style={indent(depth)}><form className="rule-folder-inline" onSubmit={event => { event.preventDefault(); onSaveFolder(); }}><Folder size={13} aria-hidden="true"/><input aria-label="Folder name" placeholder="Folder name" autoFocus maxLength={128} value={folderForm?.name ?? ''} onChange={event => folderForm && onFolderForm({ ...folderForm, name: event.target.value })} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onFolderForm(null); } }}/><button type="button" onClick={() => onFolderForm(null)}>Cancel</button><button className="primary" type="submit" disabled={!folderForm?.name.trim()}>{folderForm?.id ? 'Save folder' : 'Create folder'}</button></form></td></tr>;
   const creatingIn = folderForm && !folderForm.id ? folderForm.parentId ?? null : undefined;
 
-  return <div className="rule-table-wrap" onDragOver={sortable ? event => { if (event.target === event.currentTarget && event.dataTransfer.types.includes(dragType)) event.preventDefault(); } : undefined}>
+  return <div className="rule-table-wrap" onDragOver={sortable ? event => { if (dragging.current && event.target === event.currentTarget && event.dataTransfer.types.includes(dragType)) event.preventDefault(); } : undefined}>
     <table className="rule-table">
       <colgroup><col className="rule-colw-name"/><col className="rule-colw-method"/><col/><col className="rule-colw-stage"/><col className="rule-colw-stage"/><col className="rule-colw-stage"/><col className="rule-colw-actions"/></colgroup>
       <thead><tr><th>Name</th><th className="rule-col-method">Method</th><th>Matching rule</th>{stages.map(([, label]) => <th key={label} className="rule-col-stage">{label}</th>)}<th aria-label="Actions"/></tr></thead>
@@ -98,13 +112,16 @@ export default function RuleTable({ rows, folders, searching, emptyMessage, fold
         <button role="menuitem" onClick={() => { onAddRule(menu.row.id); close(); }}><Plus size={13}/>Add rule here</button>
         <button role="menuitem" onClick={() => { if (menu.row.type === 'folder' && !menu.row.open) onExpand(menu.row.item, true); onFolderForm({ parentId: menu.row.id, name: '' }); close(); }}><FolderPlus size={13}/>New folder inside…</button>
         <button role="menuitem" onClick={() => { onFolderForm({ id: menu.row.id, name: (menu.row.item as TableFolder).name }); close(); }}><Pencil size={13}/>Rename…</button>
-      </> : <button role="menuitem" onClick={() => { onEdit(menu.row.item as TableRule); close(); }}><Pencil size={13}/>Edit…</button>}
+      </> : <>
+        <button role="menuitem" onClick={() => { onEdit(menu.row.item as TableRule); close(); }}><Pencil size={13}/>Edit…</button>
+        {onShare && <button role="menuitem" onClick={() => { close(); onShare(menu.row.item as TableRule); }}><Share2 size={13}/>Share…</button>}
+      </>}
       <button role="menuitem" aria-haspopup="menu" aria-expanded={moving} onClick={() => setMoving(!moving)}><Folder size={13}/>Move to<span aria-hidden="true">{moving ? '▾' : '▸'}</span></button>
       {moving && <div className="rule-menu-sub" role="group" aria-label="Destinations">
         <button role="menuitemradio" aria-checked={menu.row.parentId === null} onClick={() => { onPlace({ type: menu.row.type, id: menu.row.id }, { type: 'folder', id: '' }, 'inside'); close(); }}><span>Top level</span>{menu.row.parentId === null && <span aria-hidden="true">✓</span>}</button>
         {folders.filter(folder => !(menu.row.type === 'folder' && folder.id === menu.row.id)).map(folder => <button key={folder.id} role="menuitemradio" aria-checked={menu.row.parentId === folder.id} onClick={() => { onPlace({ type: menu.row.type, id: menu.row.id }, { type: 'folder', id: folder.id }, 'inside'); close(); }}><span title={folderPath(folders, folder.id)}>{folderPath(folders, folder.id)}</span>{menu.row.parentId === folder.id && <span aria-hidden="true">✓</span>}</button>)}
       </div>}
-      {sortable && <><button role="menuitem" onClick={() => { onStep({ type: menu.row.type, id: menu.row.id }, -1); close(); }}>Move up<span aria-hidden="true">⌥↑</span></button><button role="menuitem" onClick={() => { onStep({ type: menu.row.type, id: menu.row.id }, 1); close(); }}>Move down<span aria-hidden="true">⌥↓</span></button></>}
+      {sortable && <><button role="menuitem" onClick={() => { onStep({ type: menu.row.type, id: menu.row.id }, -1); close(); }}><ArrowUp size={13}/>Move up<span aria-hidden="true">⌥↑</span></button><button role="menuitem" onClick={() => { onStep({ type: menu.row.type, id: menu.row.id }, 1); close(); }}><ArrowDown size={13}/>Move down<span aria-hidden="true">⌥↓</span></button></>}
       {menu.row.type === 'folder' ? <button role="menuitem" className="error-text" onClick={() => { onDeleteFolder(menu.row.item as TableFolder); close(); }}><Trash2 size={13}/>Delete folder…</button> : <button role="menuitem" className="error-text" onClick={() => { onDeleteRule(menu.row.item as TableRule); close(); }}><Trash2 size={13}/>Delete rule</button>}
     </PopupMenu>}
   </div>;

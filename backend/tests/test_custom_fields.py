@@ -708,6 +708,22 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await anonymous.close()
 
+    async def test_scripted_fields_publish_display_values_only(self):
+        self.service.save(capture())
+        self.service.productivity = validate(config(field("name", "$.name", script="function onCustomField() {}")))
+        self.service.invalidate_fields()
+        record = self.service.records["capture"]
+        self.assertEqual(evaluate(self.service, record)[0]["values"], [])
+        with patch.object(custom_fields, "script_result", return_value={
+            **custom_fields.extract(self.service, record)[0], "values": ["ANN"],
+        }) as transform:
+            await self.settle()
+            response = await self.client.get("/api/records/capture/fields")
+            self.assertEqual((await response.json())["fields"][0]["values"], ["ANN"])
+            self.assertEqual(self.service.state_rows()[0][0]["fields"][0]["values"], ["ANN"])
+            self.assertEqual(json.loads(record["response"]["body"])["name"], "Ann")
+            transform.assert_awaited_once()
+
     async def test_productivity_put_clears_full_cache(self):
         self.service.save(capture())
         current = await (await self.client.get("/api/productivity")).json()

@@ -54,7 +54,7 @@ The script asks where to install Streamglass:
 - the current folder;
 - or a folder you type.
 
-It defaults to the folder where Streamglass is already installed. It downloads the latest release and checks it against the release's `SHA256SUMS.txt`. It then quits a running Streamglass, replaces the app in that folder and opens the new copy.
+It defaults to the folder where Streamglass is already installed. It downloads the latest release and checks it against the release's `SHA256SUMS.txt`. The checksum detects download corruption, but does not authenticate the release: an attacker who can replace both files can replace the checksum too. Set `STREAMGLASS_SHA256` to a digest obtained independently for the target zip to require a pinned match. The installer then quits a running Streamglass, replaces the app in that folder and opens the new copy.
 
 To update, run the same command and pick the same folder. If that version is already installed, it just opens the app. Releases are unsigned, so the script removes the macOS quarantine flag, which lets the app open without a Gatekeeper prompt. Only run it if you trust this repository's releases.
 
@@ -65,9 +65,9 @@ Optional environment variables:
 
 ## Start capturing
 
-Open Streamglass and choose **Connect device**. For Mac traffic, enable Mac capture; for HTTPS content, trust the local certificate and add the destination domains to the TLS allowlist. For a booted iOS simulator, **Prepare simulator capture** combines the setup steps. See [device setup](docs/DEVICES.md) for Android, physical iOS, certificate trust, managed Macs, and proxy restoration.
+Open Streamglass and choose **Connect a device** to open its setup window. On **This Mac**, enable capture, check certificate trust, and add the destination domains to the TLS allowlist for HTTPS content. For a booted iOS simulator, use **iOS → Simulator → Connect**. Settings also opens in its own window, with MCP configuration under **Agent (MCP)**. See [device setup](docs/DEVICES.md) for Android, physical iOS, managed Macs, and proxy restoration.
 
-For a first local inspection, start the proxy, configure a client to use the address shown in **Connect device**, and send a request to a test endpoint you control. Select its row to inspect the request and response. If the row is an encrypted HTTPS destination, complete certificate trust and allowlist setup, then reconnect and retry the request. To inspect an SSE stream, open its **SSE** tab; events appear as they arrive. When finished, turn off Mac capture if enabled and use the app's restoration controls before removing a development profile.
+For a first local inspection, start the proxy, configure a client to use the address shown in **Connect a device**, and send a request to a test endpoint you control. Select its row to inspect the request and response. If the row is an encrypted HTTPS destination, complete certificate trust and allowlist setup, then reconnect and retry the request. To inspect an SSE stream, open its **SSE** tab; events appear as they arrive. When finished, turn off Mac capture if enabled and use the app's restoration controls before removing a development profile.
 
 The proxy listens on `127.0.0.1` and MCP is off in a new installation. To connect a phone or another device, turn on **Allow devices on the local network** in Settings → Proxy; each device then has to be approved in the app, and devices cannot reach this Mac's own services or private networks unless you allow it. Existing profiles keep their stored settings. See [device setup](docs/DEVICES.md#local-network-exposure) and [security](SECURITY.md).
 

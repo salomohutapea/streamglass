@@ -8,13 +8,16 @@
 .event-gap.long{color:#d9a441;font-weight:600}
 .event-gap.long::before{content:"\25B2 ";font-size:8px}
 .sse-dot{display:inline-block;flex:none;width:7px;height:7px;border-radius:50%;background:var(--muted);vertical-align:middle}
-.sse-dot.sse-live{background:var(--q-get);box-shadow:0 0 0 0 color-mix(in srgb,var(--q-get) 60%,transparent);animation:sse-pulse 1.6s ease-out infinite}
+/* The pulse ring is a scaled, fading pseudo-element: transform and opacity run on the compositor, so a live stream
+   doesn't repaint the table every frame as an animated box-shadow did. Scale 17/7 matches the old 5px spread. */
+.sse-dot.sse-live{position:relative;isolation:isolate;background:var(--q-get)}
+.sse-dot.sse-live::after{content:"";position:absolute;inset:0;z-index:-1;border-radius:50%;background:color-mix(in srgb,var(--q-get) 60%,transparent);opacity:0;animation:sse-pulse 1.6s ease-out infinite}
 .sse-dot.sse-pending{background:transparent;border:1.5px solid var(--muted)}
 .sse-dot.sse-done{background:var(--muted)}
 .sse-dot.sse-warn{background:var(--q-warn)}
 .sse-dot.sse-bad{background:var(--danger)}
-@keyframes sse-pulse{70%{box-shadow:0 0 0 5px transparent}100%{box-shadow:0 0 0 0 transparent}}
-@media (prefers-reduced-motion:reduce){.sse-dot.sse-live{animation:none}}
+@keyframes sse-pulse{0%{opacity:1;transform:scale(1)}70%{opacity:0;transform:scale(2.43)}100%{opacity:0;transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){.sse-dot.sse-live::after{animation:none}}
 .sse-method .sse-dot{margin-left:5px;margin-top:-2px}
 /* SSE timeline: a status pill, a four-step track, stat tiles and the latest events. The section is a size container,
    so it reflows by its own width (a narrow right-docked inspector), not by the window's. */

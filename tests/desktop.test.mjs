@@ -80,7 +80,7 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     await brandLogo.waitFor();
     await eventually(() => brandLogo.evaluate(image => image.complete && image.naturalWidth > 0), 'Brand logo did not render');
     const bootstrap = await page.evaluate(() => window.streamglass.getBootstrap());
-    // MCP is off by default; the user enables it in Tools → Agent (MCP).
+    // MCP is off by default; the user enables it in Settings → Agent (MCP).
     assert.equal((await page.evaluate(() => window.streamglass.getMcpConnection())).running, false);
     const mcp = await page.evaluate(() => window.streamglass.setMcpEnabled(true));
     assert.equal(mcp.running, true, mcp.error);
@@ -120,12 +120,32 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     }
     await openSidebar(page);
     await page.getByRole('button', { name: '2 domains', exact: false }).waitFor();
+    // Settings opens in its own window; Agent (MCP) is one of its sections.
+    const settingsOpened = app.waitForEvent('window');
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    const domains = page.locator('[data-domain-row]');
-    assert.equal((await page.evaluate(() => window.streamglass.getMcpConnection())).token, mcp.token);
+    const settings = await settingsOpened;
+    const settingsRoot = settings.getByRole('main', { name: 'Settings', exact: true });
+    const sections = settingsRoot.getByRole('navigation', { name: 'Settings sections', exact: true });
+    await sections.getByRole('button', { name: 'Proxy', pressed: true, exact: true }).waitFor();
+    assert.equal(await page.getByRole('dialog', { name: 'Settings', exact: true }).count(), 0);
+    await sections.getByRole('button', { name: 'HTTPS / TLS', exact: true }).click();
+    const domains = settings.locator('[data-domain-row]');
+    await domains.first().waitFor();
+    assert.equal((await settings.evaluate(() => window.streamglass.getMcpConnection())).token, mcp.token);
     assert.deepEqual(await domains.evaluateAll(inputs => inputs.map(input => input.value)), ['one.example', 'two.example']);
-    await page.getByRole('button', { name: 'Save settings', exact: true }).click();
-    await page.getByRole('dialog').waitFor({ state: 'hidden' });
+    await domains.first().fill('draft.example');
+    await page.evaluate(() => window.streamglass.openSettings({ section: 'agent' }));
+    await sections.getByRole('button', { name: 'Agent (MCP)', pressed: true, exact: true }).waitFor();
+    await settingsRoot.getByRole('button', { name: 'Disable MCP server', exact: true }).waitFor();
+    assert.equal(app.windows().filter(window => new URL(window.url()).searchParams.get('editor') === 'settings').length, 1);
+    await sections.getByRole('button', { name: 'HTTPS / TLS', exact: true }).click();
+    assert.equal(await domains.first().inputValue(), 'draft.example', 'Routing to another section preserves unsaved settings');
+    assert.deepEqual((await api('/api/state')).settings.tlsDomains, ['one.example', 'two.example']);
+    await domains.first().fill('one.example');
+    const settingsClosed = settings.waitForEvent('close');
+    await settingsRoot.getByRole('button', { name: 'Save settings', exact: true }).click();
+    await settingsClosed;
+    assert.equal(page.isClosed(), false, 'Closing Settings leaves the main workbench open');
     assert.deepEqual((await api('/api/state')).settings.tlsDomains, ['one.example', 'two.example']);
 
     let editorOpened = app.waitForEvent('window');
@@ -143,6 +163,12 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(proxyPort)]);
     editor = await editorOpened;
     await editor.getByRole('button', { name: 'Add rule', exact: true }).click();
     await editor.getByRole('textbox', { name: 'Name', exact: true }).fill('Pause binary');
+    const pauseStages = editor.getByRole('group', { name: 'Pause at', exact: true });
+    assert.equal(await pauseStages.getByRole('checkbox', { name: 'Request', exact: true }).isChecked(), true);
+    const responseStage = pauseStages.getByRole('checkbox', { name: 'Response', exact: true });
+    assert.equal(await responseStage.isChecked(), true, 'New breakpoints pause on responses by default');
+    // This round trip edits just the request. A later scenario exercises response and event pauses.
+    await responseStage.uncheck();
     await editor.getByRole('textbox', { name: 'URL wildcard', exact: false }).fill(`http://127.0.0.1:${fixturePort}/*`);
     await editor.getByRole('button', { name: 'Save rule', exact: true }).click();
     await editor.getByRole('button', { name: 'Add rule', exact: true }).waitFor();

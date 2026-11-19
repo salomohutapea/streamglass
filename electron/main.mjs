@@ -1,7 +1,8 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, protocol, session, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, net, powerMonitor, protocol, session, shell } from 'electron';
 import { spawn } from 'node:child_process';
-import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { createServer, isIP } from 'node:net';
 import { hostname, networkInterfaces } from 'node:os';
 import { lookupService } from 'node:dns/promises';
@@ -9,21 +10,23 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startScriptService } from './script-service.mjs';
 import { createUpdateChecker, releasesPrefix } from './updater.mjs';
-import { createDeviceService } from './devices.mjs';
+import { createDeviceService, findAdb } from './devices.mjs';
 import { certificateFingerprint, createSetupHandler, createSetupSite, defaultSetupPort, parsePublicCertificate } from './setup-site.mjs';
 import { createApplicationMenu } from './menu.mjs';
 import { startMcpServer } from './mcp-server.mjs';
-import { approveRedirects, loadMcpConfig, saveMcpConfig } from './mcp-config.mjs';
+import { loadMcpConfig, saveMcpConfig } from './mcp-config.mjs';
 import { createApplicationResolver } from './applications.mjs';
 import { exportSession, importSession } from './export-session.mjs';
 import { readMapLocalFile } from './map-local-file.mjs';
 import { createWorkspaceService } from './workspaces.mjs';
 import { validateToolsInput, validateToolsAction } from './tools-window.mjs';
+import { validateSettingsInput, validateSetupInput, validateDeviceFilter } from './utility-windows.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 app.setName('Streamglass');
 if (process.env.STREAMGLASS_DATA_DIR) app.setPath('userData', path.resolve(process.env.STREAMGLASS_DATA_DIR));
 const token = randomBytes(32).toString('hex');
+const mcpApprovalKey = randomBytes(32).toString('hex');
 const windows = new Set();
 const editorWindows = new Map();
 const inspectorWindows = new Map();
@@ -58,7 +61,7 @@ let pendingTimer;
 let mcpService;
 let startupReady = false;
 let setupSiteTimer, setupSiteClose;
-let toolsWindow, toolsOwner, mainWindow;
+let toolsWindow, toolsOwner, mainWindow, settingsWindow, setupWindow;
 let toolsContext = {section:'Sessions'};
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -87,6 +90,7 @@ function windowURL(recordId, editor) {
   if (recordId) url.searchParams.set('record', recordId);
   if (editor) {
     url.searchParams.set('editor', editor.type);
+    for (const [key, value] of Object.entries(editor.params ?? {})) if (value) url.searchParams.set(key, value);
     if (editor.type === 'paused') { if (editor.token) url.hash = `gate=${editor.token}`; }
     else if (editor.recordId) url.searchParams.set('record', editor.recordId);
   }
@@ -96,8 +100,8 @@ function windowURL(recordId, editor) {
 function createWindow(recordId, editor) {
   const auxiliary = Boolean(editor || recordId);
   const win = new BrowserWindow({
-    width: editor ? editor.type === 'paused' ? 1180 : 1040 : recordId ? 1100 : 1480,
-    height: editor ? editor.type === 'breakpoints' ? 760 : 820 : 940,
+    width: editor ? editor.size?.[0] ?? (editor.type === 'paused' ? 1180 : 1040) : recordId ? 1100 : 1480,
+    height: editor ? editor.size?.[1] ?? (editor.type === 'breakpoints' ? 760 : 820) : 940,
     minWidth: editor ? 600 : 900, minHeight: editor ? 400 : 600,
     title: 'Streamglass', backgroundColor: '#17191e',
     fullscreenable: !auxiliary,
@@ -148,6 +152,44 @@ function openToolsWindow(source, input) {
     toolsWindow.on('closed', () => {toolsWindow = undefined; toolsOwner = undefined;});
   } else toolsWindow.webContents.send('menu-action', 'tools-context', context);
   if (focus) {toolsWindow.restore(); toolsWindow.focus();}
+  return true;
+}
+
+// Settings and Connect a device each live in one window of their own: opening again focuses it and, when the caller
+// names a section or platform, sends that to the open window instead of replacing its state.
+function openUtilityWindow(type, size, params, current, onOpen) {
+  if (current && !current.isDestroyed()) {
+    onOpen(current);
+    current.restore(); current.focus();
+    return { win: current, created: false };
+  }
+  if (windows.size >= 8) throw new Error('Close a window before opening another');
+  const win = createWindow(undefined, { type, size, params });
+  return { win, created: true };
+}
+
+// Other windows hold back their own device-approval prompt while one of these shows the same requests inline.
+function announceUtilityWindow(kind, open) {
+  for (const other of windows) if (!other.isDestroyed() && other.webContents.getURL().indexOf('editor=') === -1) other.webContents.send('menu-action', 'utility-window-state', { kind, open });
+}
+
+function openSettingsWindow(input) {
+  const { section } = validateSettingsInput(input);
+  const { win, created } = openUtilityWindow('settings', [860, 700], { section }, settingsWindow, existing => existing.webContents.send('menu-action', 'settings-section', { section: section ?? 'proxy' }));
+  if (created) {
+    settingsWindow = win; announceUtilityWindow('settings', true);
+    win.on('closed', () => { if (settingsWindow === win) settingsWindow = undefined; announceUtilityWindow('settings', false); });
+  }
+  return true;
+}
+
+function openSetupWindow(input, onClosed) {
+  const { platform } = validateSetupInput(input);
+  const { win, created } = openUtilityWindow('setup', [860, 760], { platform }, setupWindow, existing => existing.webContents.send('menu-action', 'open-device-setup', platform ? { platform } : undefined));
+  if (created) {
+    setupWindow = win; announceUtilityWindow('setup', true);
+    win.on('closed', () => { if (setupWindow === win) setupWindow = undefined; announceUtilityWindow('setup', false); onClosed?.(); });
+  }
   return true;
 }
 
@@ -246,8 +288,10 @@ const approvalList = () => [...approvals.values()].map(item => item.request);
 function notifyApprovals() {
   for (const win of windows) if (!win.isDestroyed()) win.webContents.send('approvals-changed', approvalList());
 }
-function requestApproval({ kind, title, detail = [] }) {
+function requestApproval({ kind, title, detail = [], source }) {
   if (shuttingDown || !startupReady || approvals.size >= 8) return Promise.resolve(false);
+  if (detail.length > 40 || detail.some(line => String(line).length > 8192)
+      || (source !== undefined && (typeof source !== 'string' || source.length > 100000))) return Promise.resolve(false);
   const id = randomUUID();
   return new Promise(resolve => {
     const finish = allowed => {
@@ -258,7 +302,7 @@ function requestApproval({ kind, title, detail = [] }) {
     };
     const timer = setTimeout(() => finish(false), APPROVAL_MS);
     approvals.set(id, { finish, request: { id, kind: String(kind).slice(0, 32), title: String(title).slice(0, 200),
-      detail: detail.slice(0, 40).map(line => String(line).slice(0, 2000)), requestedAt: Date.now(), expiresAt: Date.now() + APPROVAL_MS } });
+      detail: detail.map(String), source, requestedAt: Date.now(), expiresAt: Date.now() + APPROVAL_MS } });
     const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
     notifyApprovals();
     win.show();
@@ -326,16 +370,18 @@ async function start() {
     baseUrl: `http://127.0.0.1:${port}`, token,
     lanAddresses: lanAddresses(),
   };
-  const applications = createApplicationResolver({ getFileIcon: (file, options) => app.getFileIcon(file, options) });
+  const applications = createApplicationResolver({ getFileIcon: (file, options) => app.getFileIcon(file, options), findAdb });
   scriptService = await startScriptService(token, {
-    resolveApplication: async connection => ({ clientIsLocal: applications.isLocalHost(connection.clientHost), application: await applications.resolve(connection) }),
+    // Loopback clients (simulators, emulators, adb reverse) also get a device identity from the socket's owning process.
+    resolveApplication: async connection => ({ clientIsLocal: applications.isLocalHost(connection.clientHost), ...(await applications.resolveClient(connection)) }),
     resolveApplicationIcon: id => applications.resolveIcon(id),
   });
   const executable = app.isPackaged ? path.join(process.resourcesPath, 'engine/streamglass-engine') : process.env.STREAMGLASS_PYTHON || path.join(root, '.venv/bin/python');
   const args = [...(app.isPackaged ? [] : ['-m', 'backend']), '--port', String(port), '--data-dir', dataDir];
   engine = spawn(executable, args, {
     cwd: app.isPackaged ? process.resourcesPath : root, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, STREAMGLASS_TOKEN: token, STREAMGLASS_SCRIPT_URL: scriptService.url, PYTHONUNBUFFERED: '1' },
+    env: { ...process.env, STREAMGLASS_TOKEN: token, STREAMGLASS_SCRIPT_URL: scriptService.url,
+      STREAMGLASS_MCP_APPROVAL_KEY: mcpApprovalKey, STREAMGLASS_ALLOW_DEV_ORIGIN: dev ? '1' : '0', PYTHONUNBUFFERED: '1' },
   });
   engine.stderr.on('data', chunk => { startupError = (startupError + chunk.toString()).slice(-6000); });
   // Drain stdout without persisting traffic or secrets in a second log.
@@ -382,20 +428,18 @@ async function start() {
     mcpConfigOperation = operation.catch(() => {});
     return operation;
   };
-  const confirmMcp = async request => {
-    const allowed = await requestApproval(request);
-    // Approved redirect servers are remembered; the user can remove them in Tools → Agent (MCP).
-    if (allowed && request.targets?.length) await updateMcpConfig(config => approveRedirects(config, request.targets));
-    return allowed;
-  };
-  const isApprovedRedirect = target => Boolean(mcpConfig?.approvedRedirects.includes(target));
+  let mcpGeneration = 0;
   async function enableMcp(enabled) {
     if (typeof enabled !== 'boolean') throw new Error('Expected boolean');
     if (!mcpConfig) throw new Error(mcpError || 'MCP configuration unavailable');
+    const generation = ++mcpGeneration;
+    for (const item of approvals.values()) item.finish(false);
     if (mcpService) { await mcpService.close(); mcpService = undefined; }
     mcpError = '';
     try {
-      if (enabled) mcpService = await startMcpServer({ port: mcpPort, authToken: mcpConfig.token, bootstrap, workspaces, confirm: confirmMcp, isApproved: isApprovedRedirect });
+      if (enabled) mcpService = await startMcpServer({ port: mcpPort, authToken: mcpConfig.token, bootstrap, workspaces,
+        confirm: async request => generation === mcpGeneration && await requestApproval(request) && generation === mcpGeneration,
+        signApproval: stamp => generation === mcpGeneration ? createHmac('sha256', mcpApprovalKey).update(stamp).digest('hex') : undefined });
       await updateMcpConfig(config => ({ ...config, enabled }));
     } catch (error) { mcpError = error.message; }
     return mcpConnection();
@@ -404,11 +448,18 @@ async function start() {
   catch (error) { mcpError = error.message; }
   let mcpOperation = Promise.resolve();
   handle('mcp-connection', () => mcpConnection());
-  handle('mcp-enabled', (_event, enabled) => {
-    const operation = mcpOperation.then(() => enableMcp(enabled));
+  const queueMcp = action => {
+    const operation = mcpOperation.then(action);
     mcpOperation = operation.catch(() => {});
     return operation;
-  });
+  };
+  handle('mcp-enabled', (_event, enabled) => queueMcp(() => enableMcp(enabled)));
+  handle('mcp-rotate-token', () => queueMcp(async () => {
+    if (!mcpConfig) throw new Error(mcpError || 'MCP configuration unavailable');
+    const enabled = mcpConfig.enabled;
+    await updateMcpConfig(config => ({ ...config, token: randomBytes(32).toString('hex') }));
+    return enableMcp(enabled);
+  }));
   handle('mcp-forget-redirect', async (_event, target) => {
     if (typeof target !== 'string' || target.length > 300) throw new Error('Invalid server');
     await updateMcpConfig(config => ({ ...config, approvedRedirects: config.approvedRedirects.filter(item => item !== target) }));
@@ -432,17 +483,25 @@ async function start() {
       if (checkingQuit && devices) return devices.service;
       devices = { port: settings.proxyPort, service: createDeviceService({
         dataDir, certificatePath: path.join(dataDir, 'mitmproxy/mitmproxy-ca-cert.pem'), proxyPort: settings.proxyPort,
-        getProxyHost: () => lanAddresses()[0] || '127.0.0.1',
+        getLanInfo: async () => {
+          const response = await fetch(`${bootstrap.baseUrl}/api/state`, { headers: { Authorization: `Bearer ${token}` } });
+          if (!response.ok) throw new Error('Cannot read LAN settings');
+          const { settings: current } = await response.json();
+          const address = lanAddresses()[0] || null;
+          return { enabled: current.listenHost === '0.0.0.0', address, setupUrl: address && current.listenHost === '0.0.0.0' ? `http://${address}:${Number(process.env.STREAMGLASS_SETUP_PORT) || defaultSetupPort(current.proxyPort)}` : null };
+        },
+        emitInventory: inventory => { for (const win of windows) if (!win.isDestroyed()) win.webContents.send('device-inventory', inventory); },
         ensureProxyListening: async () => {
           const response = await fetch(`${bootstrap.baseUrl}/api/settings`, { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ proxyEnabled: true }) });
           if (!response.ok) throw new Error('Cannot start proxy listener. Check Proxy settings before enabling Mac monitoring.');
         },
       }) };
-      if (replacing) await devices.service.restoreMonitor({ startListener: false }).catch(() => {});
+      if (replacing) { await devices.service.setup.start(); await devices.service.restoreMonitor({ startListener: false }).catch(() => {}); }
     }
     return devices.service;
   };
   const initialDevices = await deviceServiceForCurrentPort();
+  await initialDevices.setup.start();
   let monitorRestoreError = '';
   try { await initialDevices.restoreMonitor(); } catch (error) { monitorRestoreError = error.message; }
   handle('bootstrap', () => ({ ...bootstrap, lanAddresses: lanAddresses() }));
@@ -482,6 +541,18 @@ async function start() {
   setupSiteTimer.unref?.();
   setupSiteClose = () => { clearInterval(setupSiteTimer); return setupSite.close(); };
   void syncSetupSite();
+  // After sleep, keep-alive connections through the proxy can be half-open, so clients wait on sockets that no
+  // longer reach a server. On wake the engine drops them (paused breakpoints stay) and restarts a dead listener,
+  // and the Mac proxy is reapplied, as an app restart would. A stopped proxy stays stopped.
+  let wakeRecovery;
+  const recoverAfterWake = () => wakeRecovery ??= (async () => {
+    try {
+      await fetch(`${bootstrap.baseUrl}/api/wake`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000) });
+      if (devices && !checkingQuit && !shuttingDown) await devices.service.reconcileMonitor(true);
+    } catch { /* The engine reports listener failures in its state; the monitor records its own errors. */ }
+    finally { wakeRecovery = undefined; }
+  })();
+  powerMonitor.on('resume', () => { if (!shuttingDown) void recoverAfterWake(); });
   handle('setup-site', async (_event, input) => {
     if (input?.enableLan === true) {
       const response = await fetch(`${bootstrap.baseUrl}/api/settings`, { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ listenHost: '0.0.0.0' }) });
@@ -524,6 +595,19 @@ async function start() {
     win.on('closed', () => { if (inspectorWindows.get(id) === win) inspectorWindows.delete(id); });
   });
   handle('open-editor', (_event, input) => openEditor(input));
+  handle('open-settings', (_event, input) => openSettingsWindow(input));
+  handle('open-device-setup', (_event, input) => openSetupWindow(input, () => {
+    // Closing the window ends the inventory watch even if the page never got to clean up.
+    if (shuttingDown) return;
+    void deviceServiceForCurrentPort().then(service => service.setup.watch(false)).catch(() => {});
+  }));
+  // The Connect a device window asks the main window to show one device's traffic.
+  handle('show-device-traffic', (_event, id) => {
+    const deviceId = validateDeviceFilter(id);
+    const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow();
+    target.webContents.send('menu-action', 'filter-device', { deviceId });
+    target.restore(); target.focus();
+  });
   handle('open-tools', (event, input) => openToolsWindow(BrowserWindow.fromWebContents(event.sender), input));
   handle('tools-context', event => {
     if (BrowserWindow.fromWebContents(event.sender) !== toolsWindow) throw new Error('Tools context is only available in the Tools window');
@@ -542,6 +626,97 @@ async function start() {
     });
     if (canceled || !filePaths.length) return null;
     return readMapLocalFile(filePaths[0]);
+  });
+  function ruleEditorKind(owner) {
+    const kind = ['breakpoints', 'scripts'].find(value => editorWindows.get(`${value}:`) === owner);
+    if (!kind) throw new Error('This action requires a rules window');
+    return kind;
+  }
+  const ruleImportNotices = new WeakMap();
+  let ruleImportNoticeId = 0;
+  const ruleWindowTitle = kind => kind === 'scripts' ? 'JavaScript rules' : 'Breakpoint rules';
+
+  handle('rule-import-notice', (event, dismissId) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    ruleEditorKind(owner);
+    const notice = ruleImportNotices.get(owner);
+    if (notice && notice.id === dismissId) ruleImportNotices.delete(owner);
+    return ruleImportNotices.get(owner) ?? null;
+  });
+
+  handle('report-rule-import', async (event, result) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const source = owner === mainWindow ? null : ruleEditorKind(owner);
+    if (!result || !['breakpoints', 'scripts'].every(kind => Number.isInteger(result[kind]) && result[kind] >= 0)
+        || result.breakpoints + result.scripts > 500) throw new Error('Invalid imported rule counts');
+    const kinds = source === 'scripts' ? ['scripts', 'breakpoints'] : ['breakpoints', 'scripts'];
+    for (const kind of kinds) {
+      if (!result[kind]) continue;
+      if (kind !== source) openEditor({ type: kind });
+      const destination = editorWindows.get(`${kind}:`);
+      const notice = { id: ++ruleImportNoticeId, count: result[kind] };
+      // The renderer also reads this snapshot on mount, after subscribing to updates.
+      ruleImportNotices.set(destination, notice);
+      destination.webContents.send('rule-import-notice', notice);
+      if (source && kind !== source) {
+        await dialog.showMessageBox(destination, {
+          type: 'info', message: `Rules imported into ${ruleWindowTitle(kind)}`,
+          detail: 'Imported rules are disabled. Review them before enabling.',
+        });
+      }
+    }
+  });
+
+  handle('show-other-rule-kind', async event => {
+    const source = ruleEditorKind(BrowserWindow.fromWebContents(event.sender));
+    const type = source === 'scripts' ? 'breakpoints' : 'scripts';
+    openEditor({ type });
+    await dialog.showMessageBox(editorWindows.get(`${type}:`), {
+      type: 'info', message: `This rule belongs in ${ruleWindowTitle(type)}`,
+      detail: 'The rule stays in its current folder.',
+    });
+  });
+  handle('import-rule-files', async event => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    ruleEditorKind(owner);
+    const { canceled, filePaths } = await dialog.showOpenDialog(owner, {
+      title: 'Import Streamglass rules', properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Streamglass rules', extensions: ['sgrules', 'json'] }],
+    });
+    if (canceled || !filePaths.length) return null;
+    if (filePaths.length > 500) throw new Error('Choose at most 500 rule files');
+    let remaining = 16 * 1024 * 1024;
+    const bundles = [];
+    for (const filePath of filePaths) {
+      const file = await open(filePath, constants.O_RDONLY | constants.O_NONBLOCK);
+      try {
+        const stat = await file.stat();
+        if (!stat.isFile() || stat.size > remaining) throw new Error('Choose regular files totaling at most 16 MiB');
+        const buffer = Buffer.alloc(stat.size + 1);
+        let size = 0;
+        while (size < buffer.length) {
+          const { bytesRead } = await file.read(buffer, size, buffer.length - size, null);
+          if (!bytesRead) break;
+          size += bytesRead;
+        }
+        if (size !== stat.size) throw new Error('A rule file changed while it was being read. Choose the files again.');
+        remaining -= size;
+        try {
+          const json = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, size));
+          bundles.push(JSON.parse(json));
+        } catch {
+          throw new Error(`Invalid JSON in "${path.basename(filePath)}"`);
+        }
+      } finally { await file.close(); }
+    }
+    const response = await fetch(`${bootstrap.baseUrl}/api/rules/import`, {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000),
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(bundles),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result) throw new Error(result?.error?.message || 'Could not import rules');
+    return result;
   });
   handle('export-file', async (event, file) => {
     if (!file || typeof file.name !== 'string' || typeof file.content !== 'string' || Buffer.byteLength(file.content) > 64 * 1024 * 1024) throw new Error('Invalid export');
@@ -581,6 +756,17 @@ async function start() {
     const status = await (options?.networkOnly === true ? service.monitorStatus() : service.list());
     return { ...status, monitorRestoreError: status.monitorError ?? monitorRestoreError };
   });
+  const setupMethods = {
+    'device-inventory': 'inventory', 'watch-devices': 'watch', 'connect-device': 'connect',
+    'disconnect-device': 'disconnect', 'revert-all-devices': 'revertAll', 'set-device-options': 'setOptions',
+    'confirm-user-cert': 'confirm', 'reopen-cert-installer': 'reopen',
+    'start-adb-pairing': 'startPairing', 'cancel-adb-pairing': 'cancelPairing',
+  };
+  for (const [channel, method] of Object.entries(setupMethods)) handle(channel, async (_event, input) => {
+    if (checkingQuit) throw new Error('Streamglass is preparing to quit');
+    const service = await deviceServiceForCurrentPort();
+    return service.setup[method](input);
+  });
   handle('device-action', async (event, input) => {
     if (checkingQuit) throw new Error('Streamglass is preparing to quit. Try again after keeping the app open.');
     const descriptions = {
@@ -589,7 +775,7 @@ async function start() {
       'simulator-certificates': 'Trust the CA for this Mac user and install it in the selected simulator without changing network proxy settings',
       'simulator-install-ca': 'Install the Streamglass CA in the selected simulator',
       'android-install-ca': 'Copy the public CA to the selected Android device and open Settings',
-      'android-enable-proxy': 'Route the selected Android device through Streamglass',
+      'android-enable-proxy': 'Prepare Android capture. For a phone, set the proxy in its Wi-Fi settings.',
       'android-restore-proxy': 'Restore the selected Android device’s saved proxy settings',
       'android-reverse': 'Forward the proxy port (and optionally Metro 8081) from the selected Android device to this Mac with adb reverse',
       'android-reverse-remove': 'Remove the adb reverse forwarding for the selected Android device',
@@ -597,12 +783,6 @@ async function start() {
       'mac-restore-proxy': 'Disable Mac monitoring and restore every saved network proxy',
     };
     if (!input || !Object.hasOwn(descriptions, input.action)) throw new Error('Unknown setup action');
-    if (input.action === 'android-enable-proxy') {
-      const response = await fetch(`${bootstrap.baseUrl}/api/state`, { headers: { Authorization: `Bearer ${token}` } });
-      if (!response.ok) throw new Error('Cannot read proxy settings');
-      const { settings } = await response.json();
-      if (!settings.proxyEnabled || settings.listenHost !== '0.0.0.0' || !lanAddresses().length) throw new Error('Start the proxy and enable LAN access in Settings before configuring Android.');
-    }
     const confirmation = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
       type: 'question', buttons: ['Cancel', 'Continue'], defaultId: 0, cancelId: 0,
       message: descriptions[input.action], detail: `${input.target || 'This Mac'}${input.networkTarget ? ` · ${input.networkTarget}` : ''}. Certificate trust may request your login credentials. System proxy changes require permission; a standard account will be directed to IT or app-specific proxy setup without an administrator prompt. Mac monitoring is remembered across restarts; capture pause is unchanged.`,
@@ -646,15 +826,23 @@ app.on('before-quit', event => {
   event.preventDefault();
   if (checkingQuit) return;
   checkingQuit = true;
+  // Hide windows at once so quitting feels immediate; proxy restoration and engine shutdown finish behind them.
+  const hidden = BrowserWindow.getAllWindows().filter(win => !win.isDestroyed() && win.isVisible());
+  for (const win of hidden) win.hide();
+  if (process.platform === 'darwin' && !background) app.hide();
   void (async () => {
     let cleanup = {remainingProxyTargets:[], errors:[]};
-    try { if (devices) cleanup = await devices.service.prepareQuit(); }
+    try { if (devices) cleanup = await Promise.race([devices.service.prepareQuit(), new Promise(resolve => { const timeout = setTimeout(() => resolve({ remainingProxyTargets: [], errors: ['Proxy restoration timed out; saved device settings are retained for retry.'] }), 12000); timeout.unref?.(); })]); }
     catch (error) { cleanup.errors = [error.message]; }
     if (cleanup.remainingProxyTargets.length || cleanup.errors.length) {
-      const macProblem = cleanup.errors.length || cleanup.remainingProxyTargets.some(target => target.startsWith('mac:'));
+      if (process.platform === 'darwin' && !background) app.show();
+      for (const win of hidden) if (!win.isDestroyed()) background ? win.showInactive() : win.show();
+      const macProblem = cleanup.remainingProxyTargets.some(target => target.startsWith('mac:'));
+      const deviceProblem = cleanup.remainingProxyTargets.some(target => target.startsWith('android:'));
       const result = await dialog.showMessageBox({ type: 'warning', buttons: ['Keep Open', 'Quit Anyway'], defaultId: 0, cancelId: 0,
-        message: macProblem ? 'Mac proxy settings could not be fully restored' : 'Some devices still use this proxy',
-        detail: [macProblem ? 'Your Mac may still point to Streamglass. Keep the app open and restore its proxy in Device Setup or macOS Network settings.' : 'Mac proxy settings were restored. Other configured devices may still use Streamglass; restore their proxy in Device Setup or on the device before quitting.', ...cleanup.errors].join('\n') });
+        message: macProblem ? 'Mac proxy settings could not be fully restored' : deviceProblem ? 'Some Android settings could not be restored' : 'Proxy restoration could not be confirmed',
+        detail: [macProblem ? 'Your Mac may still point to Streamglass. Keep the app open and restore its proxy in Device Setup or macOS Network settings.'
+          : deviceProblem ? 'Restore the device’s proxy in Device Setup or on the device before quitting.' : 'Saved settings are kept for retry.', ...cleanup.errors].join('\n') });
       if (result.response !== 1) {
         checkingQuit = false;
         // The device service exposes any resume failure through monitorError.
@@ -665,14 +853,16 @@ app.on('before-quit', event => {
     }
     shuttingDown = true;
     clearTimeout(pendingTimer);
-    await mcpService?.close();
-    await setupSiteClose?.();
     scriptService?.close();
-    if (engine && engine.exitCode === null) {
+    // These are independent, so stop them together rather than one after another.
+    const stopEngine = async () => {
+      if (!engine || engine.exitCode !== null || engine.signalCode !== null) return;
+      const exited = new Promise(resolve => engine.once('exit', resolve));
       engine.kill('SIGTERM');
-      await Promise.race([new Promise(resolve => engine.once('exit', resolve)), new Promise(resolve => setTimeout(resolve, 2500))]);
+      await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 2500))]);
       if (engine.exitCode === null) engine.kill('SIGKILL');
-    }
+    };
+    await Promise.all([mcpService?.close(), setupSiteClose?.(), stopEngine()].map(step => Promise.resolve(step).catch(() => {})));
     app.quit();
   })();
 });

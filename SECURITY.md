@@ -11,7 +11,7 @@ A new installation starts with the narrowest settings:
 | Setting | Default | Turn on in |
 | --- | --- | --- |
 | LAN access (devices on the network using the proxy) | Off: the proxy listens on `127.0.0.1` only | Settings → Proxy |
-| AI access (MCP server) | Off | Tools → Agent (MCP) |
+| AI access (MCP server) | Off | Settings → Agent (MCP) |
 | HTTPS inspection | No domains | Settings → HTTPS / TLS |
 
 Existing profiles keep their stored values. Turn LAN access and MCP off again when you finish with them.
@@ -55,12 +55,14 @@ Actions that send data elsewhere or widen what Streamglass can read wait for you
 | MCP action | Asks when |
 | --- | --- |
 | Send a request (`replay_request`, `start_replay_job`) | Every time |
-| Redirect traffic (Map Remote rules, edited breakpoint URLs) | The target server has not been approved before. Approved servers are listed in Tools → Agent (MCP), where you can remove them |
+| Redirect traffic (Map Remote rules, edited breakpoint URLs) | Each new or materially changed redirect rule and each breakpoint edit that changes the upstream server |
+| Change HTTP responses (Map Local, response Rewrite, response and SSE breakpoints) | Creating or changing a response rule that supplies headers, redirects or a body, activating such a rule, or changing a paused HTTP response or SSE event |
 | Unlock HTTPS inspection for more sites (`update_settings` `tlsDomains`) | Any domain is added |
-| Run JavaScript on traffic (`upsert_rule`) | The script is new or changed |
+| Run JavaScript on traffic (`upsert_rule`) | The script is new or changed, or its execution scope changes. The prompt shows all of the script |
+| Transform custom field values (`upsert_custom_field`, `set_productivity_preferences`) | A scripted field is added or changed. The prompt shows the script and its matching locations |
 | Load a configuration workspace | Every time |
 
-AI clients cannot add broad HTTPS patterns: `*`, `*.com`, `api.*` and other patterns without a literal domain name are refused. Patterns you type in Settings are not limited this way. Other MCP tools can still read captures, delete captures, change breakpoints, Rewrite, Block and Map Local rules, and pause or stop the proxy without a prompt. See [MCP](docs/MCP.md) for authentication and tool limits.
+MCP refuses patterns such as `*`, `*.com` and `*example.com`. Accepted TLS patterns still require approval. Desktop Settings retain their existing pattern controls. Reading and deleting captures, editing ordinary breakpoint definitions and pausing or stopping the proxy need no prompt. **Rotate token** in Settings → Agent (MCP) disconnects clients and requires them to update their configuration. See [MCP](docs/MCP.md) for authentication and tool limits.
 
 ## Certificates and system settings
 

@@ -74,6 +74,45 @@ class ProxyLifecycleTests(unittest.IsolatedAsyncioTestCase):
             occupied.close()
             await occupied.wait_closed()
 
+    async def wake(self):
+        async with self.client.post(f"http://127.0.0.1:{self.service.port}/api/wake",
+                                    headers={"Authorization": "Bearer " + self.service.token}) as response:
+            self.assertEqual(response.status, 200, await response.text())
+            return await response.json()
+
+    async def test_wake_closes_idle_client_connections_and_keeps_listener(self):
+        port = self.service.settings["proxyPort"]
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(b"GET http://example.invalid/ HTTP/1.1\r\n")  # incomplete headers keep the connection open
+        await writer.drain()
+        proxyserver = self.service.master.addons.get("proxyserver")
+        for _ in range(50):
+            if proxyserver.connections:
+                break
+            await asyncio.sleep(0.02)
+        result = await self.wake()
+        self.assertEqual(result, {"closedConnections": 1, "restartedListener": False})
+        self.assertEqual(await asyncio.wait_for(reader.read(), 5), b"")
+        writer.close()
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.close()
+        await writer.wait_closed()
+
+    async def test_wake_restarts_a_listener_that_stopped(self):
+        port = self.service.settings["proxyPort"]
+        await self.service.master.addons.get("proxyserver").servers.update([])
+        with self.assertRaises(OSError):
+            await asyncio.open_connection("127.0.0.1", port)
+        self.assertEqual(await self.wake(), {"closedConnections": 0, "restartedListener": True})
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.close()
+        await writer.wait_closed()
+
+    async def test_wake_leaves_a_stopped_proxy_stopped(self):
+        await self.settings({"proxyEnabled": False})
+        self.assertEqual(await self.wake(), {"closedConnections": 0, "restartedListener": False})
+        self.assertIsNone(self.service.master)
+
     async def test_breakpoint_gate_has_no_timeout(self):
         # Gates wait until resolved, released by pause, or cancelled with their flow; never on a timer.
         import inspect

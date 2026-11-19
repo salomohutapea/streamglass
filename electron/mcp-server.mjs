@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { troubleshootingInstructions } from './mcp-diagnostics.mjs';
 import { registerTools } from './mcp-tools.mjs';
 
 const { version } = createRequire(import.meta.url)('../package.json');
@@ -35,7 +36,7 @@ async function readBody(req) {
 }
 
 /** A dedicated local MCP listener; authToken must be independent of engine credentials. */
-export async function startMcpServer({ port = 48722, authToken, bootstrap, workspaces, confirm, isApproved }) {
+export async function startMcpServer({ port = 48722, authToken, bootstrap, workspaces, confirm, signApproval }) {
   if (typeof authToken !== 'string' || authToken.length < 32 || /[\r\n]/.test(authToken)) {
     throw new Error('MCP requires a dedicated bearer token of at least 32 characters');
   }
@@ -49,9 +50,9 @@ export async function startMcpServer({ port = 48722, authToken, bootstrap, works
     if (closing) throw Object.assign(new Error('MCP listener is shutting down'), { status: 503 });
     const session = { transport, id, lastActive: Date.now(), pending: new Set() };
     sessions.set(id, session);
-    const server = new McpServer({ name: 'streamglass', version }, { capabilities: { logging: {} } });
+    const server = new McpServer({ name: 'streamglass', version }, { capabilities: { logging: {} }, instructions: troubleshootingInstructions });
     transport.onclose = () => { sessions.delete(session.id); };
-    try { registerTools(server, { ...bootstrap, workspaces, confirm, isApproved }); await server.connect(transport); }
+    try { registerTools(server, { ...bootstrap, workspaces, confirm, signApproval }); await server.connect(transport); }
     catch (error) { sessions.delete(id); await transport.close(); throw error; }
     const receive = transport.onmessage;
     const send = transport.send.bind(transport);

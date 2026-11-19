@@ -20,7 +20,9 @@ async def run(args):
         service.discard_captures()  # captures never outlive a session; this also clears leftovers from a crash
     patch_engine(service.cancel)
     service.http = ClientSession(timeout=ClientTimeout(total=10))
-    runner = web.AppRunner(create_app(service), access_log=None)
+    mcp_approval_key = os.environ.pop("STREAMGLASS_MCP_APPROVAL_KEY", "").encode()
+    runner = web.AppRunner(create_app(service, allow_dev_origin=os.environ.get("STREAMGLASS_ALLOW_DEV_ORIGIN") == "1",
+                                    mcp_approval_key=mcp_approval_key), access_log=None)
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", args.port).start()
     try:

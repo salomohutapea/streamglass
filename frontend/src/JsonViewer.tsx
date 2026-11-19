@@ -6,11 +6,19 @@ import { ensureMonaco, MAX_EDITOR_HEIGHT, sharedEditorOptions } from './monaco-s
 import './json-viewer.css';
 
 // `onReplace` and `disabled` are accepted for source compatibility; the viewer is read-only and users edit text directly elsewhere.
+// Formatting a multi-MB body takes hundreds of ms, and switching inspector tabs remounts the viewer. The last large
+// body's formatted text is kept so returning to it skips that work; one entry bounds what stays in memory.
+let lastLarge: { value: string; prepared: ReturnType<typeof prepareJson> } | null = null;
+function prepareCached(value: unknown) {
+  if (typeof value !== 'string' || value.length < 256 * 1024) return prepareJson(value);
+  if (lastLarge?.value !== value) lastLarge = { value, prepared: prepareJson(value) };
+  return lastLarge.prepared;
+}
 type Props = { value: unknown; unavailable?: boolean; preserveFormatting?: boolean; onReplace?: (range: JsonContainer) => void; disabled?: boolean };
 export default function JsonViewer({ value, unavailable = false, preserveFormatting = false }: Props) {
   const document = useMemo(() => {
     if (unavailable) return { text: 'Body streamed to the client and not retained.', isJson: false };
-    const prepared = prepareJson(value);
+    const prepared = prepareCached(value);
     return preserveFormatting && typeof value === 'string' ? { ...prepared, text: value } : prepared;
   }, [value, unavailable, preserveFormatting]);
   const host = useRef<HTMLDivElement>(null);

@@ -45,7 +45,9 @@ GitHub Actions workflows live in `.github/workflows/` and run app verification/r
 
 **Update notifications.** Packaged builds check the latest GitHub release at launch and every six hours, and show a banner when a newer version exists; "View release" opens the release page in the browser. This is a notification, not an automatic install: Electron's `autoUpdater` (Squirrel.Mac) only installs updates signed with the same Apple Developer ID, which unsigned builds do not have. Once releases are signed and notarized, replace the notifier in `electron/updater.mjs` with `autoUpdater` or `electron-updater`. Set `STREAMGLASS_DISABLE_UPDATE_CHECK=1` to turn the check off; development runs never check.
 
-The release build is unsigned and not notarized; see the Local releases section for what users see on first launch.
+The release build is unsigned and not notarized; its checksum file is distributed alongside the artifacts and cannot independently authenticate them. Distribution authentication requires a separately trusted signing identity and verification process. See the Local releases section for what users see on first launch.
+
+The macOS packaging hook sets Electron fuses before either signature is applied. Packaged builds disable Run as Node, Node environment options and Node inspector arguments. They load the app from the integrity-checked ASAR. The hook applies an ad-hoc signature after the fuse changes. Electron-builder replaces it for Developer ID builds.
 
 ## Local releases
 
@@ -107,7 +109,9 @@ Before labeling a 1.0.0 artifact, use the [release qualification checklist](RELE
 npm run build:ui && node scripts/perf-baseline.mjs [--quick] [--skip-sse]
 ```
 
-The script seeds 1,000 synthetic captures, sends synthetic HTTP and SSE traffic through the proxy, and prints renderer, Electron and engine metrics as JSON. It sets `STREAMGLASS_BACKGROUND=1`, which works only in unpackaged builds. In that mode windows are invisible and ignore the mouse, focus requests do nothing, and there's no Dock icon. Results and the findings they test are in the [performance audit](PERFORMANCE_AUDIT.md).
+The script seeds 1,000 synthetic captures, sends synthetic HTTP and SSE traffic through the proxy, and prints renderer, Electron and engine metrics as JSON. It sets `STREAMGLASS_BACKGROUND=1`, which works only in unpackaged builds. In that mode windows are invisible and ignore the mouse, focus requests do nothing, and there's no Dock icon. Results and the findings they test are in the [performance audit](PERFORMANCE_AUDIT.md). Add `--ux` for cold start, scrolling, filter typing, large-body and Tools-window timings.
+
+For the engine alone, `.venv/bin/python scripts/perf-engine.py --out <new directory> [scenario ...]` starts the engine with a temporary profile against a synthetic loopback origin. It measures HTTP, throughput, SSE, large bodies, inspected HTTPS and management API scenarios. `--profile cprofile` records where engine time goes.
 
 ### Showcase captures
 

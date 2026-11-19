@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from bisect import bisect_left, insort
 import copy
 import fnmatch
 import json
@@ -33,9 +34,36 @@ DEFAULT_INSPECTED_MIB = 1024
 INSPECTED_MIB_RANGE = (256, 4096)
 from .lan_guard import DEVICE_TTL_SECONDS
 SSL_INTERRUPTION_REASON = "Encrypted tunnel interrupted to enable SSL inspection; reconnecting requests will be inspected."
+WAKE_RESET_REASON = "Connection reset after the Mac woke from sleep; the client reconnects with a fresh connection."
+
+
+# Loopback clients (simulators, emulators, adb reverse) share one address; the desktop's process lookup names the device.
+# Device identity is display and filter data only: LAN-guard policy keys on the client address, never on these fields.
+DEVICE_KINDS = {"ios-simulator": ("iosSimulator", "ios"), "android-emulator": ("androidEmulator", "android"),
+                "android-device": ("androidDevice", "android")}
+DEVICE_ID = re.compile(r"(ios-simulator|android-emulator|android-device):[A-Za-z0-9._:@-]{1,200}\Z")
+NO_DEVICE = {"deviceId": None, "deviceName": None, "deviceKind": None}
+
+
+def device_value(value):
+    """Validated device identity from the desktop's lookup; only loopback clients can carry one."""
+    if not isinstance(value, dict) or value.get("clientIsLocal") is not True or not isinstance(value.get("device"), dict):
+        return dict(NO_DEVICE)
+    device = value["device"]
+    identifier, name = device.get("id"), device.get("name")
+    match = DEVICE_ID.match(identifier) if isinstance(identifier, str) else None
+    if not match or not isinstance(name, str) or not 0 < len(name.strip()) <= 128 or any(ord(c) < 32 or ord(c) == 127 for c in name):
+        return dict(NO_DEVICE)
+    kind, platform = DEVICE_KINDS[match.group(1)]
+    if device.get("kind", kind) != kind or device.get("platform", platform) != platform:
+        return dict(NO_DEVICE)
+    return {"deviceId": identifier, "deviceName": name.strip(), "deviceKind": kind}
 
 
 def device_platform(record):
+    for kind, platform in DEVICE_KINDS.values():
+        if record.get("deviceKind") == kind:
+            return platform
     headers = record.get("request", {}).get("headers", [])
     agent = " ".join(value for name, value in headers if name.lower() == "user-agent").lower()
     if "android" in agent:
@@ -141,10 +169,13 @@ def apply_message(message, value, request=False, headers_only=False):
         if not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", method):
             raise ValueError("Invalid method")
         url = str(value.get("url", message.url))
-        from urllib.parse import urlsplit
         parsed = urlsplit(url)
         if parsed.scheme not in ("http", "https") or not parsed.hostname or any(c in url for c in "\r\n\x00"):
             raise ValueError("URL must be an absolute HTTP(S) URL")
+        if url != message.url and (
+                "\\" in url or parsed.username is not None or parsed.password is not None
+                or re.search(r"[\x00-\x20\x7f]", url)):
+            raise ValueError("Edited URL cannot contain user information, backslashes, whitespace or control characters")
     else:
         status = int(value.get("statusCode", message.status_code))
         if not 200 <= status <= 599 and not (status == 101 and message.status_code == 101):
@@ -223,6 +254,7 @@ class Service:
         # Captures whose custom fields still need evaluating (insertion-ordered ids); custom_fields.worker drains it.
         self.field_dirty = {}
         self.field_wake = asyncio.Event()
+        self.field_script_lock = asyncio.Lock()
         self.assertion_summaries = {}
         self.codec_keys = {}
         self.folders = json.loads(config.get("folders", "[]"))
@@ -260,9 +292,10 @@ class Service:
         self.record_revs = {}
         self.json_event_cache = {}
         self.mark_fields()
-        # Records subject to the count/size limits, rebuilt when the TLS allowlist changes or a record is removed elsewhere.
+        # Records subject to the count/size limits, rebuilt when the TLS allowlist changes.
         self.retention = None
         self.state_rows_cache = None
+        self.state_rows_dirty = None
         self.search_lock = asyncio.Lock()
         self.search_cache = None
         for record in list(self.records.values()):
@@ -321,24 +354,28 @@ class Service:
         if new_events:
             self.db.executemany("INSERT OR REPLACE INTO events VALUES (?,?,?)", ((record_id, persisted + index, item) for index, item in enumerate(new_events)))
         self.event_rows[record_id] = (len(events), event_bytes)
-        self.records[record_id] = record
-        for group in retention["groups"].values():
-            if record_id in group["ids"]:
-                group["ids"].discard(record_id)
-                group["size"] -= self.record_sizes.get(record_id, 0)
-        self.record_sizes[record_id] = payload_size
         # Captures for TLS-allowlisted domains have their own larger budget, so ordinary traffic never evicts them.
         # Pinned captures are never evicted but still count.
         name = "inspected" if self.tls_allowlisted(record, retention["patterns"]) else "limited"
         group = retention["groups"][name]
-        group["ids"].add(record_id)
-        group["size"] += payload_size
+        order = None if record.get("pinned") else (record["startedAt"], record_id)
+        if record_id in group["ids"] and group["ids"][record_id] == order:
+            group["size"] += payload_size - self.record_sizes.get(record_id, 0)
+        else:
+            self.remove_from_retention(record_id)
+            group["ids"][record_id] = order
+            group["size"] += payload_size
+            if order is not None:
+                insort(group["evictable"], order)
+        self.records[record_id] = record
+        self.record_sizes[record_id] = payload_size
         self.evict(name)
         self.db.commit()
-        self.changed()
-        self.record_revs[record_id] = self.revision
-        if record_id in self.records and record.get("kind") != "tunnel":
-            self.mark_fields(record_id)
+        self.changed(record_id)
+        if record_id in self.records:
+            self.record_revs[record_id] = self.revision
+            if record.get("kind") != "tunnel":
+                self.mark_fields(record_id)
 
     def mark_fields(self, record_id=None):
         """Queue one capture (or all) for custom field evaluation; nothing is queued while no field is configured."""
@@ -363,30 +400,41 @@ class Service:
         max_records, max_bytes = self.retention_limits()[name]
         if len(group["ids"]) <= max_records and group["size"] <= max_bytes:
             return False
-        evictable = sorted((self.records[key] for key in group["ids"] if not self.records[key].get("pinned")), key=lambda r: r["startedAt"])
-        for oldest in evictable:
-            if len(group["ids"]) <= max_records and group["size"] <= max_bytes:
-                break
-            group["size"] -= self.record_sizes.get(oldest["id"], 0)
-            group["ids"].discard(oldest["id"])
-            self.forget_record(oldest["id"])
+        while group["evictable"] and (len(group["ids"]) > max_records or group["size"] > max_bytes):
+            self.forget_record(group["evictable"][0][1])
         return True
 
     def retention_index(self):
         key = tuple(self.settings["tlsDomains"])
         if self.retention is None or self.retention["key"] != key:
             patterns = [re.compile(pattern, re.IGNORECASE) for pattern in self.tls_patterns()]
-            groups = {"limited": {"ids": set(), "size": 0}, "inspected": {"ids": set(), "size": 0}}
+            groups = {name: {"ids": {}, "size": 0, "evictable": []} for name in ("limited", "inspected")}
             for record_id, record in self.records.items():
                 group = groups["inspected" if self.tls_allowlisted(record, patterns) else "limited"]
-                group["ids"].add(record_id)
+                order = None if record.get("pinned") else (record["startedAt"], record_id)
+                group["ids"][record_id] = order
                 group["size"] += self.record_sizes.get(record_id, 0)
+                if order is not None:
+                    group["evictable"].append(order)
+            for group in groups.values():
+                group["evictable"].sort()
             self.retention = {"key": key, "patterns": patterns, "groups": groups}
         return self.retention
 
+    def remove_from_retention(self, record_id):
+        if self.retention is not None:
+            for group in self.retention["groups"].values():
+                if record_id in group["ids"]:
+                    order = group["ids"].pop(record_id)
+                    group["size"] -= self.record_sizes.get(record_id, 0)
+                    if order is not None:
+                        group["evictable"].pop(bisect_left(group["evictable"], order))
+                    return
+
     def forget_record(self, record_id):
-        self.json_event_cache.pop(record_id, None)
         """Drop one retained capture from memory and storage; the caller commits and calls changed()."""
+        self.remove_from_retention(record_id)
+        self.json_event_cache.pop(record_id, None)
         self.records.pop(record_id, None)
         self.record_sizes.pop(record_id, None)
         self.event_rows.pop(record_id, None)
@@ -395,8 +443,8 @@ class Service:
         self.field_full_cache.pop(record_id, None)
         self.field_dirty.pop(record_id, None)
         self.record_revs.pop(record_id, None)
-        if self.retention is not None and any(record_id in group["ids"] for group in self.retention["groups"].values()):
-            self.retention = None
+        if self.state_rows_dirty is not None:
+            self.state_rows_dirty.discard(record_id)
         self.db.execute("DELETE FROM records WHERE id=?", (record_id,))
         self.db.execute("DELETE FROM events WHERE record=?", (record_id,))
 
@@ -436,20 +484,24 @@ class Service:
         self.json_event_cache[record["id"]] = (len(events), found)
         return found
 
-    def state_rows(self):
+    def state_rows(self, selected=None):
         """Table rows, newest first, plus each application's icon once; rows carry no icon data."""
-        keys = ("id", "url", "method", "statusCode", "device", "startedAt", "endedAt", "durationMs", "state", "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "clientIsLocal", "pinned", "annotation", "tlsFailure")
+        keys = ("id", "url", "method", "statusCode", "device", "startedAt", "endedAt", "durationMs", "state", "eventCount", "error", "interruptionReason", "kind", "isEncrypted", "sslInspected", "host", "port", "application", "clientIsLocal", "pinned", "annotation", "tlsFailure", "deviceId", "deviceName")
         records, icons = [], {}
         fields_cache, current = self.field_cache, self.productivity["fields"]
-        for r in sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True):
+        scripted_fields = any(field.get("script", "").strip() for field in current)
+        ordered = sorted(self.records.values(), key=lambda r: r["startedAt"], reverse=True) if selected is None else selected
+        for r in ordered:
             row = {**{key: r.get(key) for key in keys}, "pinned": bool(r.get("pinned")), "isSSE": is_sse(r), "serverMs": (r.get("timings") or {}).get("serverMs"), "devicePlatform": device_platform(r), **({"sseStatus": sse_status(r)} if is_sse(r) else {}), "assertionSummary": self.assertion_summaries.get(r["id"]), "rev": self.record_revs.get(r["id"], 0)}
             row["requestContentType"] = content_type(r, "request")
             row["responseContentType"] = content_type(r, "response")
             row["hasJsonEvents"] = self.has_json_events(r) if row["isSSE"] else False
             # Never evaluates: the latest finished results (possibly from an older revision) until the worker refreshes them.
             entry = fields_cache.get(r["id"])
-            if entry and entry["fields"] is current and entry["results"]:
-                row["fields"] = entry["results"]
+            if entry and entry["fields"] is current:
+                values = entry.get("display") if scripted_fields else entry["results"]
+                if values:
+                    row["fields"] = values
             app = row["application"]
             if isinstance(app, dict) and "icon" in app:
                 if app["icon"] and app.get("id"):
@@ -477,17 +529,30 @@ class Service:
         after it are sent, with the full id order so the client can drop removed rows. The etag also covers the small
         summary, which can change without a revision bump (proxy status, gates)."""
         if not self.state_rows_cache or self.state_rows_cache["revision"] != self.revision:
-            records, icons = self.state_rows()
             previous = self.state_rows_cache["rows"] if self.state_rows_cache else {}
-            rows = {}
-            for row in records:
+            ordered = sorted(self.records.values(), key=lambda record: record["startedAt"], reverse=True)
+            dirty = self.state_rows_dirty
+            selected = [record for record in ordered if dirty is None or record["id"] in dirty or record["id"] not in previous]
+            changed_rows, _ = self.state_rows(selected)
+            rows, icons = {}, {}
+            for row in changed_rows:
                 text = json.dumps(row, separators=(",", ":"))
                 old = previous.get(row["id"])
                 rows[row["id"]] = (text, old[1] if old and old[0] == text else self.revision)
+            order = []
+            for record in ordered:
+                record_id = record["id"]
+                order.append(record_id)
+                if record_id not in rows:
+                    rows[record_id] = previous[record_id]
+                app = record.get("application")
+                if isinstance(app, dict) and app.get("icon") and app.get("id"):
+                    icons.setdefault(app["id"], app["icon"])
             icons_json = json.dumps(icons, separators=(",", ":"))
             old_icons = self.state_rows_cache["icons"] if self.state_rows_cache else None
-            self.state_rows_cache = {"revision": self.revision, "order": [row["id"] for row in records], "rows": rows,
+            self.state_rows_cache = {"revision": self.revision, "order": order, "rows": rows,
                                      "icons": (icons_json, old_icons[1] if old_icons and old_icons[0] == icons_json else self.revision)}
+            self.state_rows_dirty = set()
         cache = self.state_rows_cache
         summary = json.dumps(self.state_summary(), separators=(",", ":"))
         etag = f"{self.instance}-{self.revision}-{zlib.crc32(summary.encode()):08x}"
@@ -502,7 +567,12 @@ class Service:
         icons = f',"applicationIcons":{cache["icons"][0]}' if cache["icons"][1] > base else ""
         return etag, f'{head},"delta":true,"rows":[{changed}],"ids":{json.dumps(cache["order"], separators=(",", ":"))}{icons}}}'
 
-    def changed(self):
+    def changed(self, record_id=None):
+        # Without a capture ID, callers may have changed derived row data (fields, assertions, gates).
+        if record_id is None:
+            self.state_rows_dirty = None
+        elif self.state_rows_dirty is not None and record_id in self.records:
+            self.state_rows_dirty.add(record_id)
         self.dirty = True
         self.revision += 1
 
@@ -627,19 +697,48 @@ class Service:
     def client_connected(self, client):
         if not self.lan_guard.client_connected(client):
             return
+        if not self.settings["capturePaused"]:
+            self.start_application_lookup(client)
+
+    def start_application_lookup(self, client):
+        if client.id in self.applications:
+            return self.applications[client.id]
         url = os.environ.get("STREAMGLASS_SCRIPT_URL")
-        if (self.settings["capturePaused"] or not url or client.id in self.applications
-                or sum(entry["task"] is not None for entry in self.applications.values()) >= 16):
-            return
+        if not url or sum(entry["task"] is not None for entry in self.applications.values()) >= 16:
+            return None
         if len(self.applications) >= MAX_RECORDS:
             oldest = next(iter(self.applications))
             entry = self.applications.pop(oldest)
             if entry["task"]:
                 entry["task"].cancel()
-        entry = {"records": set(), "value": {"application": None, "clientIsLocal": None},
+        entry = {"records": set(), "value": {"application": None, "clientIsLocal": None, **NO_DEVICE},
                  "task": None, "disconnected": False}
         self.applications[client.id] = entry
         entry["task"] = asyncio.create_task(self.resolve_application(client, entry, url))
+        return entry
+
+    async def android_alias_route(self, client):
+        entry = self.start_application_lookup(client)
+        if entry is None:
+            return False
+        if task := entry["task"]:
+            await asyncio.wait({task}, timeout=2)
+        if entry["value"]["deviceKind"] != "androidEmulator":
+            return False
+        entry["androidAliasRouted"] = True
+        tunnel_id = self.tunnels.get(client.id)
+        if tunnel_id in self.records and self.annotate_android_alias(self.records[tunnel_id]):
+            self.save(self.records[tunnel_id])
+        for flow_id, flow in self.flows.items():
+            if flow.client_conn.id == client.id and (record := self.records.get(flow_id)) and self.annotate_android_alias(record):
+                self.save(record)
+        return True
+
+    def annotate_android_alias(self, record):
+        if record.get("host") == "10.0.2.2" and "annotation" not in record:
+            record["annotation"] = {"note": "Routed to this Mac (127.0.0.1), preserving the original URL.", "color": ""}
+            return True
+        return False
 
     @staticmethod
     def application_value(value):
@@ -688,7 +787,8 @@ class Service:
                         try:
                             await response.content.readexactly(384 * 1024 + 1)
                         except asyncio.IncompleteReadError as exc:
-                            entry["value"] = self.application_value(json.loads(exc.partial))
+                            value = json.loads(exc.partial)
+                            entry["value"] = {**self.application_value(value), **device_value(value)}
             for record_id in entry["records"]:
                 if record := self.records.get(record_id):
                     record.update(entry["value"])
@@ -702,9 +802,11 @@ class Service:
                 self.applications.pop(client.id, None)
 
     def attribute_record(self, client, record):
-        record.update(application=None, clientIsLocal=None)
+        record.update(application=None, clientIsLocal=None, **NO_DEVICE)
         if entry := self.applications.get(client.id):
             record.update(entry["value"])
+            if entry.get("androidAliasRouted"):
+                self.annotate_android_alias(record)
             if entry["task"]:
                 entry["records"].intersection_update(self.records)
                 if len(entry["records"]) >= MAX_RECORDS:
@@ -744,6 +846,17 @@ class Service:
                     continue
 
     def http_connect(self, flow):
+        from .lan_guard import is_lan_client
+        if is_lan_client(flow.client_conn):
+            # mitmproxy awaits hook return values; local registration stays synchronous.
+            return self._lan_http_connect(flow)
+        self._capture_connect(flow)
+
+    async def _lan_http_connect(self, flow):
+        if await self.lan_guard.check_flow(flow):
+            self._capture_connect(flow)
+
+    def _capture_connect(self, flow):
         # Connections outlive captures, including when capture is paused or deleted.
         self.active_tunnels[flow.client_conn.id] = flow
         if self.settings["capturePaused"]:
@@ -859,6 +972,8 @@ class Service:
             self.tls_ok_devices.add(str(data.context.client.peername[0]))
 
     async def requestheaders(self, flow):
+        if not await self.lan_guard.check_flow(flow):
+            return
         if self.settings["capturePaused"]:
             flow.metadata["streamglass_passthrough"] = True
             return
@@ -896,14 +1011,17 @@ class Service:
             if self.bypass_rules(flow):
                 flow.metadata["streamglass_passthrough"] = True
                 return
+            started = time.time()
+            original = message_value(flow.request, True)
             if not self.settings["capturePaused"]:
                 record = {"id": flow.id, "kind": "request", "isEncrypted": False, "sslInspected": flow.request.scheme == "https",
                           "host": flow.request.host, "port": flow.request.port,
                           "url": flow.request.url, "method": flow.request.method, "device": str(flow.client_conn.peername[0]),
-                          "startedAt": time.time(), "state": "pending", "eventCount": 0, "events": [], "request": message_value(flow.request, True)}
+                          "startedAt": started, "state": "pending", "eventCount": 0, "events": [], "request": original}
                 self.save(self.attribute_record(flow.client_conn, record))
             original_request = copy.deepcopy(flow.request) if any(rule["enabled"] for rule in self.traffic_tools["mapLocalRules"]) or any(rule["enabled"] for rule in self.scenarios) or traffic_rules.rules_active(self.traffic_tools) else None
-            original = message_value(flow.request, True)
+            # Keep the final save on rule paths, including scripts that only add capture logs.
+            may_change = original_request is not None or bool(self.rules)
             value = await self.process(flow, "request", original)
             if value != original:
                 apply_message(flow.request, value, True)
@@ -924,7 +1042,7 @@ class Service:
             if flow.metadata.get("streamglass_map_local"):
                 flow.metadata["streamglass_original_request"] = original_request
             flow.metadata["streamglass_forwarded_at"] = time.time()
-            if flow.id in self.records:
+            if may_change and flow.id in self.records:
                 self.records[flow.id].update(request=message_value(flow.request, True), url=flow.request.url, method=flow.request.method)
                 if flow.metadata.get("streamglass_applied_rules"):
                     self.records[flow.id]["appliedRules"] = list(flow.metadata["streamglass_applied_rules"])
@@ -1180,11 +1298,14 @@ class Service:
                 flow.response.headers["content-length"] = str(len(flow.response.raw_content))
             if complete_response(self, flow):
                 return
+            captured = None
             if flow.id not in self.streams and not flow.metadata.get("streamglass_response_processed"):
                 original = message_value(flow.response)
                 value = await self.process(flow, "response", original)
                 if value != original:
                     apply_message(flow.response, value, headers_only=flow.request.method == "HEAD")
+                else:
+                    captured = original
             if self.bypass_rules(flow) and flow.metadata.pop("streamglass_map_local", None):
                 flow.response = None
                 return
@@ -1196,7 +1317,7 @@ class Service:
                                 "body": "", "bodyBase64": "", "bodyUnavailable": True, "bodyBytes": len(raw),
                                 "bodyPreview": raw[:65536].decode("utf-8", "replace"), "bodyPreviewBytes": min(len(raw), 65536),
                                 "bodyUnavailableReason": "Map Local response exceeds body retention limit; bounded preview retained."}
-                else:
+                elif captured is None:
                     captured = message_value(flow.response)
                 record.update(response=captured, statusCode=flow.response.status_code, state="complete")
                 self.save(record)
@@ -1260,6 +1381,51 @@ class Service:
 
     def running(self):
         self.proxy_ready.set()
+
+    async def stop_proxy(self, reason):
+        from .repeat_replay import stop_jobs
+        await stop_jobs(self)
+        if not self.master:
+            return
+        for flow_id, flow in list(self.flows.items()):
+            flow.kill()
+            self.cancel(flow_id, reason)
+        self.streams.clear()
+        self.flows.clear()
+        await self.master.addons.get("proxyserver").servers.update([])
+        self.master.shutdown()
+        # A listener that already crashed still has to be released before a new one starts.
+        await asyncio.gather(self.proxy_task, return_exceptions=True)
+        self.master = None
+
+    async def recover_after_wake(self):
+        """Drop connections that went stale during system sleep, as an app restart would.
+
+        Keep-alive client connections and their upstream sockets can be half-open after sleep or a network change;
+        clients keep reusing them and nothing reaches the server. Connections holding a paused breakpoint stay open.
+        A listener that stopped while the Mac slept is restarted on the same port.
+        """
+        if not self.settings["proxyEnabled"]:
+            return {"closedConnections": 0, "restartedListener": False}
+        proxyserver = self.master.addons.get("proxyserver") if self.master else None
+        if not self.master or self.proxy_task.done() or not proxyserver.listen_addrs():
+            await self.stop_proxy(WAKE_RESET_REASON)
+            await self.start_proxy()
+            return {"closedConnections": 0, "restartedListener": True}
+        paused = {gate["recordId"] for gate in self.pending.values() if not gate["future"].done()}
+        held = {flow.client_conn.id for flow in self.flows.values() if flow.id in paused}
+        closed = 0
+        for handler in list(proxyserver.connections.values()):
+            client = handler.client
+            if client.id in held or client not in handler.transports or not handler.transports[client].handler:
+                continue
+            for flow_id, flow in list(self.flows.items()):
+                if flow.client_conn.id == client.id:
+                    self.cancel(flow_id, WAKE_RESET_REASON)
+            # Tunnel records finish as complete through client_disconnected.
+            handler.close_connection(client)
+            closed += 1
+        return {"closedConnections": closed, "restartedListener": False}
 
     async def start_proxy(self):
         if not self.settings["proxyEnabled"]:

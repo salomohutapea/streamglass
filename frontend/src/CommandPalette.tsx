@@ -4,7 +4,7 @@ import { commandShortcuts } from './ShortcutSheet';
 import './command-palette.css';
 
 export type PaletteCommand = { id: string; title: string; group: string; keywords?: string; shortcut?: string; run: () => void };
-type DeviceLike = { id: string }; type ViewLike = { id: string; name: string };
+type DeviceLike = { id: string; name?: string }; type ViewLike = { id: string; name: string };
 
 const recentKey = 'streamglass.palette.recent.v1';
 const readRecent = (): string[] => { try { const v = JSON.parse(localStorage.getItem(recentKey) ?? '[]'); return Array.isArray(v) ? v.filter(x => typeof x === 'string').slice(0, 6) : []; } catch { return []; } };
@@ -16,13 +16,14 @@ export function buildPaletteCommands(o: {
   toggleSidebarPin: () => void; showTour: () => void; showWalkthrough: () => void; showShortcuts: () => void;
 }): PaletteCommand[] {
   const m = (id: string, title: string, group: string, keywords?: string, payload?: any): PaletteCommand => ({ id, title, group, keywords, shortcut: commandShortcuts[id], run: () => o.menu(id, payload) });
-  const tools: [string, string][] = [['map-local', 'Map Local'], ['map-remote', 'Map Remote'], ['rewrite-rules', 'Rewrite'], ['block-rules', 'Block'], ['network-profile', 'Network Conditioner'], ['daily-sessions', 'Sessions'], ['daily-journeys', 'Journeys'], ['daily-fields', 'Custom Fields'], ['daily-assertions', 'Assertions'], ['daily-repeat', 'Repeat'], ['daily-views', 'Saved filters'], ['daily-notes', 'Notes'], ['lab-compare', 'Compare'], ['lab-replay', 'Replay'], ['lab-scenarios', 'Scenarios'], ['lab-fixture', 'Create mock'], ['lab-share', 'Share'], ['lab-workspaces', 'Workspaces'], ['lab-codecs', 'Codecs'], ['lab-mcp', 'Agent (MCP)']];
+  const tools: [string, string][] = [['map-local', 'Map Local'], ['map-remote', 'Map Remote'], ['rewrite-rules', 'Rewrite'], ['block-rules', 'Block'], ['network-profile', 'Network Conditioner'], ['daily-sessions', 'Sessions'], ['daily-journeys', 'Journeys'], ['daily-fields', 'Custom Fields'], ['daily-assertions', 'Assertions'], ['daily-repeat', 'Repeat'], ['daily-views', 'Saved filters'], ['daily-notes', 'Notes'], ['lab-compare', 'Compare'], ['lab-replay', 'Replay'], ['lab-scenarios', 'Scenarios'], ['lab-fixture', 'Create mock'], ['lab-share', 'Share'], ['lab-workspaces', 'Workspaces'], ['lab-codecs', 'Codecs']];
   const platforms: [string, string][] = [['macos', 'This Mac'], ['ios-simulator', 'iOS Simulator'], ['ios-device', 'iOS Device'], ['android-emulator', 'Android Emulator'], ['android-device', 'Android Device']];
   return [
     ...tools.map(([id, name]) => m(id, `Tools: ${name}`, 'Tools', 'open tab')),
     m('breakpoints', 'Breakpoint rules', 'Rules', 'intercept pause'),
     m('scripts', 'JavaScript rules', 'Rules', 'script hook'),
     m('settings', 'Settings', 'General', 'preferences proxy port tls'),
+    m('agent-settings', 'Settings: Agent (MCP)', 'General', 'ai assistant integration server token'),
     m('connect-device', 'Connect device', 'General', 'add pair'),
     ...platforms.map(([p, name]) => m(`setup-${p}`, `Set up ${name}`, 'Setup', 'certificate install', { platform: p })).map(c => ({ ...c, run: () => o.menu('open-device-setup', { platform: c.id.slice(6) }) })),
     m('proxy-toggle', o.proxyRunning ? 'Stop proxy' : 'Start proxy', 'Capture', 'server'),
@@ -37,7 +38,7 @@ export function buildPaletteCommands(o: {
     { id: 'walkthrough', title: 'Show walkthrough', group: 'Help', keywords: 'tour guide tooltips where help', run: o.showWalkthrough },
     { id: 'shortcut-sheet', title: 'Keyboard shortcuts', group: 'Help', keywords: 'keys help', shortcut: commandShortcuts['shortcut-sheet'], run: o.showShortcuts },
     ...o.savedViews.map(v => ({ id: `view:${v.id}`, title: `Apply saved filter: ${v.name}`, group: 'Saved filters', keywords: 'filter view', run: () => o.applyView(v.id) })),
-    ...o.devices.map(d => ({ id: `device:${d.id}`, title: `Filter to device: ${d.id}`, group: 'Devices', keywords: 'only show', run: () => o.selectDevice(d.id) })),
+    ...o.devices.map(d => ({ id: `device:${d.id}`, title: `Filter to device: ${d.name ?? d.id}`, group: 'Devices', keywords: 'only show', run: () => o.selectDevice(d.id) })),
   ];
 }
 

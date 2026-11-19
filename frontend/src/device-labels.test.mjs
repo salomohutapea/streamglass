@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readDeviceLabels, trafficDevices, stableDeviceOrder, incomingRecordIds } from './device-labels.mjs';
+import { readDeviceLabels, trafficDevices, stableDeviceOrder, incomingRecordIds, isAddressDevice } from './device-labels.mjs';
 
 test('device labels retain valid preferences and reject malformed stored data', () => {
   const label = {name:'Pixel',color:'#aabbcc',icon:'android'};
@@ -11,6 +11,20 @@ test('device labels retain valid preferences and reject malformed stored data', 
 test('platforms come only from captured metadata, with mixed clients left generic', () => {
   assert.deepEqual(trafficDevices([{device:'127.0.0.1'}, {device:'phone',devicePlatform:'ios'}, {device:'phone'}]), [{id:'127.0.0.1',platform:'generic'}, {id:'phone',platform:'ios'}]);
   assert.deepEqual(trafficDevices([{device:'shared',devicePlatform:'ios'}, {device:'shared',devicePlatform:'mac'}]), [{id:'shared',platform:'generic'}]);
+});
+
+test('simulators and emulators on loopback become their own named devices', () => {
+  const sim = 'ios-simulator:00000000-0000-4000-8000-000000000001', avd = 'android-emulator:Example_Phone_API_35';
+  assert.deepEqual(trafficDevices([
+    {device:'127.0.0.1',devicePlatform:'mac'},
+    {device:'127.0.0.1',deviceId:sim,deviceName:'iPhone Example (iOS 18.0)',devicePlatform:'ios'},
+    {device:'127.0.0.1',deviceId:avd,deviceName:'Example Phone API 35',devicePlatform:'android'},
+  ]), [{id:'127.0.0.1',platform:'mac'}, {id:sim,platform:'ios',name:'iPhone Example (iOS 18.0)'}, {id:avd,platform:'android',name:'Example Phone API 35'}]);
+  // A name without an engine device id is ignored: addresses are named by reverse DNS.
+  assert.deepEqual(trafficDevices([{device:'192.0.2.5',deviceName:'spoof'}]), [{id:'192.0.2.5',platform:'generic'}]);
+  assert.equal(isAddressDevice('127.0.0.1'), true);
+  assert.equal(isAddressDevice('fe80::1'), true);
+  for (const id of [sim, avd, 'android-device:adb']) assert.equal(isAddressDevice(id), false);
 });
 
 test('devices keep their place when traffic arrives and new ones are appended', () => {

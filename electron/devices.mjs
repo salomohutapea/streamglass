@@ -1,4 +1,6 @@
+import { createDeviceSetup } from './device-setup.mjs';
 import { execFile } from 'node:child_process';
+import { X509Certificate } from 'node:crypto';
 import { promisify } from 'node:util';
 import { access, mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -8,7 +10,21 @@ import path from 'node:path';
 const execute = promisify(execFile);
 const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 
-export function createDeviceService({ dataDir, certificatePath, proxyPort, getProxyHost, ensureProxyListening = async () => {}, executeCommand = execute, platform = process.platform }) {
+// The Android SDK's adb, from ANDROID_HOME, ANDROID_SDK_ROOT, the default SDK folder or PATH. Shared with the
+// application resolver so it never runs a binary named only by a socket owner's path.
+export async function findAdb({ executeCommand = execute } = {}) {
+  const roots = [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT, path.join(homedir(), 'Library/Android/sdk')];
+  const candidates = roots.filter(root => root && path.isAbsolute(root)).map(root => path.join(root, 'platform-tools/adb'));
+  let fromPath = null;
+  try { fromPath = (await executeCommand('/usr/bin/which', ['adb'], { timeout: 15000, maxBuffer: 1024 * 1024 })).stdout.trim(); } catch { /* adb is not on PATH. */ }
+  if (fromPath && path.isAbsolute(fromPath)) candidates.push(fromPath);
+  for (const candidate of new Set(candidates)) {
+    try { await access(candidate, constants.X_OK); return candidate; } catch { /* Try the next installed SDK. */ }
+  }
+  return null;
+}
+
+export function createDeviceService({ dataDir, certificatePath, proxyPort, ensureProxyListening = async () => {}, executeCommand = execute, platform = process.platform, getLanInfo, emitInventory, metroProbe }) {
   if (!Number.isInteger(proxyPort) || proxyPort < 1024 || proxyPort > 65535) throw new Error('Invalid proxy port');
   if (!path.isAbsolute(certificatePath)) throw new Error('Public certificate path must be absolute');
   const intentPath = path.join(dataDir, 'mac-monitor.json');
@@ -47,16 +63,17 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
       if (fields.Enabled !== (previous.enabled ? 'Yes' : 'No') || previous.host && (fields.Server !== previous.host || fields.Port !== previous.port)) throw new Error('Network proxy settings did not match the requested configuration. Saved original settings are retained; check macOS Network settings.');
     }
   };
-  async function restoreMacProxies(state, automatic = false) {
+  async function restoreMacProxies(state, { automatic = false, onlyOwned = automatic } = {}) {
     const failures = [];
     for (const key of Object.keys(state).filter(key => key.startsWith('mac:'))) {
       const target = key.slice(4);
       try {
         const expected = {};
-        for (const [type, previous] of Object.entries(state[key])) {
-          if (automatic) {
+        const { appliedPort = proxyPort, ...proxies } = state[key];
+        for (const [type, previous] of Object.entries(proxies)) {
+          if (onlyOwned) {
             const current = await run('/usr/sbin/networksetup', [`-get${type}proxy`, target]);
-            if (!/^Enabled: Yes$/m.test(current) || !/^Server: 127\.0\.0\.1$/m.test(current) || !new RegExp(`^Port: ${proxyPort}$`, 'm').test(current)) continue;
+            if (!/^Enabled: Yes$/m.test(current) || !/^Server: 127\.0\.0\.1$/m.test(current) || !current.split('\n').includes(`Port: ${appliedPort}`)) continue;
           }
           // Restoring an old snapshot of this same listener would leave a dead proxy after exit.
           expected[type] = automatic && previous.enabled && previous.host === '127.0.0.1' && previous.port === String(proxyPort) ? {...previous, enabled:false} : previous;
@@ -73,16 +90,36 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
     return failures;
   }
   const trustMacCertificate = () => run('/usr/bin/security', ['add-trusted-cert', '-r', 'trustRoot', '-p', 'ssl', '-k', path.join(homedir(), 'Library/Keychains/login.keychain-db'), certificatePath], 120000);
-  const adbPath = async () => {
-    const roots = [process.env.ANDROID_HOME, process.env.ANDROID_SDK_ROOT, path.join(homedir(), 'Library/Android/sdk')];
-    const candidates = roots.filter(root => root && path.isAbsolute(root)).map(root => path.join(root, 'platform-tools/adb'));
-    const fromPath = await optional('/usr/bin/which', ['adb']);
-    if (fromPath && path.isAbsolute(fromPath)) candidates.push(fromPath);
-    for (const candidate of new Set(candidates)) {
-      try { await access(candidate, constants.X_OK); return candidate; } catch { /* Try the next installed SDK. */ }
+  async function macCertificateStatus() {
+    if (platform !== 'darwin') return null;
+    let fingerprint;
+    try {
+      fingerprint = new X509Certificate(await readFile(certificatePath)).fingerprint256.replaceAll(':', '');
+    } catch {
+      return null;
     }
-    return null;
-  };
+
+    // Match the active CA exactly. Other Streamglass profiles may have the same certificate name.
+    const keychainResults = await Promise.allSettled([
+      run('/usr/bin/security', ['find-certificate', '-a', '-Z'], 3000),
+      run('/usr/bin/security', ['find-certificate', '-a', '-Z', '/Library/Keychains/System.keychain'], 3000),
+    ]);
+    const hashLine = `SHA-256 hash: ${fingerprint}`;
+    const installed = keychainResults.some(result => result.status === 'fulfilled' && result.value.split(/\r?\n/).includes(hashLine));
+    if (!installed) {
+      return keychainResults.every(result => result.status === 'fulfilled') ? { installed: false, trusted: null } : null;
+    }
+
+    try {
+      // Let macOS use its configured trust settings. Supplying a root with -r would bypass that check.
+      await run('/usr/bin/security', ['verify-cert', '-c', certificatePath, '-p', 'ssl', '-l', '-L'], 3000);
+      return { installed: true, trusted: true };
+    } catch (error) {
+      const rejected = /^Cert Verify Result:|^SecTrustEvaluate result: kSecTrustResultDeny/m.test(error.stderr ?? '');
+      return { installed: true, trusted: rejected ? false : null };
+    }
+  }
+  const adbPath = () => findAdb({ executeCommand });
   async function networks(refresh = false) {
     if (!networkCache || refresh) {
       const [servicesText, orderText] = await Promise.all([
@@ -112,11 +149,11 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
   }
   async function list() {
     const adb = await adbPath();
-    const [simText, androidText, network, state, intent] = await Promise.all([
+    const [simText, androidText, network, state, intent, macCertificate] = await Promise.all([
       optional('/usr/bin/xcrun', ['simctl', 'list', 'devices', 'available', '--json']),
       adb ? optional(adb, ['devices']) : null,
       platform === 'darwin' ? networks(true) : { networkServices: [], activeNetworkId: null, networkNotice: 'macOS required' },
-      readState(), readIntent(),
+      readState(), readIntent(), macCertificateStatus(),
     ]);
     const simulators = simText ? Object.values(JSON.parse(simText).devices).flat().map(({ udid, name, state }) => ({ id: udid, name, state })) : [];
     const android = androidText ? androidText.split('\n').slice(1).filter(line => /\tdevice$/.test(line)).map(line => ({ id: line.split('\t')[0], name: line.split('\t')[0] })) : [];
@@ -128,10 +165,10 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
       service.canRestore = Boolean(state[`mac:${service.id}`]);
     }));
     const simulatorNotice = simText === null ? 'Simulator tools are unavailable or could not be queried. Check full Xcode, its selected developer directory, and Simulator availability, then refresh.' : simulators.some(item => item.state === 'Booted') ? 'Select a booted simulator and prepare capture to trust certificates and enable the Mac proxy.' : 'No booted simulator detected. Boot a simulator in Xcode or Simulator, then refresh.';
-    return { simulatorNotice, simulators, android, networkServices, activeNetworkId, networkNotice, adbAvailable: Boolean(adb), simulatorToolsAvailable: simText !== null, savedProxyTargets: Object.keys(state), certificatePath, proxyPort, monitorTarget: intent?.enabled ? intent.override || activeNetworkId : null, monitorEnabled: Boolean(intent?.enabled), monitorOverride: intent?.override ?? null, monitorError };
+    return { simulatorNotice, simulators, android, networkServices, activeNetworkId, networkNotice, adbAvailable: Boolean(adb), simulatorToolsAvailable: simText !== null, savedProxyTargets: Object.keys(state), certificatePath, macCertificate, proxyPort, monitorTarget: intent?.enabled ? intent.override || activeNetworkId : null, monitorEnabled: Boolean(intent?.enabled), monitorOverride: intent?.override ?? null, monitorError };
   }
   let pending = Promise.resolve();
-  async function performAction({ action, target, networkTarget, restoring = false, networkOnly = false, metro = false } = {}) {
+  async function performAction({ action, target, networkTarget, restoring = false, networkOnly = false, metro = false, onlyOwned = false } = {}) {
     if (['mac-trust-ca', 'simulator-install-ca', 'simulator-prepare', 'simulator-certificates', 'android-install-ca'].includes(action)) {
       const certificate = await readFile(certificatePath, 'utf8');
       if (!certificate.includes('-----BEGIN CERTIFICATE-----') || certificate.includes('PRIVATE KEY')) throw new Error('A public PEM certificate is required');
@@ -139,7 +176,6 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
     const devices = networkOnly ? await networks() : await list();
     const state = await readState();
     const requireTarget = items => { if (typeof target !== 'string' || !items.some(item => item.id === target)) throw new Error('Select an available device or network service'); };
-    const host = () => { const value = getProxyHost(); if (typeof value !== 'string' || !/^[a-zA-Z0-9.:-]+$/.test(value)) throw new Error('Invalid proxy host'); return value; };
     if (['simulator-prepare', 'simulator-certificates'].includes(action)) {
       if (platform !== 'darwin') throw new Error('macOS required');
       requireTarget(devices.simulators);
@@ -183,31 +219,13 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
       }
       const portList = [...new Set(ports)].join(' and ');
       return { message: action === 'android-reverse' ? `adb reverse active for port ${portList}. Set the device proxy to 127.0.0.1:${proxyPort}; the app reaches this Mac through the USB tunnel. Reversals end when the device disconnects or adb restarts.` : `adb reverse removed for port ${portList}.`, devices: await list() };
-    } else if (['android-install-ca', 'android-enable-proxy', 'android-restore-proxy'].includes(action)) {
+    } else if (action === 'android-install-ca') {
       requireTarget(devices.android);
       const adb = await adbPath();
       if (!adb) throw new Error('adb unavailable');
-      const shell = args => run(adb, ['-s', target, 'shell', ...args]);
-      const key = `android:${target}`;
-      if (action === 'android-install-ca') {
-        await run(adb, ['-s', target, 'push', certificatePath, '/sdcard/Download/streamglass-ca.cer']);
-        await shell(['am', 'start', '-a', 'android.settings.SECURITY_SETTINGS']);
-        return { message: 'Certificate copied to Downloads. In Settings choose Install a certificate → CA certificate and select streamglass-ca.cer.' };
-      }
-      const keys = ['http_proxy', 'global_http_proxy_host', 'global_http_proxy_port', 'global_http_proxy_exclusion_list'];
-      if (action === 'android-enable-proxy') {
-        if (!state[key]) { state[key] = Object.fromEntries(await Promise.all(keys.map(async name => [name, await shell(['settings', 'get', 'global', name])]))); await save(state); }
-        await shell(['settings', 'put', 'global', 'http_proxy', `${host()}:${proxyPort}`]);
-      } else {
-        if (!state[key]) throw new Error('No saved proxy configuration');
-        for (const name of keys) {
-          const value = state[key][name];
-          // adb shell joins arguments remotely; accept only settings values safe as shell words.
-          if (typeof value !== 'string' || !/^[a-zA-Z0-9_.:,/*@%+\[\]-]*$/.test(value)) throw new Error('Previous proxy value requires manual restoration');
-          await shell(value === 'null' ? ['settings', 'delete', 'global', name] : ['settings', 'put', 'global', name, quote(value)]);
-        }
-        delete state[key]; await save(state);
-      }
+      await run(adb, ['-s', target, 'push', certificatePath, '/sdcard/Download/streamglass-ca.cer']);
+      await run(adb, ['-s', target, 'shell', 'am', 'start', '-a', 'android.settings.SECURITY_SETTINGS']);
+      return { message: 'Certificate copied to Downloads. In Settings choose Install a certificate → CA certificate and select streamglass-ca.cer.' };
     } else if (['mac-enable-proxy', 'mac-restore-proxy'].includes(action)) {
       if (platform !== 'darwin') throw new Error('macOS required');
       const override = target || null;
@@ -232,6 +250,7 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
           }
           await save(state);
         }
+        if (state[key].appliedPort !== proxyPort) { state[key].appliedPort = proxyPort; await save(state); }
         if (!devices.networkServices.find(item => item.id === target)?.proxyEnabled) await configureNetwork(types.flatMap(type => [ ['/usr/sbin/networksetup', `-set${type}proxy`, target, '127.0.0.1', String(proxyPort)], ['/usr/sbin/networksetup', `-set${type}proxystate`, target, 'on'] ]), !restoring);
         await verifyNetwork(target, Object.fromEntries(types.map(type => [type, { enabled: true, host: '127.0.0.1', port: String(proxyPort) }])));
         if (!restoring) { await saveIntent({ enabled: true, override }); scheduleMonitor(); }
@@ -241,7 +260,7 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
       } else {
         clearInterval(timer); timer = undefined;
         await saveIntent({ enabled: false, override: null });
-        const failures = await restoreMacProxies(state);
+        const failures = await restoreMacProxies(state, { onlyOwned });
         monitorError = failures.join('\n');
         if (failures.length) throw new Error(`Monitoring is disabled. Some saved proxies still need restoration; retry Disable Mac capture. ${monitorError}`);
 
@@ -278,6 +297,7 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
   }
   async function restoreMonitor({ startListener = true } = {}) {
     suspended = false;
+    await setup.start();
     return enqueue(async () => {
       let intent = await readIntent();
       if (!intent) {
@@ -296,18 +316,37 @@ export function createDeviceService({ dataDir, certificatePath, proxyPort, getPr
     const [intent, state] = await Promise.all([readIntent(), readState()]);
     return { ...observedNetwork, monitorEnabled: Boolean(intent?.enabled), monitorOverride: intent?.override ?? null, monitorError, savedProxyTargets: Object.keys(state) };
   }
+  const setup = createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath, run, optional, readState, saveState: save, enqueue, performAction, ensureProxyListening, getLanInfo, emit: emitInventory, metroProbe, macMonitorEnabled: async () => Boolean((await readIntent())?.enabled) });
   async function prepareQuit() {
     suspended = true;
     clearInterval(timer); timer = undefined;
     return enqueue(async () => {
+      const deviceResult = await setup.prepareQuit();
       const state = await readState();
-      const errors = platform === 'darwin' ? await restoreMacProxies(state, true) : [];
+      const macErrors = platform === 'darwin' ? await restoreMacProxies(state, { automatic: true }) : [];
+      const errors = [...macErrors];
+      if (!deviceResult.ok) errors.push(deviceResult.message);
       monitorError = errors.join('\n');
-      return {remainingProxyTargets:Object.keys(state), errors};
+      // A simulator entry only records that it owns the Mac proxy (the simulator itself keeps no proxy).
+      // Once the Mac proxy is restored it is stale; drop it so it doesn't block quit or confuse the next launch.
+      let remaining = await readState();
+      if (!macErrors.length && !Object.keys(remaining).some(key => key.startsWith('mac:'))) {
+        const simulators = Object.keys(remaining).filter(key => key.startsWith('ios-simulator:'));
+        if (simulators.length) { for (const key of simulators) delete remaining[key]; await save(remaining); remaining = await readState(); }
+      }
+      const deferred = new Set(deviceResult.deferredTargets);
+      return {remainingProxyTargets:Object.keys(remaining).filter(key => !deferred.has(key)), errors};
     });
   }
   // releaseSystemProxy restores system proxies that still point here and pauses monitoring until restoreMonitor.
-  return { list, monitorStatus, restoreMonitor, prepareQuit, releaseSystemProxy: prepareQuit, reconcileMonitor: () => enqueue(() => reconcileMonitor()), dispose: async () => { suspended = true; clearInterval(timer); await pending; }, perform: input => enqueue(async () => {
-    try { return await performAction(input); } catch (error) { monitorError = error.message; throw error; }
-  }) };
+  return { setup, list, monitorStatus, restoreMonitor, prepareQuit, releaseSystemProxy: prepareQuit, reconcileMonitor: (force = false) => enqueue(() => reconcileMonitor(force)), dispose: async () => { suspended = true; clearInterval(timer); setup.dispose(); await pending; }, perform: input => {
+    if (input?.action === 'android-enable-proxy') return setup.connect({ platform: 'android', id: input.target, ...(input.metro === undefined ? {} : { metro: input.metro }) }).then(async result => {
+      if (!result.ok) throw new Error(result.message);
+      return { ...result, devices: await list() };
+    });
+    if (input?.action === 'android-restore-proxy') return setup.disconnect({ platform: 'android', id: input.target }).then(async result => ({ ...result, devices: await list() }));
+    return enqueue(async () => {
+      try { return await performAction(input); } catch (error) { monitorError = error.message; throw error; }
+    });
+  } };
 }

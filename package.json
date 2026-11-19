@@ -40,6 +40,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@electron/fuses": "1.8.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "6.1.2",
@@ -71,6 +72,7 @@
       }
     ],
     "asar": true,
+    "afterPack": "scripts/adhoc-sign.cjs",
     "mac": {
       "target": [
         "dmg",

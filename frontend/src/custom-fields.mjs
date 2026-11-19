@@ -19,6 +19,19 @@ export function urlWildcard(url) {
 
 const DEFAULT_LOCATION = {pattern: '*', method: '*', source: 'response', path: '$.data'};
 export function newLocation(patch = {}) { return {...DEFAULT_LOCATION, ...patch}; }
+// Optional per-field JavaScript: the engine runs it on the extracted values; blank or absent means off.
+export const FIELD_SCRIPT_LIMIT = 16384;
+export const FIELD_SCRIPT_TEMPLATE = `function onCustomField(values, context) {
+  return values;
+}
+`;
+// Only an empty string removes the key, so clearing the editor never changes what is typed into it.
+export function withScript(field, script) {
+  const {script: _removed, ...rest} = field;
+  return script ? {...rest, script} : rest;
+}
+export const scriptTooLong = field => (field.script ?? '').length > FIELD_SCRIPT_LIMIT;
+
 export function newField(patch = {}, location = {}) {
   return {id: crypto.randomUUID(), name: 'New field', locations: [newLocation(location)], ...patch};
 }
@@ -117,7 +130,7 @@ export function fieldsForTab(fields, tab) {
 }
 
 export function stateText(field) {
-  if (field.state === 'pending') return 'Waiting for content';
+  if (field.state === 'pending') return field.note || 'Waiting for content';
   if (field.state === 'unknown') return field.note || 'Content is unavailable';
   if (field.state === 'missing') return 'Not found';
   return '';

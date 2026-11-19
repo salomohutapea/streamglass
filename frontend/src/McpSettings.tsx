@@ -3,7 +3,7 @@ import { TriangleAlert } from 'lucide-react';
 import './McpSettings.css';
 
 type McpConnection = { running: boolean; url: string; token: string; error?: string; approvedRedirects?: string[] };
-type McpBridge = { forgetMcpRedirect?(target: string): Promise<McpConnection> };
+type McpBridge = { forgetMcpRedirect?(target: string): Promise<McpConnection>; rotateMcpToken?(): Promise<McpConnection> };
 
 export default function McpSettings() {
   const [connection, setConnection] = useState<McpConnection | null>(null);
@@ -49,6 +49,23 @@ export default function McpSettings() {
     }
   }
 
+  async function rotate() {
+    setBusy(true);
+    setError('');
+    setCopied('');
+    try {
+      const result = await (window.streamglass as McpBridge | undefined)?.rotateMcpToken?.();
+      if (!result) throw new Error('Unavailable.');
+      setConnection(result);
+      setError(result.error ?? '');
+      setCopied('Token rotated. Update your connected clients with the new config.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function copy(label: string, config: object) {
     try {
       const text = JSON.stringify(config, null, 2);
@@ -72,12 +89,12 @@ export default function McpSettings() {
       <label>Bearer token<input className="mono" type="password" readOnly value={connection.token} aria-label="Bearer token (masked)"/></label>
       <div className="mcp-copy-actions">
         <button type="button" onClick={() => httpConfig && void copy('HTTP', httpConfig)}>Copy config</button>
+        <button type="button" disabled={busy} onClick={() => void rotate()}>Rotate token</button>
       </div>
     </div>}
-    {connection && <div className="mcp-approved">
-      <strong>Approved redirects</strong><p className="muted">Servers you allowed an agent to redirect traffic to. Removing one makes the agent ask again.</p>
-      {connection.approvedRedirects?.length ? <ul>{connection.approvedRedirects.map(target => <li key={target}><code>{target}</code><button type="button" onClick={() => void forget(target)}>Remove</button></li>)}</ul>
-        : <p className="muted">None</p>}
+    {!!connection?.approvedRedirects?.length && <div className="mcp-approved">
+      <strong>Previous redirect approvals</strong><p className="muted">These saved servers no longer grant approval. Streamglass now asks for the specific redirect.</p>
+      <ul>{connection.approvedRedirects.map(target => <li key={target}><code>{target}</code><button type="button" onClick={() => void forget(target)}>Remove</button></li>)}</ul>
     </div>}
     {error && <p className="error-text" role="alert">{error}</p>}
     <p className="mcp-feedback" role="status" aria-live="polite">{copied}</p>

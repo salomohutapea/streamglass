@@ -1,5 +1,5 @@
 export const columnIds = ['method','request','time','status','duration','serverTime','protocol','device','application','host','path','events','fields','ssl'];
-export const defaultColumns = ['method','request','status','duration'];
+export const defaultColumns = ['method','request','time','ssl','device','fields'];
 export function readColumns(raw) {
   try {
     const value = JSON.parse(raw ?? 'null');

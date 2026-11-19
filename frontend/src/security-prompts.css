@@ -4,3 +4,5 @@
 .lan-access{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--line);padding-top:14px}.lan-access label{display:flex;flex-direction:column;gap:7px;font-weight:500}.lan-access textarea{min-height:64px;resize:vertical}.lan-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px}.lan-list li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 8px;background:var(--raised);border-radius:5px;font-size:11px}.lan-list li button:not(.icon-button){padding:2px 9px;font-size:11px}
 
 .lan-expiry{margin-left:auto;font-size:10px;white-space:nowrap}.lan-list li:has(.lan-expiry){justify-content:flex-start}.lan-access .lan-expiry-toggle{flex-direction:row;align-items:center;font-weight:500}.lan-access>small{margin-top:-4px;line-height:1.5}
+
+.approval-source{margin:0;padding:8px 10px;max-height:240px;overflow:auto;flex-shrink:0;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--raised);border-radius:5px;font-size:11px}

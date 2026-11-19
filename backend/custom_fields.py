@@ -5,8 +5,11 @@ read incrementally past a cursor, so a stream that receives thousands of events 
 import asyncio
 import fnmatch
 import json
+import os
 import time
 from functools import lru_cache
+
+from aiohttp import ClientError, ClientTimeout
 
 from .productivity import MAX_ANALYSIS, path_tokens, select_tokens
 
@@ -174,7 +177,7 @@ def merge(accs):
     return out
 
 
-def evaluate(service, record, full=False):
+def extract(service, record, full=False):
     """Results for the custom fields matching one capture, in configuration order; [] when none apply.
     A field matches when any of its locations does, and values from all matching locations merge into one list.
     full=True renders values up to 64 KiB for the inspector, from a small LRU cache of its own."""
@@ -246,6 +249,97 @@ def evaluate(service, record, full=False):
     return results
 
 
+def empty_script_result(result, state, note):
+    return {**result, "values": [], "summaries": [], "count": 0, "state": state, "note": note}
+
+
+def evaluate(service, record, full=False):
+    """Read display values without exposing untransformed inputs of a scripted field."""
+    results = extract(service, record, full)
+    scripts = {field["id"] for field in service.productivity["fields"] if field.get("script", "").strip()}
+    if not scripts:
+        return results
+    cache = service.field_full_cache if full else service.field_cache
+    entry = cache.get(record["id"]) or {}
+    if entry.get("scriptRev") == entry.get("rev") and "display" in entry:
+        return entry["display"]
+    return [empty_script_result(result, "pending", "Waiting for the custom field script")
+            if result["id"] in scripts and result["values"] else result for result in results]
+
+
+def compact(result):
+    values = result["values"]
+    return {**result, "values": [value[:MAX_TEXT] for value in values],
+            "limited": result["limited"] or any(len(value) > MAX_TEXT for value in values)}
+
+
+async def script_result(service, record, source, result):
+    worker = os.environ.get("STREAMGLASS_SCRIPT_URL")
+    failure = "Custom field script failed. Check the script in Custom Fields."
+    if not worker or service.http is None:
+        return empty_script_result(result, "unknown", "Custom field script worker is unavailable")
+    payload = {"source": source, "hook": "onCustomField", "values": result["values"],
+               "context": {"name": result["name"], "url": record.get("url"), "method": record.get("method")}}
+    try:
+        async with service.http.post(worker.rstrip("/") + "/custom-field", json=payload,
+                                     headers={"Authorization": "Bearer " + service.token},
+                                     timeout=ClientTimeout(total=2)) as response:
+            if response.status != 200:
+                return empty_script_result(result, "unknown", failure)
+            values = (await response.json()).get("value")
+    except (ClientError, ValueError, asyncio.TimeoutError):
+        return empty_script_result(result, "unknown", failure)
+    if not isinstance(values, list):
+        return empty_script_result(result, "unknown", "Custom field scripts must return an array of JSON values")
+    acc = new()
+    for value in values:
+        add(acc, value, MAX_FULL_TEXT)
+        if full(acc):
+            break
+    if acc["note"]:
+        return empty_script_result(result, "unknown", acc["note"])
+    return {**result, "values": acc["values"], "summaries": acc["summaries"], "count": len(acc["seen"]),
+            "state": "found" if acc["values"] else "missing", "limited": result["limited"] or acc["limited"]}
+
+
+async def evaluate_full(service, record, *, notify=False):
+    if not any(field.get("script", "").strip() for field in service.productivity["fields"]):
+        return evaluate(service, record, full=True)
+    record_id = record["id"]
+    async with service.field_script_lock:
+        if service.records.get(record_id) is not record:
+            return []
+        short = extract(service, record)
+        results = extract(service, record, full=True)
+        if not results:
+            return results
+        entry, full_entry = service.field_cache[record_id], service.field_full_cache[record_id]
+        revision, fields = entry["rev"], entry["fields"]
+        if full_entry.get("scriptRev") == revision:
+            return full_entry["display"]
+        scripts = {field["id"]: field["script"] for field in fields if field.get("script", "").strip()}
+        previous = full_entry.get("scriptInputs", {})
+        transformed, inputs = {}, {}
+        for result in results:
+            field_id = result["id"]
+            if field_id not in scripts or not result["values"]:
+                continue
+            cached = previous.get(field_id)
+            value = cached[1] if cached and cached[0] == result else await script_result(service, record, scripts[field_id], result)
+            if service.productivity["fields"] is not fields or service.records.get(record_id) is not record:
+                return []
+            transformed[field_id] = value
+            inputs[field_id] = (result, value)
+        full_display = [transformed.get(result["id"], result) for result in results]
+        short_display = [compact(transformed[result["id"]]) if result["id"] in transformed else result for result in short]
+        changed = entry.get("display") != short_display
+        full_entry.update(display=full_display, scriptRev=revision, scriptInputs=inputs)
+        entry.update(display=short_display, scriptRev=revision)
+        if notify and changed:
+            service.changed()
+        return full_display
+
+
 SLICE = .008
 INTERVAL = .1
 
@@ -275,7 +369,18 @@ async def worker(service, budget=SLICE, interval=INTERVAL):
             await service.field_wake.wait()
             continue
         if service.field_dirty:
-            stale |= drain(service, budget)
+            if any(field.get("script", "").strip() for field in service.productivity["fields"]):
+                active = service.field_dirty.keys() & service.records.keys()
+                if active:
+                    record_id = max(active, key=lambda key: service.records[key]["startedAt"])
+                    service.field_dirty.pop(record_id)
+                    previous = (service.field_cache.get(record_id) or {}).get("display")
+                    await evaluate_full(service, service.records[record_id])
+                    stale |= previous != (service.field_cache.get(record_id) or {}).get("display")
+                else:
+                    service.field_dirty.clear()
+            else:
+                stale |= drain(service, budget)
         now = time.monotonic()
         if stale and now - last >= interval:
             stale, last = False, now

@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   readClipboardText: () => ipcRenderer.invoke('read-clipboard-text'),
   getMcpConnection: () => ipcRenderer.invoke('mcp-connection'),
   setMcpEnabled: (enabled) => ipcRenderer.invoke('mcp-enabled', enabled),
+  rotateMcpToken: () => ipcRenderer.invoke('mcp-rotate-token'),
   forgetMcpRedirect: (target) => ipcRenderer.invoke('mcp-forget-redirect', target),
   getApprovals: () => ipcRenderer.invoke('approvals'),
   resolveApproval: (input) => ipcRenderer.invoke('resolve-approval', input),
@@ -30,15 +31,43 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   lanApprovalAttention: () => ipcRenderer.invoke('lan-approval-attention'),
   openEditor: (input) => ipcRenderer.invoke('open-editor', input),
   openTools: (input) => ipcRenderer.invoke('open-tools', input),
+  openSettings: (input) => ipcRenderer.invoke('open-settings', input),
+  openDeviceSetup: (input) => ipcRenderer.invoke('open-device-setup', input),
+  showDeviceTraffic: (deviceId) => ipcRenderer.invoke('show-device-traffic', deviceId),
   getToolsContext: () => ipcRenderer.invoke('tools-context'),
   toolsAction: (input) => ipcRenderer.invoke('tools-action', input),
   pickMapLocalFile: () => ipcRenderer.invoke('pick-map-local-file'),
+  importRuleFiles: () => ipcRenderer.invoke('import-rule-files'),
+  showOtherRuleKind: () => ipcRenderer.invoke('show-other-rule-kind'),
+  reportRuleImport: result => ipcRenderer.invoke('report-rule-import', result),
+  ruleImportNotice: dismissId => ipcRenderer.invoke('rule-import-notice', dismissId),
+  onRuleImportNotice: callback => {
+    const listener = (_event, notice) => callback(notice);
+    ipcRenderer.on('rule-import-notice', listener);
+    return () => ipcRenderer.removeListener('rule-import-notice', listener);
+  },
   exportFile: (file) => ipcRenderer.invoke('export-file', file),
   exportAllCaptures: () => ipcRenderer.invoke('export-all-captures'),
   sessionFile: (input) => ipcRenderer.invoke('session-file', input),
   listDevices: (options) => ipcRenderer.invoke('list-devices', options),
   setupSite: (input) => ipcRenderer.invoke('setup-site', input),
   deviceAction: (action) => ipcRenderer.invoke('device-action', action),
+  deviceInventory: (input) => ipcRenderer.invoke('device-inventory', input),
+  watchDevices: (input) => ipcRenderer.invoke('watch-devices', input),
+  connectDevice: (input) => ipcRenderer.invoke('connect-device', input),
+  disconnectDevice: (input) => ipcRenderer.invoke('disconnect-device', input),
+  revertAllDevices: (input) => ipcRenderer.invoke('revert-all-devices', input),
+  setDeviceOptions: (input) => ipcRenderer.invoke('set-device-options', input),
+  confirmUserCert: (input) => ipcRenderer.invoke('confirm-user-cert', input),
+  reopenCertInstaller: (input) => ipcRenderer.invoke('reopen-cert-installer', input),
+  startAdbPairing: (input) => ipcRenderer.invoke('start-adb-pairing', input),
+  cancelAdbPairing: (input) => ipcRenderer.invoke('cancel-adb-pairing', input),
+  onDeviceInventory: (callback) => {
+    const listener = (_event, inventory) => callback(inventory);
+    ipcRenderer.on('device-inventory', listener);
+    return () => ipcRenderer.removeListener('device-inventory', listener);
+  },
+
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   getUpdate: (force) => ipcRenderer.invoke('update-status', force),
   getAboutInfo: () => ipcRenderer.invoke('about-info'),
