@@ -539,13 +539,28 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     let unexpectedDialog = false;
     const rejectUnexpectedDialog = async dialog => { unexpectedDialog = true; await dialog.dismiss(); };
     page.on('dialog', rejectUnexpectedDialog);
-    await page.getByRole('row').filter({ hasText: 'a-json' }).getByRole('button', { name: 'Delete request', exact: true }).click();
-    await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 2);
+    const jsonRow = page.getByRole('row').filter({ hasText: 'a-json' });
+    const deleteNotice = page.getByRole('status').filter({ hasText: 'Request deleted' });
+    async function commitDeletion(id) {
+      const [response] = await Promise.all([
+        page.waitForResponse(response => response.request().method() === 'DELETE'
+          && new URL(response.url()).pathname === `/api/records/${id}`),
+        deleteNotice.getByRole('button', { name: 'Dismiss notification', exact: true }).click(),
+      ]);
+      assert.equal(response.ok(), true, `Delete ${id} returned HTTP ${response.status()}`);
+      assert.deepEqual(await response.json(), { deleted: 1 });
+    }
+    await jsonRow.getByRole('button', { name: 'Delete request', exact: true }).click();
+    await jsonRow.waitFor({ state: 'detached' });
     assert.equal(unexpectedDialog, false, 'Single capture delete is immediate');
     assert.match(await page.locator('tbody tr.selected').innerText(), /locked.example.test/, 'Deleting a row must preserve the existing selection');
+    // Settle the first Undo window before exercising the native menu.
+    await commitDeletion('fixture-a');
     await clickMenu('clear-selected');
-    await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 1);
+    await locked.waitFor({ state: 'detached' });
     assert.equal(unexpectedDialog, false, 'Native single capture delete is immediate');
+    await commitDeletion('fixture-lock');
+    assert.equal(await rows.count(), 1);
     page.off('dialog', rejectUnexpectedDialog);
     await page.getByRole('button', { name: 'Delete all records', exact: true }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
