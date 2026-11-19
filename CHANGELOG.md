@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-11-19
+
 ### Added
+
+- Reboot a selected iOS simulator from its HTTPS certificate step after installation to reload the trust store.
 
 - Add optional JavaScript transforms to Custom Fields. MCP edits to scripted fields require approval.
 
