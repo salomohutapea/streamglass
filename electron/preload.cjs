@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('streamglass', Object.freeze({
   watchDevices: (input) => ipcRenderer.invoke('watch-devices', input),
   connectDevice: (input) => ipcRenderer.invoke('connect-device', input),
   disconnectDevice: (input) => ipcRenderer.invoke('disconnect-device', input),
+  rebootSimulator: (input) => ipcRenderer.invoke('reboot-simulator', input),
   revertAllDevices: (input) => ipcRenderer.invoke('revert-all-devices', input),
   setDeviceOptions: (input) => ipcRenderer.invoke('set-device-options', input),
   confirmUserCert: (input) => ipcRenderer.invoke('confirm-user-cert', input),

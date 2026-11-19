@@ -36,7 +36,7 @@ On **Android → Emulator**, select **Connect** for an online emulator, or **Con
 
 ### iOS Simulator
 
-On **iOS → Simulator**, select **Connect** for a booted simulator, or **Connect all**. Streamglass installs the public root certificate with `simctl` and enables this Mac's proxy, which also affects Mac apps using that network. Full Xcode and a booted simulator are required; Streamglass does not boot or restart it. Add intended domains to the TLS allowlist and reload the app. Revert restores the Mac proxy when Streamglass owns it and no other connected simulator needs it; the simulator certificate remains installed.
+On **iOS → Simulator**, select **Connect** for a booted simulator, or **Connect all**. Streamglass installs the public root certificate with `simctl` and enables this Mac's proxy, which also affects Mac apps using that network. Full Xcode and a booted simulator are required. Once the certificate is installed, use **Reboot Simulator** beside **HTTPS certificate** if you need to reload the simulator’s trust store. This restarts the selected simulator. Add intended domains to the TLS allowlist, reopen the app, and make an HTTPS request to verify capture. Revert restores the Mac proxy when Streamglass owns it and no other connected simulator needs it; the simulator certificate remains installed.
 
 ### React Native and Metro
 

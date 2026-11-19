@@ -31,6 +31,7 @@ export interface DeviceSetupApi {
   onDeviceInventory?(callback: (inventory: DeviceInventory) => void): () => void;
   connectDevice?(request: DeviceRequest & { metro?: boolean }): Promise<{ ok: boolean; connection: DeviceConnection; message: string; inventory: DeviceInventory }>;
   disconnectDevice?(request: DeviceRequest): Promise<{ ok: boolean; message: string; inventory: DeviceInventory }>;
+  rebootSimulator?(request: { platform: 'ios-simulator'; id: string }): Promise<{ message: string; inventory: DeviceInventory }>;
   revertAllDevices?(): Promise<{ ok: boolean; message: string; inventory: DeviceInventory }>;
   setDeviceOptions?(patch: Partial<DeviceInventory['options']> & { metroMode?: DeviceInventory['metro']['mode'] }): Promise<DeviceInventory>;
   confirmUserCert?(request: { platform: 'android'; id: string }): Promise<DeviceInventory>;
