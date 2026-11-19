@@ -560,7 +560,11 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await locked.waitFor({ state: 'detached' });
     assert.equal(unexpectedDialog, false, 'Native single capture delete is immediate');
     await commitDeletion('fixture-lock');
-    assert.equal(await rows.count(), 1);
+    // The DELETE response arrives before the renderer has applied the refreshed state.
+    await page.waitForFunction(() => {
+      const captures = document.querySelectorAll('tbody tr[data-record-id]');
+      return captures.length === 1 && captures[0].getAttribute('data-record-id') === 'fixture-z';
+    }, undefined, { polling: 100 });
     page.off('dialog', rejectUnexpectedDialog);
     await page.getByRole('button', { name: 'Delete all records', exact: true }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Delete', exact: true }).click();
