@@ -122,6 +122,25 @@ test('quit restores Android and options persist in profile',async t=>{
   await assert.rejects(x.service.setOptions({autoConnect:'yes'}),/Invalid/);
 });
 test('simulator connect uses keychain and existing Mac proxy path',async t=>{const x=await fixture(t);x.sim();assert.equal((await x.service.connect({platform:'ios-simulator',id:'ABC-123'})).ok,true);assert.equal(x.mac(),true);assert.ok(x.commands.some(a=>a.join(' ').includes('simctl keychain ABC-123 add-root-cert')));await x.service.disconnect({platform:'ios-simulator',id:'ABC-123'});assert.equal(x.mac(),false);});
+test('simulator reboot requires a prepared simulator and preserves its setup', async t => {
+  const x = await fixture(t);
+  const request = { platform: 'ios-simulator', id: 'ABC-123' };
+  x.sim();
+  await assert.rejects(x.service.rebootSimulator(request), /install the certificate first/);
+  await assert.rejects(x.service.rebootSimulator({ ...request, id: 'booted' }), /Select a booted iOS simulator/);
+  await assert.rejects(x.service.rebootSimulator(x.req), /Select a booted iOS simulator/);
+  const bootCommands = () => x.commands.filter(args => args[0] === 'simctl' && ['reboot', 'bootstatus'].includes(args[1]));
+  assert.deepEqual(bootCommands(), []);
+
+  const connected = await x.service.connect(request);
+  assert.equal(connected.ok, true, connected.message);
+  const saved = structuredClone(x.state());
+  const rebooted = await x.service.rebootSimulator(request);
+  assert.deepEqual(bootCommands(), [['simctl', 'reboot', request.id], ['simctl', 'bootstatus', request.id]]);
+  assert.deepEqual(rebooted.inventory.iosSimulators[0].connection, connected.connection);
+  assert.deepEqual(x.state(), saved);
+  assert.equal(x.mac(), true);
+});
 test('mDNS parser filters unrelated services and unsafe endpoints',()=>{assert.deepEqual(parseMdns('streamglass-abc _adb-tls-pairing._tcp. 192.168.1.20:1234\nother _adb-tls-pairing._tcp. bad;:22','_adb-tls-pairing._tcp','streamglass-abc'),[{name:'streamglass-abc',address:'192.168.1.20:1234'}]);});
 test('system CA script validates hash and API 34 restores namespace mounts',()=>{assert.throws(()=>systemCaScript('bad;',35));assert.match(systemCaScript('1234abcd',34,true),/nsenter.*umount/s);});
 test('existing Metro reverse is preserved when Metro is requested',async t=>{

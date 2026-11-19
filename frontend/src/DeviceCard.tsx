@@ -4,7 +4,7 @@ import { deviceEvidence, androidRecordIds, formatAgo, formatBytes, type SetupRec
 import { describeDevice, deviceHeading } from './device-setup-view.mjs';
 import { Chips, CopyButton, DeviceIcon, Pills, Step, TrustHelp, networkConfig, useNow, type StepMark } from './device-setup-ui';
 
-export type CardActions = { connect(): void; revert(): void; confirm(): void; reopen(): void; filter(id: string): void };
+export type CardActions = { connect(): void; revert(): void; confirm(): void; reopen(): void; reboot?(): void; filter(id: string): void };
 type Props = { soleProxiedEmulator?: boolean; device: AndroidDevice | IosSimulator; records: SetupRecord[]; baseline: number; metro: boolean; options?: DeviceInventory['options']; connecting: boolean; busy: boolean; canConnect: boolean; canRevert: boolean; canConfirm: boolean; canReopen: boolean; actions: CardActions };
 const mark = (tone: string): StepMark => tone === 'ok' ? 'ok' : tone === 'spin' ? 'run' : tone === 'warn' || tone === 'err' ? 'warn' : 'idle';
 const bundleText = (bundle: NonNullable<ReturnType<typeof deviceEvidence>['bundle']>) => [<code key="n">{bundle.name}</code>, ` ${bundle.status}`, bundle.size != null ? ` · ${formatBytes(bundle.size)}` : '', bundle.durationMs != null ? ` · ${(bundle.durationMs / 1000).toFixed(1)} s` : ''];
@@ -56,6 +56,9 @@ export default function DeviceCard({ soleProxiedEmulator = false, device, record
       break;
     case 'installed': cert = connection?.cert.detail || 'Certificate installed. Waiting for an inspected HTTPS request to verify app trust.'; break;
     default: cert = connection?.cert.detail || 'Waiting for the certificate to be installed.';
+  }
+  if (!android && ready && connection?.cert.status === 'ok' && actions.reboot) {
+    certActions = <button type="button" className="ds-sm ghost" disabled={busy} onClick={actions.reboot}>Reboot Simulator</button>;
   }
   const metroStep = view.metro === 'hidden' ? null : <Step mark={mark(view.tones.metro)} title="Metro" actions={evidence.bundle && <button type="button" className="ds-sm ghost" onClick={() => actions.filter(filterId)}>Show</button>}>
     {connecting && !connection ? 'Waiting' : view.metro === 'bundle' && evidence.bundle ? <>Last bundle: {bundleText(evidence.bundle)}</> : <>{metroText} Waiting for a bundle request.</>}</Step>;

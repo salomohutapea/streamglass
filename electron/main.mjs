@@ -759,7 +759,7 @@ async function start() {
   const setupMethods = {
     'device-inventory': 'inventory', 'watch-devices': 'watch', 'connect-device': 'connect',
     'disconnect-device': 'disconnect', 'revert-all-devices': 'revertAll', 'set-device-options': 'setOptions',
-    'confirm-user-cert': 'confirm', 'reopen-cert-installer': 'reopen',
+    'confirm-user-cert': 'confirm', 'reopen-cert-installer': 'reopen', 'reboot-simulator': 'rebootSimulator',
     'start-adb-pairing': 'startPairing', 'cancel-adb-pairing': 'cancelPairing',
   };
   for (const [channel, method] of Object.entries(setupMethods)) handle(channel, async (_event, input) => {

@@ -110,6 +110,13 @@ export default function ConnectDevice({ onDone, platform, onPlatform, lanAddress
     if (!api?.disconnectDevice) { setMessage(unavailable); return; }
     const result = await api.disconnectDevice(requestFor(device)); setInventory(result.inventory); setMessage(result.message);
   };
+  const rebootSimulator = async (device: IosSimulator) => {
+    if (!api?.rebootSimulator) return;
+    setMessage(`Rebooting ${device.name}…`);
+    const result = await api.rebootSimulator({ platform: 'ios-simulator', id: device.udid });
+    setInventory(result.inventory);
+    setMessage(result.message);
+  };
   const setOptions = (patch: Parameters<NonNullable<NonNullable<Window['streamglass']>['setDeviceOptions']>>[0]) => void run(async () => {
     if (!api?.setDeviceOptions) { setMessage(unavailable); return; }
     setInventory(await api.setDeviceOptions(patch));
@@ -129,6 +136,7 @@ export default function ConnectDevice({ onDone, platform, onPlatform, lanAddress
     connecting={connectingId === deviceId(device)} busy={busy} canConnect={!!api?.connectDevice} canRevert={!!api?.disconnectDevice} canConfirm={!!api?.confirmUserCert} canReopen={!!api?.reopenCertInstaller}
     actions={{
       connect: () => void run(() => connect(device)), revert: () => void run(() => revert(device)), filter: id => onFilterDevice?.(id),
+      reboot: !('serial' in device) && api?.rebootSimulator ? () => void run(() => rebootSimulator(device)) : undefined,
       confirm: () => void run(async () => { const next = await api?.confirmUserCert?.({ platform: 'android', id: deviceId(device) }); if (next) setInventory(next); }),
       reopen: () => void run(async () => { await api?.reopenCertInstaller?.({ platform: 'android', id: deviceId(device) }); }),
     }}/>;

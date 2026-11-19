@@ -428,6 +428,16 @@ export function createDeviceSetup({ dataDir, certificatePath, proxyPort, adbPath
     // User actions mark the device in flight so a concurrent watcher tick doesn't queue a second connect behind them.
     connect: req => { const key = keyOf(req?.platform, req?.id); inflight.add(key); return enqueue(() => connect(req)).finally(() => { inflight.delete(key); previous.add(key); }); },
     disconnect: req => { const key = keyOf(req?.platform, req?.id); inflight.add(key); return enqueue(() => disconnect(req)).finally(() => { inflight.delete(key); previous.add(key); }); },
+    rebootSimulator: req => enqueue(async () => {
+      validate(req);
+      if (req.platform !== 'ios-simulator') throw new Error('Select a booted iOS simulator');
+      const simulator = (await inventory()).iosSimulators.find(device => device.udid === req.id);
+      if (!simulator) throw new Error('Select a booted iOS simulator');
+      if (simulator.connection?.cert.status !== 'ok') throw new Error('Connect the simulator to install the certificate first');
+      await run('/usr/bin/xcrun', ['simctl', 'reboot', simulator.udid], 60000);
+      await run('/usr/bin/xcrun', ['simctl', 'bootstatus', simulator.udid], 120000);
+      return { message: `${simulator.name} rebooted. Reopen your app and make an HTTPS request to verify capture.`, inventory: await publish() };
+    }),
     revertAll: () => { revertGeneration++; return enqueue(() => revertAll()); },
     setOptions: patch => enqueue(async () => {
       if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Invalid device options');
