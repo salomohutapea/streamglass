@@ -57,7 +57,10 @@
 
 /* local network bar */
 .ds-lan{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--input);margin-bottom:12px;color:var(--text-secondary)}
-.ds-addr{font-weight:600;color:var(--text)}
+.ds-proxy-endpoint{display:flex;flex-wrap:wrap;gap:6px 8px;min-width:0}
+.ds-proxy-endpoint>span{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;min-width:0;padding:4px 8px;border:1px solid var(--line-strong);border-radius:6px;background:var(--raised)}
+.ds-proxy-endpoint code{font-size:14px;font-weight:700;color:var(--text)}
+.connect-device .ds-proxy-value{font-weight:700;color:var(--text)}
 .ds-chip{font-size:10px;font-weight:600;padding:1px 7px;border-radius:999px;border:1px solid var(--line-strong);color:var(--text-secondary);background:var(--raised)}
 .ds-chip.ok{color:var(--ds-ok);border-color:color-mix(in srgb,var(--ds-ok) 45%,transparent);background:color-mix(in srgb,var(--ds-ok) 10%,transparent)}
 .ds-chip.acc{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent);background:color-mix(in srgb,var(--accent) 10%,transparent)}

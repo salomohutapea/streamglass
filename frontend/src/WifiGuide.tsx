@@ -29,14 +29,14 @@ export default function WifiGuide({ os, ip, proxyPort, lanOn, setupUrl, fingerpr
 
   const approval: ReactNode = <>
     {waiting.map(item => <div className="ds-ask" key={item.address}><span>{label(item.address)} wants to use the proxy.</span><span className="ds-spacer"/><button type="button" className="ds-sm" disabled={lan?.busy} onClick={() => lan?.onDecide(item.address, false)}>Deny</button><button type="button" className="ds-sm primary" disabled={lan?.busy} aria-label={`Allow device ${item.address}`} onClick={() => lan?.onDecide(item.address, true)}>Allow device</button></div>)}
-    {lanOn && !waiting.length && !approved && <div className="ds-d"><Spinner/> Open an app on the phone, then approve your device here.</div>}
+    {lanOn && !waiting.length && !approved && <div className="ds-d"><Spinner/> Waiting for new traffic. Open an app on the phone to verify the proxy.</div>}
     {refused.map(item => <div className="ds-ask muted" key={item.address}><span>{label(item.address)} was refused.</span><span className="ds-spacer"/><button type="button" className="ds-sm" disabled={lan?.busy} aria-label={`Allow device ${item.address}`} onClick={() => lan?.onDecide(item.address, true)}>Allow</button></div>)}
   </>;
 
   const steps: { mark: StepMark; title: ReactNode; body: ReactNode; actions?: ReactNode; extra?: ReactNode }[] = [];
   steps.push({
     mark: evidence.traffic ? 'ok' : 'num', title: 'Set the Wi-Fi proxy',
-    body: <>{ios ? 'Settings → Wi-Fi → (i) next to your network → Configure Proxy → ' : 'Settings → Wi-Fi → your network → Edit → Advanced → Proxy '}<b>Manual</b>: {ios ? 'server' : 'host'} <code>{proxyShown}</code>, port <code>{proxyPort}</code>.</>,
+    body: <>{ios ? 'Settings → Wi-Fi → (i) next to your network → Configure Proxy → ' : 'Settings → Wi-Fi → your network → Edit → Advanced → Proxy '}<b>Manual</b>: {ios ? 'server' : 'host'} <code className="ds-proxy-value">{proxyShown}</code>, port <code className="ds-proxy-value">{proxyPort}</code>.</>,
     actions: ip ? <CopyButton value={ip}>Copy address</CopyButton> : undefined, extra: approval,
   });
   steps.push({

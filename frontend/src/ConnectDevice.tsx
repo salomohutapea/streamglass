@@ -144,7 +144,10 @@ export default function ConnectDevice({ onDone, platform, onPlatform, lanAddress
   });
 
   const lanBar = <div className="ds-lan"><WifiIcon/>{lanOn
-    ? <><span>This Mac on Wi-Fi: <code className="ds-addr">{ip || '—'}</code> · proxy port <code className="ds-addr">{proxyPort}</code></span><span className="ds-spacer"/><span className="ds-chip ok">Local network access on</span></>
+    ? <><div className="ds-proxy-endpoint">
+      <span>Proxy host <code>{ip || 'Unavailable'}</code></span>
+      <span>Proxy port <code>{proxyPort}</code></span>
+    </div><span className="ds-spacer"/><span className="ds-chip ok">Local network access on</span></>
     : <><span>Real devices reach Streamglass over Wi-Fi. Local network access is off.{ip ? <> This Mac: <code>{ip}</code></> : ' Join the same Wi-Fi network as the phone to get a LAN address.'}</span><span className="ds-spacer"/><button type="button" className="primary ds-sm" disabled={busy || !api?.setupSite} onClick={turnOnLan}>Turn on</button></>}</div>;
   const metroCallout = metro && <Callout tone="info">{inventory?.metro.running ? 'React Native detected: Metro is running' : 'Metro steps are enabled; waiting for Metro'} on <code>:8081</code>. Connected devices can load the JS bundle from this Mac.</Callout>;
   const partial = !!inventory && (!api?.connectDevice || !api?.disconnectDevice || !api?.watchDevices || !api?.onDeviceInventory);
