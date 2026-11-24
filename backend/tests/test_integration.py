@@ -77,6 +77,8 @@ class ProxyIntegrationTests(unittest.IsolatedAsyncioTestCase):
             return ws
         async def events(request):
             raw = b': heartbeat\r\n\r\nid: 1\r\ndata: first\r\n\r\ndata: second\n\n'
+            if request.query.get('json'):
+                raw = b'event: delta\nid: 7\ndata: {"flight":"event-only","id":9007199254740993123,"ok":true}\n\ndata: [DONE]\n\n'
             if request.query.get('large'):
                 raw = b'event: context\ndata: {}\n\n' + (b'event: data\ndata: ' + b'x' * (1200 * 1024) + b'\n\n') * int(request.query.get('count', 2))
             if request.query.get('oversized'):
@@ -263,9 +265,32 @@ class ProxyIntegrationTests(unittest.IsolatedAsyncioTestCase):
             state = await self.wait_for(lambda s: s['records'] and s['records'][0]['state'] == 'complete')
             record_id = state['records'][0]['id']
             async with self.client.get(self.api + '/export/' + record_id, headers=self.auth) as response:
-                self.assertEqual((await response.json())['method'], 'POST')
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.headers['Content-Type'].split(';', 1)[0], 'text/plain')
+                self.assertEqual(await response.text(), '\x00binary\xff')
             async with self.client.delete(self.api + '/records/' + record_id, headers=self.auth) as response:
                 self.assertEqual((await response.json())['deleted'], 1)
+
+    async def test_export_returns_body_only_pretty_json_without_metadata(self):
+        payload = '{"query":"hello","nested":{"n":9007199254740993123}}'
+        async with self.client.post(self.url + '/rest', data=payload.encode(), headers={'Content-Type': 'application/json', 'X-Custom': 'secret'}, proxy=self.proxy) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(await response.text(), payload)
+        await self.capture('/events?json=1')
+        state = await self.wait_for(lambda s: len(s['records']) == 2 and all(r['state'] == 'complete' for r in s['records']))
+        rest_record = next(r for r in state['records'] if '/rest' in r['url'])
+        sse_record = next(r for r in state['records'] if '/events' in r['url'])
+        expected_body = '{\n  "query": "hello",\n  "nested": {\n    "n": 9007199254740993123\n  }\n}'
+        for fmt in ('request', 'response'):
+            async with self.client.get(f"{self.api}/export/{rest_record['id']}?format={fmt}", headers=self.auth) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.headers['Content-Type'].split(';', 1)[0], 'application/json')
+                self.assertEqual(await response.text(), expected_body)
+        expected_events = '[\n  {\n    "flight": "event-only",\n    "id": 9007199254740993123,\n    "ok": true\n  },\n  "[DONE]"\n]'
+        async with self.client.get(f"{self.api}/export/{sse_record['id']}?format=events", headers=self.auth) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers['Content-Type'].split(';', 1)[0], 'application/json')
+            self.assertEqual(await response.text(), expected_events)
 
     async def test_sse_preserves_wire_and_decompresses(self):
         expected = b': heartbeat\r\n\r\nid: 1\r\ndata: first\r\n\r\ndata: second\n\n'

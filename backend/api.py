@@ -10,7 +10,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from .service import MAX_BODY, is_sse
+from .service import MAX_BODY, is_sse, reject_json_constant
 from .sse import exported
 from .sse_status import sse_status
 from .search import search as search_records
@@ -123,7 +123,7 @@ def create_app(service, *, allow_dev_origin=False, mcp_approval_key=None):
                 return web.json_response({"error": {"code": "revision_conflict", "message": "TLS patterns changed. Read settings again before editing."}}, status=409)
         if isinstance(changes, dict) and "running" in changes:
             changes["proxyEnabled"] = changes.pop("running")
-        if not isinstance(changes, dict) or set(changes) - {"capturePaused", "proxyEnabled", "proxyPort", "listenHost", "tlsDomains", "lanDevices", "lanDeviceExpiry", "lanAllowedDestinations", "inspectedStorageMiB"}:
+        if not isinstance(changes, dict) or set(changes) - {"capturePaused", "proxyEnabled", "proxyPort", "listenHost", "tlsDomains", "lanDevices", "lanDeviceExpiry", "lanAllowedDestinations", "inspectedStorageMiB", "exportIncludeMetadata"}:
             raise ValueError("Unknown settings")
         from .lan_guard import validate_devices, validate_destinations
         if "lanDevices" in changes:
@@ -141,6 +141,8 @@ def create_app(service, *, allow_dev_origin=False, mcp_approval_key=None):
             # Turning expiry back on gives every approved device a fresh 24 hours instead of dropping old ones at once.
             if changes["lanDeviceExpiry"] and not service.settings.get("lanDeviceExpiry", True):
                 service.settings["lanDeviceApprovals"] = {}
+        if "exportIncludeMetadata" in changes and type(changes["exportIncludeMetadata"]) is not bool:
+            raise ValueError("exportIncludeMetadata must be boolean")
         if "proxyEnabled" in changes and type(changes["proxyEnabled"]) is not bool:
             raise ValueError("proxyEnabled must be boolean")
         if "capturePaused" in changes and type(changes["capturePaused"]) is not bool:
@@ -552,8 +554,83 @@ def create_app(service, *, allow_dev_origin=False, mcp_approval_key=None):
             return web.Response(text=prefix + " ".join(parts), content_type="text/plain", headers={"Content-Disposition": f'attachment; filename="{item["id"]}.sh"'})
         if fmt not in ("request", "response", "events"):
             raise ValueError("Unknown export format")
-        value = exported(item).get("events") if fmt == "events" else item.get(fmt)
-        return web.Response(text=json.dumps(value, ensure_ascii=False, indent=2), content_type="application/json", headers={"Content-Disposition": f'attachment; filename="{item["id"]}-{fmt}.json"'})
+
+        def parse_json_text(text):
+            if not isinstance(text, str) or not text:
+                return None, False
+            try:
+                return json.loads(text, parse_constant=reject_json_constant), True
+            except (ValueError, RecursionError):
+                return None, False
+
+        def parsed_or_raw(text):
+            if isinstance(text, str):
+                parsed, is_json = parse_json_text(text)
+                return parsed if is_json else text
+            return text
+
+        include_metadata = bool(service.settings.get("exportIncludeMetadata", False))
+
+        if fmt == "events":
+            if include_metadata:
+                events = exported(item).get("events")
+                if isinstance(events, list):
+                    value = [
+                        {**event, "data": parsed_or_raw(event["data"])} if isinstance(event, dict) and "data" in event else event
+                        for event in events
+                    ]
+                else:
+                    value = events
+                return web.Response(
+                    text=json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False),
+                    content_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="{item["id"]}-events.json"'},
+                )
+            events = item.get("events") or []
+            bodies = [
+                parsed_or_raw(event.get("data", "") if isinstance(event, dict) else event)
+                for event in events
+            ]
+            return web.Response(
+                text=json.dumps(bodies, ensure_ascii=False, indent=2, allow_nan=False),
+                content_type="application/json",
+                headers={"Content-Disposition": f'attachment; filename="{item["id"]}-events.json"'},
+            )
+
+        if include_metadata:
+            stage = item.get(fmt)
+            if isinstance(stage, dict) and "body" in stage:
+                value = {**stage, "body": parsed_or_raw(stage["body"])}
+            else:
+                value = stage
+            return web.Response(
+                text=json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False),
+                content_type="application/json",
+                headers={"Content-Disposition": f'attachment; filename="{item["id"]}-{fmt}.json"'},
+            )
+
+        stage = item.get(fmt) or {}
+        body = stage.get("body")
+        if body is None:
+            body = ""
+        if not isinstance(body, str):
+            return web.Response(
+                text=json.dumps(body, ensure_ascii=False, indent=2, allow_nan=False),
+                content_type="application/json",
+                headers={"Content-Disposition": f'attachment; filename="{item["id"]}-{fmt}.json"'},
+            )
+        parsed, is_json = parse_json_text(body)
+        if is_json:
+            return web.Response(
+                text=json.dumps(parsed, ensure_ascii=False, indent=2, allow_nan=False),
+                content_type="application/json",
+                headers={"Content-Disposition": f'attachment; filename="{item["id"]}-{fmt}.json"'},
+            )
+        return web.Response(
+            text=body,
+            content_type="text/plain",
+            headers={"Content-Disposition": f'attachment; filename="{item["id"]}-{fmt}.txt"'},
+        )
 
     async def export_all(request):
         # Retain the starting set; stream one capture at a time instead of a second full-session copy.

@@ -66,3 +66,63 @@ class ExportAllTests(unittest.IsolatedAsyncioTestCase):
             self.icon_reply = {'id': app['id'], 'icon': icon}
             await self.service.refresh_application_icons()
         self.assertEqual(record['application'], {**app, 'icon': icon})
+
+    async def test_single_export_edge_cases(self):
+        headers = {'Authorization': 'Bearer ' + self.service.token}
+        self.service.save({
+            'id': 'edge',
+            'startedAt': 1,
+            'state': 'complete',
+            'request': {'method': 'POST', 'url': 'https://example.test/api', 'headers': [['X-Test', '1']], 'body': '{"city":"café"}'},
+            'response': {'statusCode': 200, 'headers': [['Content-Type', 'text/plain']], 'body': 'NaN'},
+            'events': [{'sequence': 1, 'event': 'message', 'data': '{"n":1}', 'raw': 'data: {"n":1}\n\n', 'receivedAt': 1}],
+        })
+        self.service.save({
+            'id': 'empty',
+            'startedAt': 2,
+            'state': 'complete',
+            'request': {'method': 'GET', 'url': 'https://example.test/empty', 'headers': [], 'body': ''},
+        })
+        res = await self.client.get('/api/export/edge?format=request', headers=headers)
+        self.assertEqual(res.status, 200)
+        self.assertEqual(res.headers['Content-Type'].split(';', 1)[0], 'application/json')
+        self.assertEqual(await res.text(), '{\n  "city": "café"\n}')
+
+        res = await self.client.get('/api/export/edge?format=response', headers=headers)
+        self.assertEqual(res.status, 200)
+        self.assertEqual(res.headers['Content-Type'].split(';', 1)[0], 'text/plain')
+        self.assertEqual(await res.text(), 'NaN')
+
+        res = await self.client.get('/api/export/edge?format=events', headers=headers)
+        self.assertEqual(res.status, 200)
+        self.assertEqual(await res.text(), '[\n  {\n    "n": 1\n  }\n]')
+
+        for fmt in ('request', 'response'):
+            res = await self.client.get(f'/api/export/empty?format={fmt}', headers=headers)
+            self.assertEqual(res.status, 200)
+            self.assertEqual(res.headers['Content-Type'].split(';', 1)[0], 'text/plain')
+            self.assertEqual(await res.text(), '')
+
+        res = await self.client.put('/api/settings', headers=headers, json={'exportIncludeMetadata': True})
+        self.assertEqual(res.status, 200)
+
+        res = await self.client.get('/api/export/edge?format=request', headers=headers)
+        self.assertEqual(res.status, 200)
+        req_exported = await res.json()
+        self.assertEqual(req_exported['method'], 'POST')
+        self.assertEqual(req_exported['headers'], [['X-Test', '1']])
+        self.assertEqual(req_exported['body'], {'city': 'café'})
+
+        res = await self.client.get('/api/export/edge?format=response', headers=headers)
+        self.assertEqual(res.status, 200)
+        res_exported = await res.json()
+        self.assertEqual(res_exported['statusCode'], 200)
+        self.assertEqual(res_exported['body'], 'NaN')
+
+        res = await self.client.get('/api/export/edge?format=events', headers=headers)
+        self.assertEqual(res.status, 200)
+        events_exported = await res.json()
+        self.assertEqual(events_exported[0]['sequence'], 1)
+        self.assertEqual(events_exported[0]['event'], 'message')
+        self.assertEqual(events_exported[0]['data'], {'n': 1})
+

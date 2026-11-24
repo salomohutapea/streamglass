@@ -22,7 +22,7 @@ export function buildPaletteCommands(o: {
     ...tools.map(([id, name]) => m(id, `Tools: ${name}`, 'Tools', 'open tab')),
     m('breakpoints', 'Breakpoint rules', 'Rules', 'intercept pause'),
     m('scripts', 'JavaScript rules', 'Rules', 'script hook'),
-    m('settings', 'Settings', 'General', 'preferences proxy port tls'),
+    m('settings', 'Settings', 'General', 'preferences proxy port tls storage export'),
     m('agent-settings', 'Settings: Agent (MCP)', 'General', 'ai assistant integration server token'),
     m('connect-device', 'Connect device', 'General', 'add pair'),
     ...platforms.map(([p, name]) => m(`setup-${p}`, `Set up ${name}`, 'Setup', 'certificate install', { platform: p })).map(c => ({ ...c, run: () => o.menu('open-device-setup', { platform: c.id.slice(6) }) })),
