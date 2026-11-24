@@ -782,7 +782,9 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await page.locator('.inspector table[aria-label="Set-Cookie"]').getByText('session', { exact: true }).waitFor();
 
     await page.getByRole('row').filter({ hasText: '/stream' }).click();
-    await page.getByRole('tab', { name: /^Events\d*$/ }).click();
+    await page.locator('.inspector .request-url', { hasText: '/stream' }).waitFor();
+    await page.locator('.inspector .tabs [role="tab"] span', { hasText: '1' }).waitFor();
+    await page.getByRole('tab', { name: /^Events(?:\s*\d+)?$/ }).click();
     await page.locator('.inspector .event').getByText('sse-one', { exact: false }).waitFor();
     await page.locator('.inspector').getByRole('region', { name: 'Custom fields' }).getByText('sse-one', { exact: true }).waitFor();
     const eventsOrder = await page.locator('.inspector-content').evaluate(rootElement => {
