@@ -27,29 +27,28 @@ export function RequestStructured({request, raw}: {request?:Message; raw:ReactNo
   return <>
     <ViewToggle mode={mode} onChange={setMode}/>
     {mode==='raw' ? raw : <>
-      <PairTable title="Query" rows={pairRows(s.query)}/>
       <PairTable title="Form" rows={pairRows(s.form)}/>
       {s.parts.length>0 && <section className="structured-section"><h3>Multipart parts ({s.parts.length})</h3><div className="structured-scroll"><table className="structured-table" aria-label="Multipart parts"><thead><tr><th>Name</th><th>Filename</th><th>Type</th><th>Size</th></tr></thead><tbody>{s.parts.map((p,i)=><tr key={i}><td><code>{p.name}</code></td><td><code>{p.filename||'—'}</code></td><td><code>{p.contentType||'—'}</code></td><td>{formatSize(p.size)}</td></tr>)}</tbody></table></div>{s.parts.map((p,i)=>p.text!==undefined&&p.text!==''&&<details key={i} className="part-preview"><summary>{p.name||`Part ${i+1}`}{p.truncated?' (truncated)':''}</summary><pre className="body-code">{p.text}</pre></details>)}</section>}
       {!s.form.length && !s.parts.length && raw}
+      <PairTable title="Query" rows={pairRows(s.query)}/>
     </>}
     {cookies}
   </>;
 }
 
-/** Read-only structured view of a response: image preview and Set-Cookie. */
+/** Read-only structured view of a response: image preview above, Set-Cookie below. */
 export function ResponseStructured({response, raw}: {response?:Message; raw:ReactNode}) {
   const [mode,setMode]=useState<'structured'|'raw'>('structured');
   if (!response) return <>{raw}</>;
   const cookies = parseSetCookie(headerValues(response.headers,'set-cookie'));
   const image = imageDataUrl(response.headers, response.bodyUnavailable ? '' : response.bodyBase64);
-  if (!cookies.length && !image) return <>{raw}</>;
+  // Set-Cookie sits below the body as a collapsed disclosure, like Headers and Request Cookies, in both views.
+  const setCookies = cookies.length>0 && <details className="headers-disclosure"><summary>Set-Cookie ({cookies.length})</summary><div className="structured-scroll"><table className="structured-table" aria-label="Set-Cookie"><thead><tr><th>Name</th><th>Value</th><th>Domain</th><th>Path</th><th>Expires</th><th>Flags</th></tr></thead><tbody>{cookies.map((c,i)=><tr key={i}>{[<code>{c.name}</code>,<code>{c.value}</code>,c.domain||'—',c.path||'—',c.expires||'—',c.flags.join(', ')||'—'].map((cell,j)=><td key={j}>{cell}</td>)}</tr>)}</tbody></table></div></details>;
+  if (!image) return <>{raw}{setCookies}</>;
   return <>
     <ViewToggle mode={mode} onChange={setMode}/>
-    {mode==='raw' ? raw : <>
-      {image && <section className="structured-section"><h3>Image</h3><div className="image-preview"><img src={image} alt="Response body preview" loading="lazy"/></div></section>}
-      <PairTable title="Set-Cookie" columns={['Name','Value','Domain','Path','Expires','Flags']} rows={cookies.map(c=>[<code>{c.name}</code>,<code>{c.value}</code>,c.domain||'—',c.path||'—',c.expires||'—',c.flags.join(', ')||'—'])}/>
-      {!image && raw}
-    </>}
+    {mode==='raw' ? raw : <section className="structured-section"><h3>Image</h3><div className="image-preview"><img src={image} alt="Response body preview" loading="lazy"/></div></section>}
+    {setCookies}
   </>;
 }
 

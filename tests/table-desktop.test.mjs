@@ -577,3 +577,167 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('inspector tabs keep body and events list above secondary sections', { timeout: 90000 }, async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'streamglass-inspector-order-'));
+  const reservation = net.createServer();
+  await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve));
+  const port = reservation.address().port;
+  await new Promise(resolve => reservation.close(resolve));
+  const records = [
+    {
+      id: 'api-req', kind: 'request', method: 'POST', url: 'https://example.test/search?page=2&sort=asc',
+      startedAt: 1792123201.0, state: 'complete', statusCode: 200, eventCount: 0, device: 'test-device',
+      request: {
+        method: 'POST', url: 'https://example.test/search?page=2&sort=asc',
+        headers: [['Cookie', 'sid=abc; theme=dark'], ['Content-Type', 'application/json']],
+        body: '{"query":"flights"}', bodyBase64: Buffer.from('{"query":"flights"}').toString('base64'),
+      },
+      response: {
+        statusCode: 200,
+        headers: [['Content-Type', 'application/json'], ['Set-Cookie', 'session=xyz; Path=/; HttpOnly']],
+        body: '{"ok":true,"token":"abc"}', bodyBase64: Buffer.from('{"ok":true,"token":"abc"}').toString('base64'),
+      },
+      events: [],
+    },
+    {
+      id: 'sse-req', kind: 'request', method: 'POST', url: 'https://example.test/stream',
+      startedAt: 1792123202.0, endedAt: 1792123203.0, state: 'complete', statusCode: 200,
+      isSSE: true, eventCount: 1, device: 'test-device',
+      request: { method: 'POST', url: 'https://example.test/stream', headers: [], body: '{}', bodyBase64: Buffer.from('{}').toString('base64') },
+      response: { statusCode: 200, headers: [['Content-Type', 'text/event-stream']], body: '', bodyBase64: '' },
+      sseDiagnostics: { headersAt: 1792123202.2, firstEventAt: 1792123202.4, endedAt: 1792123203.0, eventCount: 1 },
+      events: [{ sequence: 1, event: 'data', data: '{"item":"sse-one"}', receivedAt: 1792123202.4, forwarded: true }],
+    },
+  ];
+  execFileSync(path.join(root, '.venv/bin/python'), ['-c', `import sqlite3,json,sys
+c=sqlite3.connect(sys.argv[1])
+c.execute('CREATE TABLE config (key TEXT PRIMARY KEY,value TEXT NOT NULL)')
+c.execute('INSERT INTO config VALUES (?,?)',('settings',json.dumps({'proxyPort':int(sys.argv[2])})))
+c.execute('CREATE TABLE records (id TEXT PRIMARY KEY,started REAL,payload TEXT)')
+for r in json.loads(sys.stdin.read()): c.execute('INSERT INTO records VALUES (?,?,?)',(r['id'],r['startedAt'],json.dumps(r)))
+c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: JSON.stringify(records) });
+  let app;
+  try {
+    const env = { ...process.env, STREAMGLASS_MCP_PORT: '0', STREAMGLASS_KEEP_CAPTURES: '1', STREAMGLASS_BUILT_UI: '1', STREAMGLASS_DATA_DIR: directory };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const executablePath = process.env.STREAMGLASS_TEST_APP;
+    app = await electron.launch({ ...(executablePath ? { executablePath } : {}), args: [...(executablePath ? [] : [root]), `--user-data-dir=${path.join(directory, 'chromium')}`], env });
+    const page = await app.firstWindow();
+    page.setDefaultTimeout(15000);
+    await page.getByRole('dialog', { name: 'Welcome tour' }).getByRole('button', { name: 'Skip tour' }).click();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+
+    await page.evaluate(async () => {
+      const connection = await window.streamglass.getBootstrap();
+      const headers = { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' };
+      const current = await (await fetch(`${connection.baseUrl}/api/productivity`, { headers })).json();
+      const response = await fetch(`${connection.baseUrl}/api/productivity`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          revision: current.revision,
+          config: {
+            ...current.config,
+            fields: [
+              { id: 'f-req', name: 'Req query', locations: [{ pattern: '*', method: '*', source: 'request', path: '$.query' }] },
+              { id: 'f-res', name: 'Res token', locations: [{ pattern: '*', method: '*', source: 'response', path: '$.token' }] },
+              { id: 'f-evt', name: 'Evt item', locations: [{ pattern: '*', method: '*', source: 'event', path: '$.item' }] },
+            ],
+          },
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+    });
+
+    await page.getByRole('row').filter({ hasText: '/search' }).click();
+
+    await page.getByRole('tab', { name: 'Request', exact: true }).click();
+    await page.locator('.inspector').getByText('"flights"', { exact: false }).waitFor();
+    await page.locator('.inspector').getByRole('region', { name: 'Custom fields' }).getByText('flights', { exact: true }).waitFor();
+    const requestOrder = await page.locator('.inspector-content').evaluate(rootElement => {
+      const body = rootElement.querySelector('.json-viewer');
+      const query = rootElement.querySelector('table[aria-label="Query"]');
+      const disclosures = [...rootElement.querySelectorAll('details.headers-disclosure')];
+      const cookies = disclosures.find(el => el.querySelector('summary')?.textContent?.startsWith('Cookies'));
+      const headers = disclosures.find(el => el.querySelector('summary')?.textContent?.startsWith('Headers'));
+      const custom = rootElement.querySelector('[aria-label="Custom fields"]');
+      const follows = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+      return {
+        cookiesOpen: cookies?.open,
+        headersOpen: headers?.open,
+        bodyBeforeQuery: follows(body, query),
+        queryBeforeCookies: follows(query, cookies),
+        cookiesBeforeHeaders: follows(cookies, headers),
+        headersBeforeCustom: follows(headers, custom),
+      };
+    });
+    assert.deepEqual(requestOrder, {
+      cookiesOpen: false,
+      headersOpen: false,
+      bodyBeforeQuery: true,
+      queryBeforeCookies: true,
+      cookiesBeforeHeaders: true,
+      headersBeforeCustom: true,
+    });
+
+    await page.getByRole('tab', { name: 'Response', exact: true }).click();
+    await page.locator('.inspector').getByText('"abc"', { exact: false }).waitFor();
+    await page.locator('.inspector').getByRole('region', { name: 'Custom fields' }).getByText('abc', { exact: true }).waitFor();
+    const responseOrder = await page.locator('.inspector-content').evaluate(rootElement => {
+      const body = rootElement.querySelector('.json-viewer');
+      const disclosures = [...rootElement.querySelectorAll('details.headers-disclosure')];
+      const setCookie = disclosures.find(el => el.querySelector('summary')?.textContent?.startsWith('Set-Cookie'));
+      const headers = disclosures.find(el => el.querySelector('summary')?.textContent?.startsWith('Headers'));
+      const decode = [...rootElement.querySelectorAll('button')].find(btn => btn.textContent === 'Decode response');
+      const custom = rootElement.querySelector('[aria-label="Custom fields"]');
+      const follows = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+      return {
+        setCookieOpen: setCookie?.open,
+        headersOpen: headers?.open,
+        toggleCount: rootElement.querySelectorAll('.structured-toggle').length,
+        bodyBeforeSetCookie: follows(body, setCookie),
+        setCookieBeforeHeaders: follows(setCookie, headers),
+        headersBeforeDecode: follows(headers, decode),
+        decodeBeforeCustom: follows(decode, custom),
+      };
+    });
+    assert.deepEqual(responseOrder, {
+      setCookieOpen: false,
+      headersOpen: false,
+      toggleCount: 0,
+      bodyBeforeSetCookie: true,
+      setCookieBeforeHeaders: true,
+      headersBeforeDecode: true,
+      decodeBeforeCustom: true,
+    });
+    await page.locator('.inspector details.headers-disclosure summary', { hasText: 'Set-Cookie (1)' }).click();
+    await page.locator('.inspector table[aria-label="Set-Cookie"]').getByText('session', { exact: true }).waitFor();
+
+    await page.getByRole('row').filter({ hasText: '/stream' }).click();
+    await page.getByRole('tab', { name: 'Events', exact: true }).click();
+    await page.locator('.inspector .event').getByText('sse-one', { exact: false }).waitFor();
+    await page.locator('.inspector').getByRole('region', { name: 'Custom fields' }).getByText('sse-one', { exact: true }).waitFor();
+    const eventsOrder = await page.locator('.inspector-content').evaluate(rootElement => {
+      const eventRow = rootElement.querySelector('.event');
+      const timeline = rootElement.querySelector('.sse-timeline');
+      const custom = rootElement.querySelector('[aria-label="Custom fields"]');
+      const follows = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+      return {
+        eventBeforeTimeline: follows(eventRow, timeline),
+        timelineBeforeCustom: follows(timeline, custom),
+      };
+    });
+    assert.deepEqual(eventsOrder, {
+      eventBeforeTimeline: true,
+      timelineBeforeCustom: true,
+    });
+
+    assert.deepEqual(errors, []);
+  } finally {
+    if (app) await app.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
