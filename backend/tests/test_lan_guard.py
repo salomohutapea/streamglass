@@ -182,6 +182,15 @@ class LanGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await response.json())["inspectedStorageMiB"], 256)
         self.assertEqual(sorted(self.service.records), ["r1", "r2"])
 
+    async def test_export_include_metadata_setting_defaults_false_and_validates_boolean(self):
+        self.assertIs(self.service.settings["exportIncludeMetadata"], False)
+        for bad in ("true", 1, None, []):
+            response = await self.client.put("/api/settings", headers=self.headers, json={"exportIncludeMetadata": bad})
+            self.assertEqual(response.status, 400, bad)
+        response = await self.client.put("/api/settings", headers=self.headers, json={"exportIncludeMetadata": True})
+        self.assertEqual(response.status, 200)
+        self.assertIs((await response.json())["exportIncludeMetadata"], True)
+
     def test_restricted_addresses(self):
         for value in ("127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "::1", "fd00::1", "fe80::1", "fec0::1", "64:ff9b::a00:1", "64:ff9b:1::1", "0.0.0.0", "224.0.0.1", "::ffff:10.0.0.1"):
             self.assertTrue(restricted(_address(value)), value)

@@ -271,11 +271,77 @@ c.commit()`, path.join(directory, 'captures.sqlite3'), String(port)], { input: J
     await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, exportPath);
     await target.click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Export request', exact: true }).click();
-    let exported;
+    let exportedText = '';
     for (let attempt = 0; attempt < 50; attempt++) {
-      try { exported = JSON.parse(await readFile(exportPath, 'utf8')); break; } catch { await new Promise(resolve => setTimeout(resolve, 50)); }
+      try { exportedText = await readFile(exportPath, 'utf8'); JSON.parse(exportedText); break; } catch { await new Promise(resolve => setTimeout(resolve, 50)); }
     }
-    assert.equal(exported?.url, 'https://example.test/z-search/sse');
+    assert.equal(exportedText, '{\n  "query": "request-only"\n}');
+    const sseExportPath = path.join(directory, 'clicked-events.json');
+    await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, sseExportPath);
+    await target.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Export SSE stream', exact: true }).click();
+    let sseExportText = '';
+    for (let attempt = 0; attempt < 50; attempt++) {
+      try { sseExportText = await readFile(sseExportPath, 'utf8'); JSON.parse(sseExportText); break; } catch { await new Promise(resolve => setTimeout(resolve, 50)); }
+    }
+    assert.equal(sseExportText, '[\n  {\n    "flight": "event-only",\n    "id": 9007199254740993123,\n    "ok": true\n  }\n]');
+    const responseExportPath = path.join(directory, 'clicked-response.json');
+    await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, responseExportPath);
+    await page.getByRole('row').filter({ hasText: 'a-json' }).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Export response', exact: true }).click();
+    let responseExportText = '';
+    for (let attempt = 0; attempt < 50; attempt++) {
+      try { responseExportText = await readFile(responseExportPath, 'utf8'); JSON.parse(responseExportText); break; } catch { await new Promise(resolve => setTimeout(resolve, 50)); }
+    }
+    assert.equal(responseExportText, '{\n  "message": "response-only",\n  "n": 9007199254740993123,\n  "safe": "<script>alert(1)</script>"\n}');
+    const exportSettingsOpened = app.waitForEvent('window');
+    await clickMenu('settings');
+    const exportSettings = await exportSettingsOpened;
+    await exportSettings.getByRole('main', { name: 'Settings', exact: true }).waitFor();
+    await exportSettings.getByRole('button', { name: 'Export', exact: true }).click();
+    const metadataToggle = exportSettings.getByRole('checkbox', { name: 'Include metadata properties in exports', exact: true });
+    assert.equal(await metadataToggle.isChecked(), false);
+    await metadataToggle.check();
+    const exportSettingsClosed = exportSettings.waitForEvent('close');
+    await exportSettings.getByRole('button', { name: 'Save settings', exact: true }).click();
+    await exportSettingsClosed;
+    const metaReqPath = path.join(directory, 'meta-request.json');
+    await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, metaReqPath);
+    await target.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Export request', exact: true }).click();
+    let metaReqText = '';
+    for (let attempt = 0; attempt < 50; attempt++) {
+      try { metaReqText = await readFile(metaReqPath, 'utf8'); JSON.parse(metaReqText); break; } catch { await new Promise(resolve => setTimeout(resolve, 50)); }
+    }
+    const metaReq = JSON.parse(metaReqText);
+    assert.equal(metaReq.method, 'POST');
+    assert.equal(metaReq.url, 'https://example.test/z-search/sse');
+    assert.deepEqual(metaReq.body, { query: 'request-only' });
+    assert.equal(metaReqText.includes('\\"query\\"'), false);
+    const metaSsePath = path.join(directory, 'meta-events.json');
+    await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, metaSsePath);
+    await target.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Export SSE stream', exact: true }).click();
+    let metaSseText = '';
+    for (let attempt = 0; attempt < 50; attempt++) {
+      try { metaSseText = await readFile(metaSsePath, 'utf8'); JSON.parse(metaSseText); break; } catch { await new Promise(resolve => setTimeout(resolve, 50)); }
+    }
+    const metaSse = JSON.parse(metaSseText);
+    assert.equal(metaSse[0].sequence, 1);
+    assert.equal(metaSse[0].event, 'data');
+    assert.equal(metaSse[0].data.flight, 'event-only');
+    assert.equal(metaSseText.includes('9007199254740993123'), true);
+    assert.equal(metaSseText.includes('\\"flight\\"'), false);
+    const revertSettingsOpened = app.waitForEvent('window');
+    await clickMenu('settings');
+    const revertSettings = await revertSettingsOpened;
+    await revertSettings.getByRole('main', { name: 'Settings', exact: true }).waitFor();
+    await revertSettings.getByRole('button', { name: 'Export', exact: true }).click();
+    assert.equal(await revertSettings.getByRole('checkbox', { name: 'Include metadata properties in exports', exact: true }).isChecked(), true);
+    await revertSettings.getByRole('checkbox', { name: 'Include metadata properties in exports', exact: true }).uncheck();
+    const revertClosed = revertSettings.waitForEvent('close');
+    await revertSettings.getByRole('button', { name: 'Save settings', exact: true }).click();
+    await revertClosed;
     const allExportPath = path.join(directory, 'all-captures.json');
     await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, allExportPath);
     await query.fill('*a-json');

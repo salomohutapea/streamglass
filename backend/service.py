@@ -236,7 +236,8 @@ class Service:
         config = dict(self.db.execute("SELECT key,value FROM config"))
         # LAN access is off until the user enables it; approved devices and destinations apply only while it is on.
         self.settings = {"capturePaused": False, "proxyEnabled": True, "proxyPort": default_proxy_port, "listenHost": "127.0.0.1", "tlsDomains": [],
-                         "lanDevices": [], "lanDeviceApprovals": {}, "lanDeviceExpiry": True, "lanAllowedDestinations": [], "inspectedStorageMiB": DEFAULT_INSPECTED_MIB}
+                         "lanDevices": [], "lanDeviceApprovals": {}, "lanDeviceExpiry": True, "lanAllowedDestinations": [], "inspectedStorageMiB": DEFAULT_INSPECTED_MIB,
+                         "exportIncludeMetadata": False}
         self.settings.update(json.loads(config.get("settings", "{}")))
         from .lan_guard import LanGuard
         self.lan_guard = LanGuard(self)
